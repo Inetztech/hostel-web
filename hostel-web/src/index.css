@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===============================
+   THEME VARIABLES (IMAGE MATCH)
+   =============================== */
+@layer base {
+  :root {
+    /* Main layout */
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
+    /* Cards / tables */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* PRIMARY BLUE (buttons, pills, active menu) */
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary / muted */
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    /* Status */
+    --success: 221 83% 53%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 48 96% 89%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 204 94% 94%;
+
+    /* Borders / inputs */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+
+    --radius: 0.5rem;
+
+    /* SIDEBAR (DARK) */
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 40% 96%;
+
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+
+    --sidebar-accent: 223 47% 18%;
+    --sidebar-accent-foreground: 210 40% 96%;
+
+    --sidebar-border: 223 47% 18%;
+    --sidebar-ring: 221 83% 53%;
+  }
+
+  /* Optional dark mode */
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+
+    --card: 223 47% 15%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 223 47% 15%;
+    --popover-foreground: 210 40% 98%;
+
+    --secondary: 223 47% 18%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 223 47% 18%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 223 47% 18%;
+    --accent-foreground: 210 40% 98%;
+
+    --border: 223 47% 18%;
+    --input: 223 47% 18%;
+  }
+}
+
+/* ===============================
+   GLOBAL BASE
+   =============================== */
+html,
+body {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* ===============================
+   ELEMENT DEFAULTS
+   =============================== */
+a {
+  font-weight: 500;
+  color: hsl(var(--primary));
+  text-decoration: none;
+}
+
+a:hover {
+  opacity: 0.85;
+}
+
+button {
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
+  padding: 0.6em 1.2em;
+
+  font-size: 0.95rem;
+  font-weight: 500;
+  font-family: inherit;
+
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+button:hover {
+  background-color: hsl(var(--primary) / 0.9);
+}
+
+button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
