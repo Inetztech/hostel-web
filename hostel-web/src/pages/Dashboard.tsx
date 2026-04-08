@@ -65,7 +65,7 @@ const Dashboard = () => {
       value: data.activeTenants,
       sub: "Currently staying",
       icon: Users,
-      color: "text-accent",
+      color: "text-blue-600",
     },
     {
       label: "EB Units",

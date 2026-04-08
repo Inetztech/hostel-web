@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  fetchBranches,
+  getBranches,
   createBranch,
   updateBranch,
   deleteBranch,
   getUserRole,
 } from "@/lib/store";
+
 import { Branch, BranchRequest } from "@/lib/types";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
@@ -30,48 +32,48 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogDescription,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
 
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 
 import { AgGridReact } from "ag-grid-react";
-import { ColDef } from "ag-grid-community";
+import type { ColDef, GridOptions } from "ag-grid-community";
 
 const BranchPage = () => {
+  /* ================= STATE ================= */
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [addOpen, setAddOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editBranchData, setEditBranchData] = useState<Branch | null>(null);
   const [unitName, setUnitName] = useState("");
 
-  const role = getUserRole()?.toUpperCase();
+  const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBranch, setEditBranch] = useState<Branch | null>(null);
 
-  /* ================= LOAD DATA ================= */
+  const role = getUserRole()?.toUpperCase();
+  const hasAccess = true;
+
+  /* ================= LOAD ================= */
   const reload = async () => {
-    try {
-      const data = await fetchBranches();
-      setBranches(data);
-    } catch {
-      toast.error("Failed to load branches");
-    }
-  };
+  try {
+    const data = await getBranches(0,10);
+
+    setBranches(data);
+
+  } catch (err) {
+    console.error(err);
+    toast.error("Failed to load branches");
+  }
+};
 
   useEffect(() => {
     reload();
   }, []);
 
-  /* ================= ACTIONS ================= */
+  /* ================= CRUD ================= */
   const handleAdd = async () => {
-    if (!unitName) {
+    if (!unitName.trim()) {
       toast.error("Unit name required");
       return;
     }
@@ -82,24 +84,25 @@ const BranchPage = () => {
       setAddOpen(false);
       setUnitName("");
       reload();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Failed to create branch");
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Create failed");
     }
   };
 
   const handleEdit = async () => {
-    if (!editBranchData) return;
+    if (!editBranch) return;
 
     try {
-      await updateBranch(editBranchData.id, {
-        unitName: editBranchData.unitName,
+      await updateBranch(editBranch.id, {
+        unitName: editBranch.unitName,
       } as BranchRequest);
+
       toast.success("Branch updated");
       setEditOpen(false);
-      setEditBranchData(null);
+      setEditBranch(null);
       reload();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Failed to update branch");
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Update failed");
     }
   };
 
@@ -108,64 +111,72 @@ const BranchPage = () => {
       await deleteBranch(id);
       toast.success("Branch deleted");
       reload();
-    } catch {
-      toast.error("Failed to delete branch");
+    } catch (e: any){
+      toast.error(e?.response?.data?.message ||"Delete failed");
     }
   };
 
-  /* ================= GRID DATA ================= */
+  /* ================= GRID ================= */
   const rowData = useMemo(() => branches, [branches]);
 
-  const columnDefs: ColDef[] = [
-    { headerName: "Unit Name", field: "unitName", filter: true },
+  const columnDefs: ColDef<Branch>[] = [
+  {
+    headerName: "Unit Name",
+    field: "unitName",
+    filter: true,
+  },
 
-    ...(role === "ADMIN"
-      ? [
-          {
-            headerName: "Actions",
-            cellRenderer: (params: any) => (
-              <div className="flex gap-2">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => {
-                    setEditBranchData({ ...params.data });
-                    setEditOpen(true);
-                  }}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
+  ...(hasAccess
+  ?[
+        {
+          headerName: "Actions",
+          cellRenderer: (params: { data: Branch }) => (
+            <div className="flex gap-2">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => {
+                  setEditBranch({ ...params.data });
+                  setEditOpen(true);
+                }}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
 
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button size="icon" variant="ghost">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </AlertDialogTrigger>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="icon" variant="ghost">
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </AlertDialogTrigger>
 
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        Delete Branch {params.data.unitName}?
-                      </AlertDialogTitle>
-                    </AlertDialogHeader>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Delete Branch {params.data.unitName}?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This action cannot be undone. This will permanently delete
+                      the branch and remove all associated data.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
 
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => handleDelete(params.data.id)}
-                      >
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            ),
-          },
-        ]
-      : []),
-  ];
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => handleDelete(params.data.id)}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          ),
+        },
+      ]
+    : []),
+];
 
   const defaultColDef: ColDef = {
     sortable: true,
@@ -173,18 +184,7 @@ const BranchPage = () => {
     flex: 1,
   };
 
-  const Grid = ({ data }: { data: any[] }) => (
-    <div className="ag-theme-alpine" style={{ height: 500 }}>
-      <AgGridReact
-        rowData={data}
-        columnDefs={columnDefs}
-        defaultColDef={defaultColDef}
-        pagination
-        paginationPageSize={10}
-        paginationPageSizeSelector={[10, 20, 50, 100]}
-      />
-    </div>
-  );
+
 
   /* ================= UI ================= */
   return (
@@ -198,7 +198,7 @@ const BranchPage = () => {
           </p>
         </div>
 
-        {role === "ADMIN" && (
+        {hasAccess && (
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
               <Button size="sm">
@@ -208,17 +208,18 @@ const BranchPage = () => {
             </DialogTrigger>
 
             <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Branch</DialogTitle>
-              </DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Add Branch</DialogTitle>
+              <DialogDescription>
+                Create a new branch by entering the unit name.
+              </DialogDescription>
+            </DialogHeader>
 
-              <div className="grid gap-4">
-                <Input
-                  placeholder="Unit Name"
-                  value={unitName}
-                  onChange={(e) => setUnitName(e.target.value)}
-                />
-              </div>
+              <Input
+                placeholder="Unit Name"
+                value={unitName}
+                onChange={(e) => setUnitName(e.target.value)}
+              />
 
               <DialogFooter>
                 <DialogClose asChild>
@@ -234,29 +235,27 @@ const BranchPage = () => {
       {/* EDIT DIALOG */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Branch</DialogTitle>
-          </DialogHeader>
+        <DialogHeader>
+          <DialogTitle>Edit Branch</DialogTitle>
+          <DialogDescription>
+            Update the branch unit name.
+          </DialogDescription>
+        </DialogHeader>
 
-          {editBranchData && (
-            <div className="grid gap-4">
-              <Input
-                value={editBranchData.unitName}
-                onChange={(e) =>
-                  setEditBranchData({
-                    ...editBranchData,
-                    unitName: e.target.value,
-                  })
-                }
-              />
-            </div>
+          {editBranch && (
+            <Input
+              value={editBranch.unitName}
+              onChange={(e) =>
+                setEditBranch({
+                  ...editBranch,
+                  unitName: e.target.value,
+                })
+              }
+            />
           )}
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setEditOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
             <Button onClick={handleEdit}>Save</Button>
@@ -266,10 +265,19 @@ const BranchPage = () => {
 
       {/* GRID */}
       <Card>
-        <CardContent>
-          <Grid data={rowData} />
-        </CardContent>
-      </Card>
+      <CardContent>
+        <div className="ag-theme-alpine" style={{ height: 513 }}>
+          <AgGridReact
+            rowData={rowData}
+            columnDefs={columnDefs}
+            defaultColDef={defaultColDef}
+            pagination={true}
+            paginationPageSize={10}
+            paginationPageSizeSelector={[10, 20, 50, 100]}
+          />
+        </div>
+      </CardContent>
+    </Card>
     </div>
   );
 };

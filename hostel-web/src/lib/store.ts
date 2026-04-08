@@ -14,35 +14,34 @@ import {
   LoginResponse,
 } from "./types";
 
-
-
-export const loginUser = async (email: string, password: string): Promise<LoginResponse> => {
-  const res = await api.post<LoginResponse>("/auth/login", { email, password });
-  return res.data;
+/* =====================================================
+   AUTH
+===================================================== */
+export const loginUser = async (
+  email: string,
+  password: string
+): Promise<LoginResponse> => {
+  const res = await api.post("/auth/login", { email, password });
+  return res.data.data;
 };
 
-
-
-
-/* =====================================================
-   AUTH / ROLE
-   ===================================================== */
 export const getUserRole = (): Role => {
   const role = sessionStorage.getItem("role");
-  if (role === "ADMIN" || role === "USER" || role === "VIEWER") return role;
+  if (role === "ADMIN" ||  role === "VIEWER") return role;
   return "VIEWER";
 };
 
-// Guards
-const assertAdmin = () => {
-  if (getUserRole() !== "ADMIN") {
-    throw new Error("Admin access required");
+const assertAccess = () => {
+  const role = getUserRole();
+
+  if (role !== "ADMIN" && role !== "VIEWER") {
+    throw new Error("Access denied");
   }
 };
 
 /* =====================================================
    JWT EXPIRY HELPER
-   ===================================================== */
+===================================================== */
 export const isTokenExpired = (token?: string): boolean => {
   if (!token) return true;
   try {
@@ -55,18 +54,12 @@ export const isTokenExpired = (token?: string): boolean => {
 
 /* =====================================================
    ROOMS
-   ===================================================== */
-// export const fetchRooms = async (page = 0, size = 10) => {
-//   const res = await api.get("/rooms", { params: { page, size } });
-//   return res.data;
-// };
-
-// export const getRooms = fetchRooms;
-
+===================================================== */
 export const fetchRooms = async (page = 0, size = 10): Promise<Room[]> => {
   const res = await api.get("/rooms", { params: { page, size } });
-  return Array.isArray(res.data) ? res.data : res.data.content ?? [];
+  return res.data?.data?.content ?? [];
 };
+
 export const getRooms = fetchRooms;
 
 export const createRoom = async (data: {
@@ -74,176 +67,149 @@ export const createRoom = async (data: {
   hostelType: string;
   totalBeds: number;
   rentPerBed: number;
-  unitId: number; 
+  unitId: number;
 }): Promise<Room> => {
-  assertAdmin();
-  return (await api.post("/rooms", data)).data;
+  assertAccess();
+  const res = await api.post("/rooms", data);
+  return res.data.data;
 };
 
-export const editRoom = async (
-  roomId: number,
-  data: Partial<Room>
-): Promise<Room> => {
-  assertAdmin();
-  return (await api.put(`/rooms/${roomId}`, data)).data;
+export const editRoom = async (roomId: number, data: Partial<Room>): Promise<Room> => {
+  assertAccess();
+  const res = await api.put(`/rooms/${roomId}`, data);
+  return res.data.data;
 };
 
 export const removeRoom = async (roomId: number): Promise<void> => {
-  assertAdmin();
+  assertAccess();
   await api.delete(`/rooms/${roomId}`);
 };
 
 /* =====================================================
    BEDS
-   ===================================================== */
-// lib/store.ts
-// export const fetchBeds = async (page = 0, size = 10): Promise<Bed[]> => {
-//   const res = await api.get("/beds", {
-//     params: { page, size },
-//   });
-//   return res.data;
-// };
-
-
-// export const getBeds = fetchBeds;
-
+===================================================== */
 export const fetchBeds = async (page = 0, size = 10): Promise<Bed[]> => {
   const res = await api.get("/beds", { params: { page, size } });
-  return Array.isArray(res.data) ? res.data : res.data.content ?? [];
+  return res.data?.data ?? [];
 };
+
 export const getBeds = fetchBeds;
 
-
-export const updateBedStatus = async (
-  bedId: number,
-  isOccupied: boolean
-): Promise<Bed> => {
-  assertAdmin();
-  return (await api.put(`/beds/${bedId}`, { isOccupied })).data;
+export const updateBedStatus = async (bedId: number, isOccupied: boolean): Promise<Bed> => {
+  assertAccess();
+  const res = await api.put(`/beds/${bedId}`, { occupied: isOccupied });
+  return res.data.data;
 };
 
 /* =====================================================
-   TENANTS (MATCHES BACKEND)
-   ===================================================== */
-export const fetchTenants = async (): Promise<Tenant[]> => {
-  const res = await api.get("/tenants");
-  return Array.isArray(res.data) ? res.data : res.data.content ?? [];
+   TENANTS
+===================================================== */
+export const fetchTenants = async (
+  page = 0,
+  size = 10
+): Promise<Tenant[]> => {
+
+  const res = await api.get("/tenants", {
+    params: { page, size }
+  });
+
+  return res.data?.data?.content ?? [];
 };
+
 export const getTenants = fetchTenants;
 
 export const getActiveTenants = async (): Promise<Tenant[]> =>
   (await fetchTenants()).filter(t => t.status === "Active");
 
-export const getActiveTenantsByRoom = async (
-  roomId: number
-): Promise<Tenant[]> =>
-  (await getActiveTenants()).filter(t => Number(t.roomId) === roomId);
+export const getActiveTenantsByRoom = async (roomId: number): Promise<Tenant[]> =>
+  (await getActiveTenants()).filter(t => Number(t.roomId) === Number(roomId));
 
-/* -------- ADD TENANT -------- */
-export const addTenant = async (
-  data: TenantRequest
-): Promise<Tenant> => {
-  assertAdmin();
+export const addTenant = async (data: TenantRequest): Promise<Tenant> => {
+  assertAccess();
   const res = await api.post("/tenants", data);
-  return res.data;
+  return res.data.data;
 };
 
-export const importTenantsExcel = async (
-  file: File
-): Promise<string> => {
-  assertAdmin();
-
+export const importTenantsExcel = async (file: File): Promise<string> => {
+  assertAccess();
   const formData = new FormData();
   formData.append("file", file);
-
   const res = await api.post("/tenants/import", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
+    headers: { "Content-Type": "multipart/form-data" },
   });
-
-  return res.data;
+  return res.data.data;
 };
 
-/* -------- CHECKOUT TENANT --------
-   Backend: PUT /api/tenants/{id}/checkout
----------------------------------- */
-export const checkoutTenant = async (
-  tenantId: number,
-  currentReading?: number | null
-): Promise<Tenant> => {
-  assertAdmin();
-
-  if (!tenantId || tenantId <= 0) {
-    throw new Error("Invalid tenant ID");
-  }
-
-  const body: Partial<TenantRequest> = {
-    joinReading: currentReading ?? null,
-  };
-
-  const res = await api.put(
-    `/tenants/${tenantId}/checkout`,
-    body
-  );
-
-  return res.data;
+export const deleteTenant = async (tenantId: number | string): Promise<void> => {
+  assertAccess();
+  if (!tenantId) throw new Error("Invalid tenant ID");
+  await api.delete(`/tenants/${tenantId}`);
 };
 
+export const checkoutTenant = async (tenantId: number, currentReading?: number | null): Promise<Tenant> => {
+  assertAccess();
+  const res = await api.put(`/tenants/${tenantId}/checkout`, {
+    finalReading: currentReading ?? null,
+  });
+  return res.data.data;
+};
 
-/* -------- UPDATE TENANT -------- */
-export const updateTenant = async (
-  tenantId: number | string,
-  data: TenantRequest
-): Promise<Tenant> => {
-
+export const updateTenant = async (tenantId: number | string, data: TenantRequest): Promise<Tenant> => {
   const role = getUserRole();
-
-  // backend allows ADMIN + VIEWER
-  if (role !== "ADMIN" && role !== "VIEWER") {
-    throw new Error("Permission denied");
-  }
-
+  if (role !== "ADMIN" && role !== "VIEWER") throw new Error("Permission denied");
   const res = await api.put(`/tenants/${tenantId}`, data);
-  return res.data;
+  return res.data.data;
 };
+
 /* =====================================================
    EB READINGS
-   ===================================================== */
-export const fetchEBReadings = async (): Promise<EBReading[]> =>
-  (await api.get("/eb-readings")).data;
+===================================================== */
+export const fetchEBReadings = async (
+  page = 0,
+  size = 10
+): Promise<EBReading[]> => {
+
+  const res = await api.get("/eb-readings", {
+    params: { page, size }
+  });
+
+  return res.data?.data?.content ?? [];
+};
 
 export const getEBReadings = fetchEBReadings;
 
-export const addEBReading = async (
-  data: Partial<EBReading>
-): Promise<EBReading> => {
-  assertAdmin();
-  return (await api.post("/eb-readings", data)).data;
+export const addEBReading = async (data: EBReading): Promise<EBReading> => {
+  assertAccess();
+  const res = await api.post("/eb-readings", data);
+  return res.data.data;
 };
 
-export const updateEBReading = async (
-  ebReadingId: string,
-  data: Partial<EBReading>
-): Promise<EBReading> => {
-  assertAdmin();
-  return (await api.put(`/eb-readings/${ebReadingId}`, data)).data;
+export const updateEBReading = async (ebReadingId: string, data: Partial<EBReading>): Promise<EBReading> => {
+  assertAccess();
+  const res = await api.put(`/eb-readings/${ebReadingId}`, data);
+  return res.data.data;
 };
 
-export const deleteEBReading = async (
-  ebReadingId: string
-): Promise<void> => {
-  assertAdmin();
+export const deleteEBReading = async (ebReadingId: string): Promise<void> => {
+  assertAccess();
   await api.delete(`/eb-readings/${ebReadingId}`);
 };
 
 /* =====================================================
    RENTS
-   ===================================================== */
-export const fetchRents = async (): Promise<Rent[]> => {
-  const res = await api.get("/rents");
-  return Array.isArray(res.data) ? res.data : res.data.content ?? [];
+===================================================== */
+export const fetchRents = async (
+  page = 0,
+  size = 10
+): Promise<Rent[]> => {
+
+  const res = await api.get("/rents", {
+    params: { page, size }
+  });
+
+  return res.data?.data?.content ?? [];
 };
+
 export const getRents = fetchRents;
 
 export const generateRent = async (data: {
@@ -254,45 +220,29 @@ export const generateRent = async (data: {
   rentAmount: number;
   ebAmount: number;
 }): Promise<Rent> => {
-  assertAdmin();
-  return (await api.post("/rents/generate", data)).data;
+  assertAccess();
+  const res = await api.post("/rents/generate", data);
+  return res.data.data;
 };
 
-/* =====================================================
-   RECORD RENT PAYMENT (MATCHES BACKEND)
-   Backend: PUT /api/rents/{id}/payment
-===================================================== */
-export const recordRentPayment = async (
-  rentId: string | number,
-  paymentMode: PaymentMode,
-  paymentStatus: "PENDING" | "PAID" | "PARTIAL"
-): Promise<Rent> => {
-  assertAdmin();
-
-  return (
-    await api.put(`/rents/${rentId}/payment`, {
-      paymentMode,
-      paymentStatus,
-    })
-  ).data;
+export const recordRentPayment = async (rentId: string | number, paymentMode: PaymentMode, paymentStatus: "PENDING" | "PAID" | "PARTIAL"): Promise<Rent> => {
+  assertAccess();
+  const res = await api.put(`/rents/${rentId}/payment`, { paymentMode, paymentStatus });
+  return res.data.data;
 };
 
 export const deleteRent = async (rentId: string): Promise<void> => {
-  assertAdmin();
+  assertAccess();
   await api.delete(`/rents/${rentId}`);
 };
 
 /* =====================================================
    TENANT-WISE EB BILL
-   ===================================================== */
-export const getTenantWiseEBBill = async (
-  roomNumber: string
-): Promise<TenantEBBill[]> => {
+===================================================== */
+export const getTenantWiseEBBill = async (roomNumber: string): Promise<TenantEBBill[]> => {
   try {
-    const res = await api.get("/eb-readings/tenant-wise-bill", {
-      params: { roomNumber },
-    });
-    return Array.isArray(res.data) ? res.data : [];
+    const res = await api.get("/eb-readings/tenant-wise-bill", { params: { roomNumber } });
+    return Array.isArray(res.data) ? res.data : res.data?.data ?? [];
   } catch (err) {
     console.error("Failed to fetch EB bills:", err);
     return [];
@@ -301,104 +251,79 @@ export const getTenantWiseEBBill = async (
 
 /* =====================================================
    RECORD PAYMENT
-   ===================================================== */
-export const recordPayment = async (
-  rentId: string | number,
-  paymentMode: PaymentMode
-): Promise<Rent> => {
-  assertAdmin();
-
-  return (
-    await api.put(`/rents/${rentId}/payment`, {
-      paymentMode,
-      paymentStatus: "PAID",
-    })
-  ).data;
+===================================================== */
+export const recordPayment = async (rentId: string | number, paymentMode: PaymentMode): Promise<Rent> => {
+  assertAccess();
+  const res = await api.put(`/rents/${rentId}/payment`, { paymentMode, paymentStatus: "PAID" });
+  return res.data.data;
 };
 
 /* =====================================================
-   CHECKOUT SUMMARY (FRONTEND CALC)
-   ===================================================== */
-export const getCheckoutSummary = async (
-  tenantId: string | number
-) => {
+   CHECKOUT SUMMARY
+===================================================== */
+export const getCheckoutSummary = async (tenantId: string | number) => {
   const id = Number(tenantId);
-
-  // ------------------ Get Tenant ------------------
   const tenants = await getTenants();
-  const tenant = tenants.find((t) => Number(t.id) === id);
+  const tenant = tenants.find(t => Number(t.id) === id);
   if (!tenant) return null;
 
-  // ------------------ Get Pending Rents ------------------
   const rents = await fetchRents();
-
-  const pendingRents = rents.filter(
-    (r) =>
-      Number(r.tenantId) === id &&
-      r.paymentStatus !== "Paid"
-  );
-
-  const totalRentDue = pendingRents.reduce(
-    (sum, r) => sum + (r.rentAmount ?? 0),
-    0
-  );
-
-  // ------------------ Advance ------------------
+  const pendingRents = rents.filter(r => Number(r.tenantId) === id && r.paymentStatus !== "PAID");
+  const totalRentDue = pendingRents.reduce((sum, r) => sum + (r.rentAmount ?? 0), 0);
   const advancePaid = tenant.advance ?? 0;
 
-  return {
-    tenant,
-    pendingRents,
-    totalRentDue,
-    advancePaid,
-  };
+  return { tenant, pendingRents, totalRentDue, advancePaid };
 };
 
 /* =====================================================
-   BRANCH / UNIT
-   ===================================================== */
-export const fetchBranches = async (): Promise<Branch[]> =>
-  (await api.get("/units")).data;
+   BRANCHES / UNITS
+===================================================== */
+export const fetchBranches = async (page = 0, size = 10): Promise<Branch[]> => {
+  const res = await api.get(`/units`, {
+    params: { page, size }
+  });
 
+  return res.data?.data?.content ?? [];
+};
 export const getBranches = fetchBranches;
 
 export const createBranch = async (data: BranchRequest): Promise<Branch> => {
-  assertAdmin();
-  return (await api.post("/units", data)).data;
+  assertAccess();
+  const res = await api.post("/units", data);
+  return res.data.data ?? res.data;
 };
 
-export const getBranchById = async (id: number): Promise<Branch> =>
-  (await api.get(`/units/${id}`)).data;
+export const getBranchById = async (id: number): Promise<Branch> => {
+  assertAccess();
+  const res = await api.get(`/units/${id}`);
+  return res.data.data ?? res.data;
+};
 
-export const updateBranch = async (
-  id: number,
-  data: BranchRequest
-): Promise<Branch> => {
-  assertAdmin();
-  return (await api.put(`/units/${id}`, data)).data;
+export const updateBranch = async (id: number, data: BranchRequest): Promise<Branch> => {
+  assertAccess();
+  const res = await api.put(`/units/${id}`, data);
+  return res.data.data ?? res.data;
 };
 
 export const deleteBranch = async (id: number): Promise<void> => {
-  assertAdmin();
+  assertAccess();
   await api.delete(`/units/${id}`);
 };
 
 /* =====================================================
    WHATSAPP EB BILL
-   ===================================================== */
-export const sendEBBillWhatsApp = async (
-  roomNumber: string,
-  message: string
-): Promise<void> => {
-  assertAdmin();
-
-  await api.post("/whatsapp/send-eb-bill", {
-    roomNumber,
-    message,
-  });
+===================================================== */
+export const sendEBBillWhatsApp = async (roomNumber: string): Promise<void> => {
+  assertAccess();
+  if (!roomNumber) throw new Error("Room number is required");
+  const res = await api.post("/whatsapp/send-eb-bill", { roomNumber });
+  return res.data.data;
 };
 
+/* =====================================================
+   DASHBOARD
+===================================================== */
 export const getDashboard = async () => {
   const res = await api.get("/dashboard");
-  return res.data;
+  return res.data.data;
 };

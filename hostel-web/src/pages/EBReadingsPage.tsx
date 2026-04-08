@@ -51,6 +51,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogDescription,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
@@ -58,7 +59,7 @@ import { toast } from "sonner";
 import { Plus, Trash2, Eye } from "lucide-react";
 
 import { AgGridReact } from "ag-grid-react";
-import { ColDef, GridReadyEvent, GridApi } from "ag-grid-community";
+import { ColDef } from "ag-grid-community";
 
 const EBReadingsPage = () => {
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -69,32 +70,56 @@ const EBReadingsPage = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
+  const [manualRate, setManualRate] = useState<number | "">(13);
+  const [manualMode, setManualMode] = useState(false);
+  const rateValue = typeof manualRate === "number" ? manualRate : 13;
+  
 
   const [tenantBills, setTenantBills] = useState<any[]>([]);
   const [billRoom, setBillRoom] = useState("");
 
   const [bulkRows, setBulkRows] = useState<any[]>([]);
+  const [roomManualRates, setRoomManualRates] = useState<Record<string, number>>({});
+  
 
   const [formRoomId, setFormRoomId] = useState("");
   const [formPrevReading, setFormPrevReading] = useState("");
   const [formCurrReading, setFormCurrReading] = useState("");
+  const [formAcUnits, setFormAcUnits] = useState("");
 
-  const [gridApi, setGridApi] = useState<GridApi | null>(null);
 
-  const role = getUserRole();
+  const role = getUserRole()?.toUpperCase();
+  const hasAccess = true;
+
+
   const selMonth = new Date().getMonth() + 1;
   const selYear = new Date().getFullYear();
 
+  /* -------- RATE RESOLVER (SINGLE SOURCE OF TRUTH) -------- */
+const getRateForRoom = (roomId: string | number) => {
+  const roomRate = roomManualRates[String(roomId)];
+
+  if (manualMode && roomRate !== undefined) {
+    return roomRate;
+  }
+
+  if (typeof manualRate === "number") {
+    return manualRate;
+  }
+
+  return 13;
+};
+
   /* LOAD DATA */
   const reload = async () => {
+
   const [roomData, readingData, tenantData] = await Promise.all([
-    getRooms(0, 1000),
-    getEBReadings(),
-    getTenants(),
+    getRooms(0,1000),
+    getEBReadings(0,1000),
+    getTenants(0,1000),
   ]);
 
-  const roomsArray = Array.isArray(roomData) ? roomData : roomData.content ?? [];
-  setRooms(roomsArray);
+  setRooms(roomData);
   setReadings(readingData);
   setTenants(tenantData);
 };
@@ -102,6 +127,33 @@ const EBReadingsPage = () => {
   useEffect(() => {
     reload();
   }, []);
+
+
+  const calculateTenantShareProportional = (
+  previousReading: number,
+  currentReading: number,
+  tenants: Tenant[],
+  rate: number
+) => {
+  const totalRoomUnits = currentReading - previousReading;
+
+  if (totalRoomUnits <= 0) return tenants.map(t => ({ ...t, units: 0, amount: 0 }));
+
+  // Calculate each tenant's individual units (difference from their join reading)
+  const tenantUnitsRaw = tenants.map(t => {
+    const join = Number(t.joinReading || previousReading);
+    return currentReading - join > 0 ? currentReading - join : 0;
+  });
+
+  const totalRawUnits = tenantUnitsRaw.reduce((a, b) => a + b, 0);
+
+  // Proportional allocation
+  return tenants.map((t, i) => {
+    const units = +(tenantUnitsRaw[i] / totalRawUnits * totalRoomUnits).toFixed(2);
+    const amount = +(units * rate).toFixed(2);
+    return { ...t, units, amount };
+  });
+};
 
   /* ROOM MAP */
   const roomMap = useMemo(() => {
@@ -115,6 +167,21 @@ const EBReadingsPage = () => {
     () => readings.filter((r) => r.month === selMonth && r.year === selYear),
     [readings]
   );
+
+  // calculate EB amount based on manual or automatic mode
+    const calculateEBAmount = (units: number, roomId: string | number) => {
+    const rate = getRateForRoom(roomId);
+    return +(units * rate).toFixed(2);
+    };
+
+// split total EB among tenants equally
+const calculateTenantShare = (totalAmount: number, tenants: any[]) => {
+  const totalTenants = tenants.length;
+  return tenants.map((t) => ({
+    ...t,
+    amount: +(totalAmount / totalTenants).toFixed(2),
+  }));
+};
 
   /* TOTALS */
   const totalUnits = filteredReadings.reduce(
@@ -197,41 +264,6 @@ const EBReadingsPage = () => {
         buildTenantRows();
       }, [filteredReadings, roomMap]);
 
-      /* ------- Build EB Message ------ */
-           const buildEBMessage = (
-            roomNumber: string,
-            reading: EBReading,
-            tenantBills: any[]
-          ) => {
-
-            const tenantsText = tenantBills
-              .map(
-                (t) =>
-                  `• ${t.tenantName || t.name} : ₹${Number(
-                    t.amount ?? t.tenantAmount ?? 0
-                  ).toFixed(0)}`
-              )
-              .join("\n");
-
-            return `*EB BILL DETAILS*
-
-          🏠 Room : ${roomNumber}
-
-          📊 Reading Details
-          ---------------------------
-          Previous : ${reading.previousReading}
-          Current  : ${reading.currentReading}
-          Units    : ${reading.unitsConsumed}
-
-          💰 Total EB Amount : ₹${reading.ebAmount}
-
-          👥 Tenant Share
-          ---------------------------
-          ${tenantsText}
-
-          ✅ Please pay on time.
-          Thank you 🙏`;
-          };
 
       /* STATUS COLOR */
       const statusColor = (s: EBStatus) =>
@@ -258,36 +290,50 @@ const EBReadingsPage = () => {
         roomNumber: room.roomNumber,
         previousReading: getRoomStartingReading(room.id),
         currentReading: "",
+        acUnits: "",
       }));
 
       setBulkRows(rows);
     }, [bulkOpen, rooms, getRoomStartingReading]);
 
+    
+
   /* ADD READING */
   const handleAdd = async () => {
-    if (!formRoomId || !formPrevReading || !formCurrReading)
-      return toast.error("Fill all fields");
+  if (!formRoomId || !formPrevReading || !formCurrReading)
+    return toast.error("Fill all fields");
 
-    if (+formCurrReading < +formPrevReading)
-      return toast.error("Current reading cannot be less");
+  if (+formCurrReading < +formPrevReading)
+    return toast.error("Current reading cannot be less");
 
-    await addEBReading({
-      roomId: formRoomId,
-      month: selMonth,
-      year: selYear,
-      previousReading: Number(formPrevReading),
-      currentReading: Number(formCurrReading),
-    });
+  const selectedRoomId = Number(formRoomId);
+  const units = Number(formCurrReading) - Number(formPrevReading);
 
-    toast.success("Reading added");
+  const rateForRoom = roomManualRates[formRoomId?.toString() || ""];
 
-    setAddOpen(false);
-    setFormRoomId("");
-    setFormPrevReading("");
-    setFormCurrReading("");
+  const ebAmount = calculateEBAmount(units, selectedRoomId);
 
-    reload();
-  };
+  await addEBReading({
+    roomId: selectedRoomId,
+    month: selMonth,
+    year: selYear,
+    acUnits: Number(formAcUnits || 0),
+    previousReading: Number(formPrevReading),
+    currentReading: Number(formCurrReading),
+    ebAmount,
+    ebRate: getRateForRoom(selectedRoomId),
+  });
+
+  toast.success("Reading added");
+
+  setAddOpen(false);
+  setFormRoomId("");
+  setFormPrevReading("");
+  setFormCurrReading("");
+  setFormAcUnits("");
+
+  reload();
+};
 
   const handleBulkChange = (roomId: string, value: string) => {
   setBulkRows((prev) =>
@@ -297,45 +343,46 @@ const EBReadingsPage = () => {
   );
 };
 
-    /* --------------WhatApp Send Handle -------------- */
-    const handleSendWhatsApp = async (roomId: string) => {
-      try {
-        const roomNumber = roomMap[roomId];
+const handleBulkACChange = (roomId: string, value: string) => {
+  setBulkRows(prev =>
+    prev.map(r =>
+      r.roomId === roomId ? { ...r, acUnits: value } : r
+    )
+  );
+};
 
-        if (!roomNumber) {
-          toast.error("Room not found");
-          return;
-        }
+    /* -------------- WhatsApp Send Handle (Backend builds message) -------------- */
+const handleSendWhatsApp = async (roomId: string) => {
+  try {
+    const roomNumber = roomMap[roomId];
 
-        // tenant bills
-        const bills = await getTenantWiseEBBill(roomNumber);
+    if (!roomNumber) {
+      toast.error("Room not found");
+      return;
+    }
 
-        // room reading
-        const reading = filteredReadings.find(
-          (r) => String(r.roomId) === String(roomId)
+    // Call backend directly, backend will fetch tenants and reading, build message
+    try {
+      await sendEBBillWhatsApp(roomNumber);
+      toast.success("WhatsApp sent successfully");
+    } catch (backendError: any) {
+      console.error("Backend error:", backendError);
+
+      // check for Twilio sandbox specific error
+      const msg = backendError?.response?.data?.error || backendError.message || "";
+      if (msg.includes("Channel not found")) {
+        toast.error(
+          "Failed to send WhatsApp. Ensure the recipient has joined the Twilio sandbox."
         );
-
-        if (!reading) {
-          toast.error("EB reading not found");
-          return;
-        }
-
-        // build message
-        const message = buildEBMessage(
-          roomNumber,
-          reading,
-          bills
-        );
-
-        // call backend
-        await sendEBBillWhatsApp(roomNumber, message);
-
-        toast.success("WhatsApp sent successfully ");
-      } catch (e) {
-        console.error(e);
-        toast.error("Failed to send WhatsApp");
+      } else {
+        toast.error("Failed to send WhatsApp: " + msg);
       }
-    };
+    }
+  } catch (e) {
+    console.error("Unexpected error:", e);
+    toast.error("Unexpected error occurred while sending WhatsApp");
+  }
+};
 
 const handleBulkSave = async () => {
   try {
@@ -347,17 +394,25 @@ const handleBulkSave = async () => {
         return;
       }
 
+      const units = Number(row.currentReading) - Number(row.previousReading);
+      
+      const rateForRoom = roomManualRates[row.roomId];
+
+      const ebAmount = calculateEBAmount(units, row.roomId);
+
       await addEBReading({
         roomId: row.roomId,
         month: selMonth,
         year: selYear,
         previousReading: Number(row.previousReading),
         currentReading: Number(row.currentReading),
+        acUnits: Number(row.acUnits || 0),
+        ebAmount,
+        ebRate: getRateForRoom(row.roomId),
       });
     }
 
     toast.success("Bulk readings saved");
-
     setBulkOpen(false);
     reload();
   } catch {
@@ -372,15 +427,23 @@ const handleBulkSave = async () => {
     reload();
   };
 
-  /* VIEW BILL */
   const handleViewBill = async (roomId: string) => {
-    const roomNumber = roomMap[roomId];
-    const data = await getTenantWiseEBBill(roomNumber);
+  const roomNumber = roomMap[roomId];
+  if (!roomNumber) return toast.error("Room not found");
 
-    setTenantBills(data || []);
-    setBillRoom(roomNumber);
-    setBillOpen(true);
-  };
+  const reading = filteredReadings.find(
+    (r) => String(r.roomId) === String(roomId)
+  );
+
+  if (!reading) return toast.error("Reading not found");
+
+  // fetch already calculated tenant bills
+  const bills = await getTenantWiseEBBill(roomNumber);
+
+  setTenantBills(bills);
+  setBillRoom(roomNumber);
+  setBillOpen(true);
+};
 
   /* AGGRID */
   const columns: ColDef[] = useMemo(
@@ -396,16 +459,43 @@ const handleBulkSave = async () => {
     { headerName: "Current", field: "currentReading", flex: 1 },
     { headerName: "Units", field: "unitsConsumed", flex: 1 },
     {
-      headerName: "Tenant Amount",
-      field: "tenantAmount",
-      flex: 1,
-      valueFormatter: (p) => `₹${Number(p.value || 0).toFixed(2)}`,
-    },
+  headerName: "Tenant Amount",
+  field: "tenantAmount",
+  flex: 1,
+  valueGetter: (p) => {
+    // Use saved tenantAmount if present
+    if (p.data.tenantAmount !== undefined && p.data.tenantAmount !== null) {
+      return Number(p.data.tenantAmount);
+    }
+
+    // Otherwise, calculate for manual rooms
+    const rateForRoom = roomManualRates[String(p.data.roomId)];
+    if (rateForRoom !== undefined) {
+      const roomTenants = tenants.filter(
+        (t) => String(t.roomId) === String(p.data.roomId)
+      );
+
+      const result = calculateTenantShareProportional(
+        Number(p.data.previousReading),
+        Number(p.data.currentReading),
+        roomTenants,
+        rateForRoom
+      );
+
+      const tenant = result.find((r) => r.name === p.data.tenantName);
+      return tenant?.amount || 0;
+    }
+
+    return Number(p.data.tenantAmount ?? 0);
+  },
+  valueFormatter: (p) => `₹${Number(p.value).toFixed(2)}`,
+},
     {
       headerName: "Actions",
       flex: 1,
       cellRenderer: (p: any) => (
         <div className="flex gap-2">
+          {/* VIEW BILL */}
           <Button
             size="icon"
             variant="ghost"
@@ -414,6 +504,7 @@ const handleBulkSave = async () => {
             <Eye className="h-4 w-4" />
           </Button>
 
+          {/* WHATSAPP */}
           <Button
             size="icon"
             variant="ghost"
@@ -422,7 +513,8 @@ const handleBulkSave = async () => {
             📲
           </Button>
 
-          {role === "ADMIN" && (
+          {/* DELETE (ADMIN ONLY) */}
+          {hasAccess && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button size="icon" variant="ghost">
@@ -431,13 +523,24 @@ const handleBulkSave = async () => {
               </AlertDialogTrigger>
 
               <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete EB reading?</AlertDialogTitle>
-                </AlertDialogHeader>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Delete EB Reading?
+                </AlertDialogTitle>
+
+                <AlertDialogDescription>
+                  This action cannot be undone. The electricity reading and
+                  calculated tenant bills for this month will be permanently removed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
 
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => handleDelete(p.data.id)}>
+
+                  <AlertDialogAction
+                    onClick={() => handleDelete(p.data.id)}
+                    className="bg-destructive text-white"
+                  >
                     Delete
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -446,14 +549,11 @@ const handleBulkSave = async () => {
           )}
         </div>
       ),
-    },
+    }
   ],
   [roomMap, role]
 );
 
-  const onGridReady = useCallback((params: GridReadyEvent) => {
-    setGridApi(params.api);
-  }, []);
 
   return (
     <div>
@@ -465,7 +565,7 @@ const handleBulkSave = async () => {
           </p>
         </div>
 
-        {role !== "VIEWER" && (
+        {hasAccess  && (
           <>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -490,6 +590,11 @@ const handleBulkSave = async () => {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Add EB Reading</DialogTitle>
+
+                  <DialogDescription>
+                    Enter the electricity meter readings for this month to calculate tenant EB bills.
+                  </DialogDescription>
+
                 </DialogHeader>
 
                 <div className="grid gap-4">
@@ -525,6 +630,48 @@ const handleBulkSave = async () => {
                       setFormCurrReading(e.target.value)
                     }
                   />
+
+                  <div className="space-y-2">
+                  <Label>AC Units (Optional)</Label>
+                  <Input
+                    type="number"
+                    value={formAcUnits}
+                    onChange={(e) => setFormAcUnits(e.target.value)}
+                    placeholder="Enter AC consumption"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 mb-2">
+                <Label>Mode:</Label>
+                <Button
+                  size="sm"
+                  variant={manualMode ? "secondary" : "outline"}
+                  onClick={() => setManualMode(false)}
+                >
+                  Automatic
+                </Button>
+                <Button
+                  size="sm"
+                  variant={manualMode ? "outline" : "secondary"}
+                  onClick={() => setManualMode(true)}
+                >
+                  Manual
+                </Button>
+              </div>
+
+           {manualMode && (
+          <Input
+            type="number"
+            value={roomManualRates[formRoomId?.toString() || ""] } 
+            onChange={(e) =>
+              setRoomManualRates((prev) => ({
+                ...prev,
+                [formRoomId?.toString() || ""]: Number(e.target.value),
+              }))
+            }
+            placeholder="Enter unit rate"
+          />
+        )}
                 </div>
 
                 <DialogFooter>
@@ -570,9 +717,9 @@ const handleBulkSave = async () => {
               {bill.tenantName || bill.name}
             </p>
 
-            {/* <p className="text-sm text-muted-foreground">
-              Units: {bill.units ?? "-"}
-            </p> */}
+            <p className="text-sm text-muted-foreground">
+              {bill.acUser ? "AC User" : "Non-AC User"}
+            </p> 
           </div>
 
           <div className="font-semibold">
@@ -594,7 +741,7 @@ const handleBulkSave = async () => {
 </Dialog>
 
 
-          <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Bulk EB Reading</DialogTitle>
@@ -623,6 +770,49 @@ const handleBulkSave = async () => {
                   handleBulkChange(row.roomId, e.target.value)
                 }
               />
+
+              <div className="space-y-2">
+              <Label>AC Units (Optional)</Label>
+              <Input
+                type="number"
+                placeholder="AC Units"
+                value={row.acUnits}
+                onChange={(e) =>
+                  handleBulkACChange(row.roomId, e.target.value)
+                }
+              />
+              </div>
+              
+
+              <div className="flex items-center gap-2 mb-2">
+              <Label>Mode:</Label>
+              <Button
+                size="sm"
+                variant={manualMode ? "secondary" : "outline"}
+                onClick={() => setManualMode(false)}
+              >
+                Automatic
+              </Button>
+              <Button
+                size="sm"
+                variant={manualMode ? "outline" : "secondary"}
+                onClick={() => setManualMode(true)}
+              >
+                Manual
+              </Button>
+            </div>
+
+            <Input
+              type="number"
+              value={roomManualRates[row.roomId?.toString() || ""]} 
+              onChange={(e) =>
+                setRoomManualRates((prev) => ({
+                  ...prev,
+                  [row.roomId?.toString() || ""]: Number(e.target.value),
+                }))
+              }
+              placeholder="Enter unit rate"
+            />
             </div>
           ))}
         </div>
@@ -648,19 +838,18 @@ const handleBulkSave = async () => {
       <Card>
         <CardContent className="pt-4 px-0">
           <div className="ag-theme-alpine" style={{ height: 513 }}>
-            <AgGridReact
-              rowData={tenantRows}
-              columnDefs={columns}
-              onGridReady={onGridReady}
-              pagination
-              paginationPageSize={10}
-              paginationPageSizeSelector={[10, 20, 50, 100]}
-            />
-          </div>
+        <AgGridReact
+          rowData={tenantRows}
+          columnDefs={columns}
+          pagination={true}
+          paginationPageSize={10}
+          paginationPageSizeSelector={[10,20,50,100]}
+        />
+      </div>
         </CardContent>
       </Card>
     </div>
   );
 };
 
-export default EBReadingsPage;
+export default EBReadingsPage;    

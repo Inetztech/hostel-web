@@ -6,6 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { getUserRole } from "@/lib/auth";
+import {
+  loginUser,
+} from "@/lib/store";
 
 interface LoginResponse {
   token: string;
@@ -33,15 +36,12 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await axios.post<LoginResponse>(
-        "http://localhost:8080/api/auth/login",
-        { email, password }
-      );
+      const data = await loginUser(email, password);
 
-      // Save token and role from backend
-      sessionStorage.setItem("token", res.data.token);
-      sessionStorage.setItem("refreshToken", res.data.refreshToken);
-      sessionStorage.setItem("role", res.data.role);
+      sessionStorage.setItem("token", data.token);
+      sessionStorage.setItem("refreshToken", data.refreshToken);
+      sessionStorage.setItem("role", data.role);
+
 
       // Redirect to dashboard
       navigate("/dashboard", { replace: true });

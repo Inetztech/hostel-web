@@ -1,16 +1,31 @@
-export type Role = "ADMIN" | "USER" | "VIEWER";
+export type Role = "ADMIN" | "VIEWER";
 export type HostelType = "Boys" | "Girls";
 export type TenantStatus = "Active" | "Checked_Out";
 export type EBStatus = "Pending" | "Billed" | "Paid";
-export type PaymentStatus = "Pending" | "Paid" | "Partial" | "PAID" | "UNPAID" | "Unpaid";
-export type PaymentMode = "Cash" | "UPI" | "Bank Transfer";
-export type IdProofType = "Aadhar" | "PAN" | "Voter ID" | "Driving License" | "Passport";
-
+export type PaymentStatus = "PENDING" | "PAID" | "PARTIAL";
+export type PaymentMode = "CASH" | "UPI";
+export type IdProofType = "AADHAR" | "PAN" | "VOTER_ID" | "DRIVING_LICENSE" | "PASSPORT";
 
 export interface LoginResponse {
   token: string;
+  refreshToken: string;
   role: Role;
   message?: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  refreshToken: string;
+  role: string; 
+}
+
+export interface Branch {
+  id: number;
+  unitName: string;
+}
+
+export interface BranchRequest {
+  unitName: string;
 }
 
 export interface Room {
@@ -21,17 +36,14 @@ export interface Room {
   rentPerBed: number;
   unitId: number;   
   unitName?: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface Bed {
   id: number;
-  occupied: boolean;
+  isOccupied: boolean;
   bedNumber: number;
   roomId: number;
 }
-
 
 export interface Tenant {
   id: number;
@@ -46,6 +58,8 @@ export interface Tenant {
 
   advance: number;
   monthlyRent: number;
+
+  acUser: boolean;
 
   joinReading: number;
   checkoutReading: number | null;
@@ -65,46 +79,49 @@ export interface TenantRequest {
   bedId: number;
 
   joinReading: number;
-
+  acUser: boolean;
   advance: number;
   monthlyRent: number;
   checkInDate: string;
 }
 
 export interface EBReading {
-  id: string;
-  roomId: string;
+  id?: number;
+  roomId: number;
   month: number;
   year: number;
   previousReading: number;
   currentReading: number;
+  acUnits?: number;
+  unitsConsumed?: number; 
+  ebRate?: number;      
+  ebAmount?: number;      
+  status?: EBStatus;     
+}
+
+export interface TenantEBBill {
+  tenantId: number;
+  tenantName: string;
+  previousReading: number;
+  currentReading: number;
   unitsConsumed: number;
-  ratePerUnit: number;
-  ebAmount: number;
-  status: EBStatus;
-  createdAt: string;
-  updatedAt: string;
+  amount: number;
 }
 
 export interface Rent {
-  id: string;
-  tenantId: string;
-  roomId: string;
+  id: number;
+  tenantId: number;
+  roomId: number;
   rentMonth: number;
   rentYear: number;
   rentAmount: number;
   ebAmount: number;
-  otherCharges: number;
-  discount: number;
   totalAmount: number;
   paymentStatus: PaymentStatus;
-  paymentDate: string | null;
   paymentMode: PaymentMode | null;
-  createdAt: string;
-  updatedAt: string;
+  paymentDate: string | null;
 }
 
-// ── Report Types ──
 export interface RoomReport {
   roomNumber: string;
   hostelType: HostelType;
@@ -125,16 +142,6 @@ export interface MemberReport {
   year: number;
 }
 
-export interface TenantEBBill {
-  tenantId: number;
-  tenantName: string;
-  previousReading: number;
-  currentReading: number;
-  unitsConsumed: number;
-  amount: number;
-  
-}
-
 export interface CheckoutSummary {
   tenant: Tenant;
   roomNumber: string;
@@ -145,18 +152,6 @@ export interface CheckoutSummary {
   netPayable: number;
 }
 
-export interface Branch {
-  id: number;
-  unitName: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface BranchRequest {
-  unitName: string;
-}
-
-// ── Constants ──
 export const DEFAULT_EB_RATE = 13;
 
 export const MONTHS = [
@@ -164,5 +159,8 @@ export const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-export const ID_PROOF_TYPES: IdProofType[] = ["Aadhar", "PAN", "Voter ID", "Driving License", "Passport"];
-export const PAYMENT_MODES: PaymentMode[] = ["Cash", "UPI", "Bank Transfer"];
+export const ID_PROOF_TYPES: IdProofType[] = [
+  "AADHAR", "PAN", "VOTER_ID", "DRIVING_LICENSE", "PASSPORT"
+];
+
+export const PAYMENT_MODES: PaymentMode[] = ["CASH", "UPI"];

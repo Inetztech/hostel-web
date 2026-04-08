@@ -28,7 +28,6 @@ api.interceptors.response.use(
   async err => {
     const originalRequest = err.config;
 
-    // token expired
     if (err.response?.status === 401 && !originalRequest._retry) {
 
       originalRequest._retry = true;
@@ -41,11 +40,11 @@ api.interceptors.response.use(
           { refreshToken }
         );
 
-        const newToken = response.data.token;
+        // ✅ FIX HERE
+        const newToken = response.data.data.token;
 
         setToken(newToken);
 
-        // retry original request
         originalRequest.headers.Authorization =
           `Bearer ${newToken}`;
 

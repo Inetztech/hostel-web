@@ -8,6 +8,7 @@ import {
   getTenants,
   addTenant,
   updateTenant,
+  deleteTenant, 
   getBranches,
   importTenantsExcel,
   getUserRole,
@@ -26,6 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
   DialogFooter,
+  DialogDescription,
   DialogClose,
 } from "@/components/ui/dialog";
 
@@ -38,10 +40,11 @@ import {
 } from "@/components/ui/select";
 
 import { toast } from "sonner";
-import { UserPlus, Eye, Search, Pencil } from "lucide-react";
+import { UserPlus, Eye, Search, Pencil , Trash2} from "lucide-react";
 
 const TenantsPage = () => {
-  const role = getUserRole();
+const role = getUserRole()?.toUpperCase();
+const hasAccess = true;
 
   /* ================= STATE ================= */
 
@@ -49,6 +52,9 @@ const TenantsPage = () => {
   const [beds, setBeds] = useState<Bed[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [search, setSearch] = useState("");
+
+  const [acUser, setAcUser] = useState(false);
+  
 
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -78,15 +84,16 @@ const TenantsPage = () => {
 
   const load = async () => {
   const [r, b, t, br] = await Promise.all([
-    getRooms(0, 1000), 
+    getRooms(0, 1000),
     getBeds(0, 1000),
-    getTenants(),
-    getBranches(),
+    getTenants(0, 1000),  
+    getBranches(0, 1000),
   ]);
 
+
   setRooms(r);
-  setBeds(b); 
-  setTenants(t);
+  setBeds(b);
+  setTenants(t || []);
   setBranches(br);
 };
 
@@ -130,14 +137,28 @@ useEffect(() => {
   //   [rooms, beds]
   // );
 
-  const availableBeds = useMemo(
-    () => beds.filter((b) => b.roomId === roomId && !b.occupied),
-    [beds, roomId]
+  const availableBeds = useMemo(() => {
+  return beds.filter(
+    (b) =>
+      b.roomId === Number(roomId) &&
+      (
+        !b.isOccupied ||              
+        b.id === editTenant?.bedId    
+      )
   );
+}, [beds, roomId, editTenant]);
+
+  const availableRooms = useMemo(() => {
+  return rooms.filter((r) =>
+    beds.some((b) => b.roomId === r.id && !b.isOccupied)
+  );
+}, [rooms, beds]);
 
   useEffect(() => {
+  if (!editTenant) {
     setBedId("");
-  }, [roomId]);
+  }
+}, [roomId, editTenant]);
 
   /* ================= PRINT TENANT ================= */ 
       const handlePrintTenant = (tenant: Tenant) => {
@@ -195,40 +216,90 @@ useEffect(() => {
     setMonthlyRent("");
     setCurrentReading("");
     setCheckInDate("");
+    setAcUser(false);
   };
 
   /* ================= ADD TENANT ================= */
 
-  const handleAdd = async () => {
-    if (!name || !phone || !roomId || !bedId) {
-      toast.error("Fill required fields");
-      return;
-    }
+ const handleAdd = async () => {
+  if (!name || !phone || !roomId || !bedId) {
+    toast.error("Fill required fields");
+    return;
+  }
 
-    try {
-      await addTenant({
-        name,
-        phone,
-        email,
-        idProofType: idProofType as IdProofType,
-        idProofNumber,
-        roomId: Number(roomId),
-        bedId: Number(bedId),
-        advance: Number(advance),
-        monthlyRent: Number(monthlyRent),
-        joinReading: Number(currentReading),
-        checkInDate,
-      });
+  try {
+    await addTenant({
+      name,
+      phone,
+      email,
+      idProofType: idProofType as IdProofType,
+      idProofNumber,
+      roomId: Number(roomId),
+      bedId: Number(bedId),
+      advance: Number(advance),
+      monthlyRent: Number(monthlyRent),
+      joinReading: Number(currentReading),
+      checkInDate,
+      acUser,
+    });
 
-      toast.success("Tenant added");
+    toast.success("Tenant added");
 
-      setAddOpen(false);
-      resetForm();
-      load();
-    } catch (e: any) {
-      toast.error(e.message || "Failed to add tenant");
-    }
-  };
+    // Reset form & reload
+    setAddOpen(false);
+    resetForm();
+    load();
+
+    // ================= SEND HOSTEL RULES VIA WHATSAPP =================
+    const sendHostelRulesWhatsApp = (phone: string, tenantName: string) => {
+      const message = encodeURIComponent(`Hi ${tenantName},
+
+🏠 Brindhavanam Gents Hostel – Vadapalani
+
+📜 Updated Hostel Rules & Regulations
+
+1. Hostel Fee Payment
+   Hostel fee must be transferred only to 98848 25258.
+   🔴 Do not transfer to 98402 34475 henceforth.
+
+2. Due Date & Late Fee
+   Hostel fee should be paid on or before the 5th of every month.
+   A late fee of ₹100 per week will be charged for delays.
+
+3. Vacating Notice
+   Residents must give 15 days’ prior notice through WhatsApp (98848 25258) before vacating.
+   Caution deposit (advance) will be returned on the last day.
+
+4. Notice Period & Advance Refund Policy
+   If a 15-day notice is not given, rent will be deducted accordingly.
+   Advance amount will not be refunded in case of vacating without the notice period.
+
+5. Hostel Timings
+   Entry must be before 11:00 p.m.
+   Prior intimation is mandatory for late entry.
+
+6. Food Consumption Policy 🍱
+   Food is strictly not allowed inside rooms. Use terrace/dining area.
+
+7. Prohibited Activities
+   Smoking and consumption of alcohol are strictly prohibited.
+
+8. Responsibility Clause
+   Management is not responsible for loss of belongings or unlawful activities.
+
+9. Maintenance Deduction
+   ₹1000 maintenance charge will be deducted from your advance at the time of vacating.
+`);
+      const url = `https://wa.me/${phone}?text=${message}`;
+      window.open(url, "_blank");
+    };
+
+    sendHostelRulesWhatsApp(phone, name);
+
+  } catch (e: any) {
+    toast.error(e.message || "Failed to add tenant");
+  }
+};
 
   /* ================= EDIT TENANT ================= */
 
@@ -248,6 +319,7 @@ useEffect(() => {
         monthlyRent: Number(monthlyRent),
         joinReading: Number(currentReading),
         checkInDate,
+        acUser,
       });
 
       toast.success("Tenant updated");
@@ -259,6 +331,26 @@ useEffect(() => {
       toast.error(e.message || "Update failed");
     }
   };
+
+  /* ================= DELETE TENANT ================= */
+
+const handleDeleteTenant = async (tenant: Tenant) => {
+  const confirmDelete = confirm(
+    `Delete tenant "${tenant.name}" ?`
+  );
+
+  if (!confirmDelete) return;
+
+  try {
+    await deleteTenant(tenant.id);
+
+    toast.success("Tenant deleted");
+
+    load(); 
+  } catch (e: any) {
+    toast.error(e?.response?.data?.message || "Delete failed");
+  }
+};
 
   /* ================= IMPORT EXCEL ================= */
 
@@ -279,9 +371,12 @@ const handleExcelImport = async () => {
 
     load();
 
+
+    window.dispatchEvent(new Event("beds-updated"));
+
   } catch (e: any) {
 
-    toast.error(e.message || "Excel import failed");
+    toast.error(e?.response?.data?.message || "Excel import failed");
 
   }
 
@@ -320,6 +415,18 @@ const handleExcelImport = async () => {
   flex: 1,
   cellClass: "text-center",
 },
+{
+  headerName: "Type",
+  field: "acUser",
+  cellRenderer: (params: any) => {
+    const isAc = Boolean(params.value);
+    return (
+      <Badge variant={isAc ? "default" : "secondary"}>
+        {isAc ? "AC" : "Non-AC"}
+      </Badge>
+    );
+},
+},
   {
     headerName: "Status",
     field: "status",
@@ -345,7 +452,7 @@ const handleExcelImport = async () => {
         </Button>
 
         {/* Edit */}
-        {role === "ADMIN" && (
+        {hasAccess && (
           <Button
             size="icon"
             variant="ghost"
@@ -364,13 +471,24 @@ const handleExcelImport = async () => {
               setMonthlyRent(String(t.monthlyRent));
               setCurrentReading(String(t.joinReading));
               setCheckInDate(t.checkInDate);
-
+              setAcUser(Boolean(t.isAcUser));
+              
               setEditOpen(true);
             }}
           >
             <Pencil className="h-4 w-4" />
           </Button>
         )}
+
+        {hasAccess && (
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => handleDeleteTenant(params.data)}
+        >
+          <Trash2 className="h-4 w-4 text-red-500" />
+        </Button>
+      )}
 
         {/* Print */}
         <Button
@@ -403,7 +521,7 @@ const defaultColDef: ColDef = {
       <div className="flex justify-between items-center">
   <h1 className="text-2xl font-bold">Tenants</h1>
 
-  {role === "ADMIN" && (
+  {hasAccess && (
     <div className="flex gap-2 items-center">
 
       {/* Excel File Input */}
@@ -438,25 +556,40 @@ const defaultColDef: ColDef = {
         </DialogTrigger>
 
             <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add Tenant</DialogTitle>
+              <DialogDescription>
+                Enter tenant details and assign an available room and bed.
+              </DialogDescription>
+            </DialogHeader>
 
-              <DialogHeader>
-                <DialogTitle>New Tenant</DialogTitle>
-              </DialogHeader>
+            <div className="grid gap-3">
 
-              <div className="grid gap-3">
+              <Input
+                placeholder="Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
 
-                <Input placeholder="Name" value={name} onChange={(e)=>setName(e.target.value)} />
-                <Input placeholder="Phone" value={phone} onChange={(e)=>setPhone(e.target.value)} />
-                <Input placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} />
+              <Input
+                placeholder="Phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
 
-                <Select
+              <Input
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+
+              <Select
                 value={idProofType}
                 onValueChange={(v) => setIdProofType(v as IdProofType)}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="IdProofType" />
+                  <SelectValue placeholder="ID Proof Type" />
                 </SelectTrigger>
-
                 <SelectContent>
                   <SelectItem value="AADHAR">AADHAR</SelectItem>
                   <SelectItem value="PAN">PAN</SelectItem>
@@ -464,51 +597,100 @@ const defaultColDef: ColDef = {
                 </SelectContent>
               </Select>
 
-                <Input placeholder="ID Proof Number" value={idProofNumber} onChange={(e)=>setIdProofNumber(e.target.value)} />
+              <Input
+                placeholder="ID Proof Number"
+                value={idProofNumber}
+                onChange={(e) => setIdProofNumber(e.target.value)}
+              />
 
-                <Select value={roomId ? String(roomId) : ""} onValueChange={(v)=>setRoomId(Number(v))}>
-                  <SelectTrigger><SelectValue placeholder="Room" /></SelectTrigger>
-                  <SelectContent>
-                  {rooms.map((r)=>(
-                    <SelectItem key={r.id} value={String(r.id)}>
-                      {r.roomNumber}
+              <Select
+              value={roomId ? String(roomId) : ""}
+              onValueChange={(v) => setRoomId(Number(v))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Room" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableRooms.map((r) => (
+                  <SelectItem key={r.id} value={String(r.id)}>
+                    {r.roomNumber}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+              <Select
+                value={bedId ? String(bedId) : ""}
+                onValueChange={(v) => setBedId(Number(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Bed" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableBeds.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>
+                      Bed {b.bedNumber}
                     </SelectItem>
                   ))}
                 </SelectContent>
-                </Select>
+              </Select>
 
-                <Select value={bedId ? String(bedId) : ""} onValueChange={(v)=>setBedId(Number(v))}>
-                  <SelectTrigger><SelectValue placeholder="Bed" /></SelectTrigger>
-                  <SelectContent>
-                    {availableBeds.map((b)=>(
-                      <SelectItem key={b.id} value={String(b.id)}>
-                        Bed {b.bedNumber}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <Input
+                type="number"
+                placeholder="Advance"
+                value={advance}
+                onChange={(e) => setAdvance(e.target.value)}
+              />
 
-                <Input type="number" placeholder="Advance" value={advance} onChange={(e)=>setAdvance(e.target.value)} />
-                <Input type="number" placeholder="Rent" value={monthlyRent} onChange={(e)=>setMonthlyRent(e.target.value)} />
-                <Input type="number" placeholder="Current EB Reading" value={currentReading} onChange={(e)=>setCurrentReading(e.target.value)} />
-                <Input type="date" value={checkInDate} onChange={(e)=>setCheckInDate(e.target.value)} />
+              <Input
+                type="number"
+                placeholder="Rent"
+                value={monthlyRent}
+                onChange={(e) => setMonthlyRent(e.target.value)}
+              />
 
-              </div>
+              <div className="flex items-center gap-2 mt-2">
+                  <input
+                    type="checkbox"
+                    id="acUser"
+                    checked={acUser}
+                    onChange={(e) => setAcUser(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <label htmlFor="acUser" className="text-sm">
+                    AC User
+                  </label>
+                </div>
 
-              <DialogFooter>
-                <DialogClose asChild>
-                  <Button variant="outline">Cancel</Button>
-                </DialogClose>
+              <Input
+                type="number"
+                placeholder="Current EB Reading"
+                value={currentReading}
+                onChange={(e) => setCurrentReading(e.target.value)}
+              />
 
-                <Button onClick={handleAdd}>
-                  Check-In
-                </Button>
-              </DialogFooter>
+              <Input
+                type="date"
+                value={checkInDate}
+                onChange={(e) => setCheckInDate(e.target.value)}
+              />
 
-            </DialogContent>
+            </div>
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline">Cancel</Button>
+              </DialogClose>
+
+              <Button onClick={handleAdd}>
+                Check-In
+              </Button>
+            </DialogFooter>
+          </DialogContent>
           </Dialog>
           </div>
           )}
+          
       </div>
 
       {/* SEARCH */}
@@ -525,25 +707,27 @@ const defaultColDef: ColDef = {
 
       {/* GRID */}
 
-      <div className="ag-theme-alpine" style={{height:513}}>
-        <AgGridReact
-          rowData={filteredTenants}
-          columnDefs={columnDefs}
-          defaultColDef={defaultColDef}
-          pagination
-          paginationPageSize={10}
-          paginationPageSizeSelector={[10, 20, 50, 100]}
-        />
-      </div>
+      <div className="ag-theme-alpine" style={{ height: 513 }}>
+      <AgGridReact<Tenant>
+        rowData={filteredTenants}
+        columnDefs={columnDefs}
+        defaultColDef={defaultColDef}
+        pagination={true}
+        paginationPageSize={10}
+        paginationPageSizeSelector={[10,20,50,100]}
+      />
+    </div>
 
       {/* EDIT TENANT */}
 
         <Dialog open={editOpen} onOpenChange={setEditOpen}>
           <DialogContent>
-
-            <DialogHeader>
-              <DialogTitle>Edit Tenant</DialogTitle>
-            </DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Edit Tenant</DialogTitle>
+            <DialogDescription>
+              Update tenant information and save your changes.
+            </DialogDescription>
+          </DialogHeader>
 
             <div className="grid gap-3">
 
@@ -585,19 +769,28 @@ const defaultColDef: ColDef = {
 
               {/* ROOM */}
 
-              <Select value={roomId ? String(roomId) : ""} onValueChange={(v)=>setRoomId(Number(v))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Room" />
-                </SelectTrigger>
+      <Select
+        value={roomId ? String(roomId) : ""}
+        onValueChange={(v) => setRoomId(Number(v))}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder="Room" />
+        </SelectTrigger>
 
-                <SelectContent>
-                  {rooms.map((r)=>(
-                    <SelectItem key={r.id} value={String(r.id)}>
-                      {r.roomNumber}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <SelectContent>
+          {rooms
+            .filter(
+              (r) =>
+                beds.some((b) => b.roomId === r.id && !b.isOccupied) ||
+                r.id === editTenant?.roomId 
+            )
+            .map((r) => (
+              <SelectItem key={r.id} value={String(r.id)}>
+                {r.roomNumber}
+              </SelectItem>
+            ))}
+        </SelectContent>
+      </Select>
 
               {/* BED */}
 
@@ -607,14 +800,12 @@ const defaultColDef: ColDef = {
                 </SelectTrigger>
 
                 <SelectContent>
-                  {beds
-                    .filter((b)=>b.roomId === roomId)
-                    .map((b)=>(
-                      <SelectItem key={b.id} value={String(b.id)}>
-                        Bed {b.bedNumber}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
+                {availableBeds.map((b) => (
+                  <SelectItem key={b.id} value={String(b.id)}>
+                    Bed {b.bedNumber}
+                  </SelectItem>
+                ))}
+              </SelectContent>
               </Select>
 
               <Input
@@ -637,6 +828,19 @@ const defaultColDef: ColDef = {
                 value={currentReading}
                 onChange={(e)=>setCurrentReading(e.target.value)}
               />
+              
+              <div className="flex items-center gap-2 mt-2">
+              <input
+                type="checkbox"
+                id="acUser"
+                checked={acUser}
+                onChange={(e) => setAcUser(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <label htmlFor="acUser" className="text-sm">
+                AC User
+              </label>
+            </div>
 
               <Input
                 type="date"
@@ -668,9 +872,12 @@ const defaultColDef: ColDef = {
 
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Tenant Details</DialogTitle>
-          </DialogHeader>
+        <DialogHeader>
+          <DialogTitle>Tenant Details</DialogTitle>
+          <DialogDescription>
+            View complete information about this tenant.
+          </DialogDescription>
+        </DialogHeader>
 
           {viewTenant && (
             <div className="grid gap-2 text-sm">
@@ -692,7 +899,7 @@ const defaultColDef: ColDef = {
       </Dialog>
 
     </div>
-  );
+  )
 };
 
 export default TenantsPage;

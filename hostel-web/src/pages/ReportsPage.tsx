@@ -41,12 +41,11 @@ const ReportsPage = () => {
   useEffect(() => {
   const fetchData = async () => {
 
-    const roomsData = await getRooms();
-    const bedsData = await getBeds();
-    const readingsData = await getEBReadings();
-    const rentsData = await getRents();
-    const tenantsData = await getTenants();
-
+    const roomsData = await getRooms(0,1000);
+    const bedsData = await getBeds(0,1000);
+    const readingsData = await getEBReadings(0,1000);
+    const rentsData = await getRents(0,1000);
+    const tenantsData = await getTenants(0,1000);
     setRooms(roomsData);
     setBeds(bedsData);
     setReadings(readingsData);
@@ -90,8 +89,8 @@ const ReportsPage = () => {
       unitsConsumed: r.unitsConsumed,
       totalEBAmount: r.ebAmount,
       totalBeds: rBeds.length,
-      occupiedBeds: rBeds.filter(b => b.occupied).length,
-      availableBeds: rBeds.filter(b => !b.occupied).length,
+      occupiedBeds: rBeds.filter(b => b.isOccupied).length,
+      availableBeds: rBeds.filter(b => !b.isOccupied).length,
     };
   })
   .filter(Boolean) as RoomReport[];
@@ -120,8 +119,8 @@ const ReportsPage = () => {
   const totalEBCost = roomReports.reduce((s, r) => s + r.totalEBAmount, 0);
   const boysReports = roomReports.filter(r => r.hostelType === "Boys");
   const girlsReports = roomReports.filter(r => r.hostelType === "Girls");
-  const occupiedBeds = beds.filter(b => b.occupied).length;
-  const availableBeds = beds.filter(b => !b.occupied).length;
+  const occupiedBeds = beds.filter(b => b.isOccupied).length;
+  const availableBeds = beds.filter(b => !b.isOccupied).length;
   const totalRentCollected = filteredRent.filter(r => r.paymentStatus?.toUpperCase() === "PAID").reduce((s, r) => s + r.totalAmount, 0);
   const totalRentPending = filteredRent.filter(r => r.paymentStatus?.toUpperCase() !== "PAID").reduce((s, r) => s + r.totalAmount, 0);
   const checkedOut = allTenants.filter(t => t.status === "Checked_Out");
@@ -153,8 +152,6 @@ const ReportsPage = () => {
       <Tabs defaultValue="summary">
         <TabsList className="mb-4 flex-wrap">
           <TabsTrigger value="summary">Summary</TabsTrigger>
-          <TabsTrigger value="room">Room EB ({roomReports.length})</TabsTrigger>
-          <TabsTrigger value="member">Member EB ({memberReports.length})</TabsTrigger>
           <TabsTrigger value="rent">Rent ({filteredRent.length})</TabsTrigger>
           <TabsTrigger value="checkedout">Checked Out ({checkedOut.length})</TabsTrigger>
         </TabsList>
@@ -252,67 +249,6 @@ const ReportsPage = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="room">
-        <Card>
-          <CardHeader>
-            <CardTitle>Room EB Report</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Room</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Units</TableHead>
-                  <TableHead>EB Amount</TableHead>
-                  <TableHead>Occupied</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {roomReports.map((r, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{r.roomNumber}</TableCell>
-                    <TableCell>{r.hostelType}</TableCell>
-                    <TableCell>{r.unitsConsumed}</TableCell>
-                    <TableCell>₹{r.totalEBAmount}</TableCell>
-                    <TableCell>
-                      {r.occupiedBeds}/{r.totalBeds}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="member">
-        <Card>
-          <CardHeader>
-            <CardTitle>Member EB Report</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Tenant</TableHead>
-                  <TableHead>Room</TableHead>
-                  <TableHead>EB Share</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {memberReports.map((m, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{m.tenantName}</TableCell>
-                    <TableCell>{m.roomNumber}</TableCell>
-                    <TableCell>₹{m.individualEBAmount}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </TabsContent>
 
       <TabsContent value="rent">
         <Card>

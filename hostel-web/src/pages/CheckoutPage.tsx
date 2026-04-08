@@ -8,7 +8,7 @@ import {
   getUserRole,
   getTenantWiseEBBill,
   getEBReadings,
-  updateBedStatus 
+  updateBedStatus
 } from "@/lib/store";
 import { Room, Tenant, Rent, DEFAULT_EB_RATE } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,17 +53,16 @@ const CheckoutPage = () => {
 } | null>(null);
 
   const role = getUserRole();
-
+  
   // -------------------- Load Rooms & Tenants --------------------
-  const reload = async () => {
+const reload = async () => {
   try {
     const [fetchedRooms, fetchedTenants] = await Promise.all([
-          getRooms(0, 1000),
-          getActiveTenants()
+      getRooms(0, 1000),
+      getActiveTenants()
     ]);
 
-    // Ensure rooms is always an array
-    setRooms(Array.isArray(fetchedRooms) ? fetchedRooms : fetchedRooms.content ?? []);
+    setRooms(fetchedRooms);
     setTenants(fetchedTenants ?? []);
   } catch (err) {
     console.error("Reload error:", err);
@@ -372,11 +371,12 @@ const filteredTenants = tenants.filter(
     // -------------------- Optional Final EB Reading --------------------
     if (finalPrev && finalCurr) {
       await addEBReading({
-        roomId: String(selectedTenant.roomId),
+        roomId: selectedTenant.roomId,
         month: new Date().getMonth() + 1,
         year: new Date().getFullYear(),
         previousReading: Number(finalPrev),
         currentReading: Number(finalCurr),
+        ebRate: DEFAULT_EB_RATE,
       });
     }
 
@@ -390,7 +390,7 @@ const filteredTenants = tenants.filter(
         finalCurr ? Number(finalCurr) : null
       );
 
-    // ==================== 🔥 IMPORTANT PART ====================
+    // ====================  IMPORTANT PART ====================
     // Free the bed after checkout
     if (selectedTenant.bedId) {
       await updateBedStatus(Number(selectedTenant.bedId), false);

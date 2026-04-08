@@ -1,4 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+
+import { AgGridReact } from "ag-grid-react";
+import type { ColDef } from "ag-grid-community";
+import { useMemo } from "react";
+
 import {
   getRooms,
   getRents,
@@ -41,7 +46,9 @@ import { toast } from "sonner";
 import { CreditCard, Trash2 } from "lucide-react";
 
 const RentPage = () => {
-  const role = getUserRole();
+  
+const role = getUserRole()?.toUpperCase();
+const hasAccess = true;
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [rents, setRents] = useState<Rent[]>([]);
@@ -49,6 +56,9 @@ const RentPage = () => {
     (TenantEBBill & { roomNumber: string })[]
   >([]);
   const [search, setSearch] = useState("");
+
+
+  const loadingRef = useRef(false);
 
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
@@ -76,27 +86,34 @@ const RentPage = () => {
 
   /* ================= LOAD DATA ================= */
 
-  const reload = async () => {
-  try {
-    const [roomDataRes, rentData] = await Promise.all([getRooms(), getRents()]);
+ const reload = async () => {
+  if (loadingRef.current) return;
+  loadingRef.current = true;
 
-    // Ensure roomData is always an array
-    const roomData = Array.isArray(roomDataRes) ? roomDataRes : roomDataRes.content || [];
+  try {
+    const [roomData, rentData] = await Promise.all([
+      getRooms(0,1000),
+      getRents(0,1000),
+    ]);
 
     setRooms(roomData);
     setRents(rentData);
 
-    // Load EB bills safely
-    loadAllRoomsEB(roomData);
+    await loadAllRoomsEB(roomData);
+
   } catch (err) {
-    console.error("Failed to reload data:", err);
     toast.error("Failed to load data");
+  } finally {
+    loadingRef.current = false;
   }
 };
 
   useEffect(() => {
     reload();
   }, []);
+
+
+  
 
   /* ================= LOAD EB ================= */
 
@@ -131,12 +148,6 @@ const RentPage = () => {
     }
   };
 
-  const filteredBills = ebBills.filter((bill) =>
-    `${bill.tenantName} ${bill.roomNumber}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
-
   const getRoomObj = (roomNumber: string) =>
     rooms.find((r) => r.roomNumber === roomNumber);
 
@@ -153,13 +164,168 @@ const RentPage = () => {
     );
   };
 
+  const filteredBills = ebBills.filter((bill) =>
+    `${bill.tenantName} ${bill.roomNumber}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
+
+  const rowData = useMemo(() => {
+  return filteredBills.map((bill) => {
+    const room = getRoomObj(bill.roomNumber);
+    const rentPerBed = room?.rentPerBed ?? 0;
+
+    const rentRecord = getRentStatus(
+      bill.tenantId,
+      bill.roomNumber
+    );
+
+    return {
+      ...bill,
+      rentPerBed,
+      total: rentPerBed + bill.amount,
+      rentRecord,
+    };
+  });
+}, [filteredBills, rents, rooms, month, year]);
+
+
+
+
+const columnDefs = useMemo<ColDef[]>(() => [
+  {
+    headerName: "Room No",
+    field: "roomNumber",
+    filter: true,
+    flex: 1,
+    minWidth: 110,
+  },
+  {
+    headerName: "Tenant",
+    field: "tenantName",
+    filter: true,
+    flex: 2,
+    minWidth: 160,
+  },
+  {
+    headerName: "EB",
+    field: "amount",
+    filter: true,
+    flex: 1,
+    minWidth: 120,
+    valueFormatter: (p) => `₹${Number(p.value ?? 0).toFixed(2)}`,
+  },
+  {
+    headerName: "Rent",
+    field: "rentPerBed",
+    filter: true,
+    flex: 1,
+    minWidth: 120,
+    valueFormatter: (p) => `₹${Number(p.value ?? 0).toFixed(2)}`,
+  },
+  {
+    headerName: "Total",
+    field: "total",
+    flex: 1,
+    minWidth: 130,
+    cellStyle: { fontWeight: "600" },
+    valueFormatter: (p) => `₹${Number(p.value ?? 0).toFixed(2)}`,
+  },
+  {
+    headerName: "Status",
+    field: "paymentStatus",
+    filter: true,
+    flex: 1,
+    minWidth: 150,
+    maxWidth: 170,
+    cellStyle: {
+      display: "flex",
+      alignItems: "center",
+    },
+    cellRenderer: (params: any) => {
+      const status =
+        params.data.rentRecord?.paymentStatus || "UNGENERATED";
+
+      return (
+        <Badge
+          variant="outline"
+          className={`text-xs ${payStatusColor(status)}`}
+        >
+          {status}
+        </Badge>
+      );
+    },
+  },
+
+  ...(hasAccess
+    ? [
+        {
+  headerName: "Actions",
+  sortable: false,
+  filter: false,
+  resizable: false,
+  flex: 2,
+  minWidth: 340,
+  cellRenderer: (params: any) => {
+    const bill = params.data;
+    const rentRecord = bill.rentRecord;
+
+    return (
+      <div className="flex gap-2 items-center w-full">
+        {/* Generate */}
+        {!rentRecord && (
+          <Button size="sm" onClick={() => handleGenerate(bill)}>Generate</Button>
+        )}
+
+        {/* Payment */}
+        {rentRecord && !isPaid(rentRecord.paymentStatus) && (
+          <>
+            <Select
+              value={paymentModes[rentRecord.id] || ""}
+              onValueChange={(value: PaymentMode) =>
+                setPaymentModes((p) => ({ ...p, [rentRecord.id]: value }))
+              }
+            >
+              <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectValue placeholder="Mode" />
+              </SelectTrigger>
+              <SelectContent>
+                {PAYMENT_MODES.map((mode) => (
+                  <SelectItem key={mode} value={mode}>{mode}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button size="sm" variant="outline" onClick={() => handlePayment(rentRecord)}>
+              <CreditCard className="h-3 w-3 mr-1" />
+              Pay
+            </Button>
+          </>
+        )}
+
+        {/* Delete */}
+        {rentRecord && (
+          <Button size="sm" variant="destructive" onClick={() => handleDelete(rentRecord)}>
+            <Trash2 className="h-3 w-3 mr-1" />
+            Delete
+          </Button>
+        )}
+      </div>
+    );
+  },
+},
+      ]
+    : []),
+], [paymentModes, rents, rooms]);
+
+
+
   /* ================= GENERATE ================= */
 
   const handleGenerate = async (
     bill: TenantEBBill & { roomNumber: string }
   ) => {
-    if (role !== "ADMIN") return toast.error("Admin only");
-
+    
     const room = getRoomObj(bill.roomNumber);
     if (!room) return;
 
@@ -181,7 +347,6 @@ const RentPage = () => {
   };
 
   const handleGenerateAll = async () => {
-    if (role !== "ADMIN") return toast.error("Admin only");
 
     if (!confirm("Generate rent for all tenants?")) return;
 
@@ -216,7 +381,6 @@ const RentPage = () => {
   /* ================= PAYMENT ================= */
 
   const handlePayment = async (rent: Rent) => {
-    if (role !== "ADMIN") return;
 
     const selectedMode = paymentModes[rent.id];
     if (!selectedMode) return toast.error("Select payment mode");
@@ -240,7 +404,6 @@ const RentPage = () => {
   /* ================= DELETE ================= */
 
   const handleDelete = async (rent: Rent) => {
-    if (role !== "ADMIN") return toast.error("Admin only");
 
     if (!confirm("Delete this rent record?")) return;
 
@@ -348,7 +511,7 @@ const RentPage = () => {
           </SelectContent>
         </Select>
 
-        {role === "ADMIN" && (
+        {hasAccess && (
           <Button size="sm" onClick={handleGenerateAll}>
             Generate All
           </Button>
@@ -365,154 +528,20 @@ const RentPage = () => {
 
       {/* TABLE */}
       <Card>
-        <CardContent className="pt-4">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Room</TableHead>
-                <TableHead>Tenant</TableHead>
-                <TableHead>EB</TableHead>
-                <TableHead>Rent</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Status</TableHead>
-                {role === "ADMIN" && <TableHead>Actions</TableHead>}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {filteredBills.map((bill) => {
-                const room = getRoomObj(bill.roomNumber);
-                const rentPerBed = room?.rentPerBed ?? 0;
-                const total = rentPerBed + bill.amount;
-
-                const rentRecord = getRentStatus(
-                  bill.tenantId,
-                  bill.roomNumber
-                );
-
-                return (
-                  <TableRow
-                    key={bill.tenantId + bill.roomNumber}
-                  >
-                    <TableCell>{bill.roomNumber}</TableCell>
-                    <TableCell>{bill.tenantName}</TableCell>
-                    <TableCell>₹{bill.amount}</TableCell>
-                    <TableCell>₹{rentPerBed}</TableCell>
-                    <TableCell className="font-bold">
-                      ₹{total}
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={`text-xs ${payStatusColor(
-                          rentRecord?.paymentStatus
-                        )}`}
-                      >
-                        {rentRecord?.paymentStatus ??
-                          "UNGENERATED"}
-                      </Badge>
-                    </TableCell>
-
-                    {role === "ADMIN" && (
-                      <TableCell>
-                        <div className="flex gap-2 items-center">
-                          {!rentRecord && (
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                handleGenerate(bill)
-                              }
-                            >
-                              Generate
-                            </Button>
-                          )}
-
-                          {rentRecord &&
-                            !isPaid(
-                              rentRecord.paymentStatus
-                            ) && (
-                              <>
-                                <Select
-                                  value={
-                                    paymentModes[
-                                      rentRecord.id
-                                    ] || ""
-                                  }
-                                  onValueChange={(
-                                    value: PaymentMode
-                                  ) =>
-                                    setPaymentModes((p) => ({
-                                      ...p,
-                                      [rentRecord.id]: value,
-                                    }))
-                                  }
-                                >
-                                  <SelectTrigger className="w-28 h-8 text-xs">
-                                    <SelectValue placeholder="Mode" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {PAYMENT_MODES.map(
-                                      (mode) => (
-                                        <SelectItem
-                                          key={mode}
-                                          value={mode}
-                                        >
-                                          {mode}
-                                        </SelectItem>
-                                      )
-                                    )}
-                                  </SelectContent>
-                                </Select>
-
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    handlePayment(
-                                      rentRecord
-                                    )
-                                  }
-                                >
-                                  <CreditCard className="h-3 w-3 mr-1" />
-                                  Pay
-                                </Button>
-                              </>
-                            )}
-
-                          {rentRecord && (
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() =>
-                                handleDelete(rentRecord)
-                              }
-                            >
-                              <Trash2 className="h-3 w-3 mr-1" />
-                              Delete
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                );
-              })}
-
-              {filteredBills.length === 0 && (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center text-muted-foreground"
-                  >
-                    No tenants found
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <CardContent className="pt-4">
+        <div className="ag-theme-alpine" style={{ height: 513, width: "100%" }}>
+        <AgGridReact
+          rowData={rowData}
+          columnDefs={columnDefs}
+          pagination={true}
+          paginationPageSize={10}
+          paginationPageSizeSelector={[10,20,50,100]}
+          domLayout="normal"
+          animateRows={true}
+        />
+      </div>
+      </CardContent>
+    </Card>
     </div>
   );
 };
