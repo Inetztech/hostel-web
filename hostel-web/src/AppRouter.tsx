@@ -17,16 +17,16 @@ import ReportsPage from "@/pages/ReportsPage";
 import NotFound from "@/pages/NotFound";
 import Unauthorized from "@/pages/Unauthorized";
 import BranchPage from "@/pages/BranchPage";
+import UserRegisterPage from "@/pages/UserRegisterPage";
 
 export const router = createBrowserRouter([
   // Public routes
   { path: "/", element: <Login /> },
   { path: "/unauthorized", element: <Unauthorized /> },
-
-  // Protected routes wrapped in AppLayout
+  
   {
     element: (
-      <ProtectedRoute allow={["ADMIN", "USER", "VIEWER"]}>
+      <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
         <AppLayout />
       </ProtectedRoute>
     ),
@@ -36,7 +36,7 @@ export const router = createBrowserRouter([
       {
         path: "/tenants",
         element: (
-          <ProtectedRoute allow={["ADMIN", "USER","VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN","VIEWER"]}>
             <TenantsPage />
           </ProtectedRoute>
         ),
@@ -44,7 +44,7 @@ export const router = createBrowserRouter([
       {
         path: "/eb-readings",
         element: (
-          <ProtectedRoute allow={["ADMIN", "USER", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
             <EBReadingsPage />
           </ProtectedRoute>
         ),
@@ -52,7 +52,7 @@ export const router = createBrowserRouter([
       {
         path: "/rent",
         element: (
-          <ProtectedRoute allow={["ADMIN", "USER", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
             <RentPage />
           </ProtectedRoute>
         ),
@@ -61,13 +61,21 @@ export const router = createBrowserRouter([
       {
         path: "/branch",
         element: (
-          <ProtectedRoute allow={["ADMIN", "USER", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN"]}>
             <BranchPage />
           </ProtectedRoute>
         ),
       },
 
-      // ADMIN only
+      {
+        path: "/user-register",
+        element: (
+          <ProtectedRoute allow={["ADMIN"]}>
+            <UserRegisterPage />
+          </ProtectedRoute>
+        ),
+      },
+
       {
         path: "/rooms",
         element: (
@@ -87,7 +95,7 @@ export const router = createBrowserRouter([
       {
         path: "/reports",
         element: (
-          <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN"]}>
             <ReportsPage />
           </ProtectedRoute>
         ),

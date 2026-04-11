@@ -3,7 +3,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import { getUserRole } from "@/lib/auth";
 
 interface ProtectedRouteProps {
-  allow: ("ADMIN" | "USER" | "VIEWER")[];
+  allow: ("ADMIN" |  "VIEWER")[];
   children?: React.ReactNode;
 }
 

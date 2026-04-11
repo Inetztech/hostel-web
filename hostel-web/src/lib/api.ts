@@ -40,7 +40,6 @@ api.interceptors.response.use(
           { refreshToken }
         );
 
-        // ✅ FIX HERE
         const newToken = response.data.data.token;
 
         setToken(newToken);

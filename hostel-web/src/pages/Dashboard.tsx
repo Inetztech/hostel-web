@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getDashboard } from "@/lib/store";
+import { getDashboard, getUserRole, getBranchId } from "@/lib/store";
+
 
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -13,20 +14,68 @@ import {
   GitBranch,
 } from "lucide-react";
 
-const Dashboard = () => {
+  const Dashboard = () => {
   const [data, setData] = useState<any>(null);
+  const role = getUserRole();
 
-  /* =========================
+  /* =====================
      LOAD DASHBOARD
   ========================= */
-  const loadDashboard = async () => {
-    try {
-      const res = await getDashboard();
-      setData(res);
-    } catch (err) {
-      console.error("Dashboard load failed", err);
+
+    const loadDashboard = async () => {
+      try {
+        const res = await getDashboard();
+        const role = getUserRole();
+        const branchId = getBranchId();
+
+        /* =========================
+          FILTER FOR VIEWER
+        ========================= */
+        if (role === "VIEWER" && branchId) {
+      const branchData = res.branches.find(
+        (b: any) => Number(b.branchId) === Number(branchId)
+      );
+
+      if (branchData) {
+
+        const occupied = branchData.occupiedBeds ?? branchData.activeTenants ?? 0;
+
+        const branchRents = (res.rents ?? []).filter(
+          (r: any) => Number(r.branchId) === Number(branchId)
+        );
+
+        const unpaidCount = branchRents.filter(
+          (r: any) => r.paymentStatus !== "PAID"
+        ).length;
+
+        setData({
+          ...res,
+          totalBranches: 1,
+          totalRooms: branchData.rooms,
+          totalBeds: branchData.beds,
+          occupiedBeds: occupied,
+          availableBeds: (branchData.beds ?? 0) - occupied,
+          activeTenants: branchData.activeTenants,
+          totalUnits: branchData.ebUnits ?? 0,
+          rentCollected: branchData.collected ?? 0,
+          pendingDues: branchData.pending ?? 0,
+          unpaidCount,
+          branches: [branchData],
+        });
+
+        return;
+      }
     }
-  };
+
+    /* =========================
+       ADMIN → show all
+    ========================= */
+    setData(res);
+
+  } catch (err) {
+    console.error("Dashboard load failed", err);
+  }
+};
 
   useEffect(() => {
     loadDashboard();
@@ -131,6 +180,8 @@ const Dashboard = () => {
 
       {/* ================= BRANCH STATS ================= */}
 
+      {role === "ADMIN" && (
+  <>
       {/* ROOMS BY BRANCH */}
       <div className="mt-10">
         <h2 className="text-lg font-semibold mb-4">
@@ -270,6 +321,8 @@ const Dashboard = () => {
           ))}
         </div>
       </div>
+      </>
+    )}
 
     </div>
   );

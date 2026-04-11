@@ -11,7 +11,7 @@ export const setToken = (token: string) =>
 
 export const getUserRole = (): Role | null => {
   const role = sessionStorage.getItem("role");
-  if (role === "ADMIN" || role === "USER" || role === "VIEWER") {
+  if (role === "ADMIN" || role === "VIEWER") {
     return role;
   }
   return null;

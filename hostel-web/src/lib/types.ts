@@ -6,17 +6,26 @@ export type PaymentStatus = "PENDING" | "PAID" | "PARTIAL";
 export type PaymentMode = "CASH" | "UPI";
 export type IdProofType = "AADHAR" | "PAN" | "VOTER_ID" | "DRIVING_LICENSE" | "PASSPORT";
 
+export interface User {
+  id: number;
+  email: string;
+  role: Role;
+  branch: Branch;
+}
+
 export interface LoginResponse {
   token: string;
   refreshToken: string;
   role: Role;
   message?: string;
+  branchId?: number;
 }
 
 export interface AuthResponse {
   token: string;
   refreshToken: string;
   role: string; 
+  branchId?: number;
 }
 
 export interface Branch {
@@ -97,6 +106,7 @@ export interface EBReading {
   ebRate?: number;      
   ebAmount?: number;      
   status?: EBStatus;     
+  isCheckout: boolean;
 }
 
 export interface TenantEBBill {

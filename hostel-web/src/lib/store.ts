@@ -12,6 +12,7 @@ import {
   BranchRequest,
   TenantRequest,
   LoginResponse,
+  User,
 } from "./types";
 
 /* =====================================================
@@ -106,7 +107,7 @@ export const updateBedStatus = async (bedId: number, isOccupied: boolean): Promi
 ===================================================== */
 export const fetchTenants = async (
   page = 0,
-  size = 10
+  size = 1000
 ): Promise<Tenant[]> => {
 
   const res = await api.get("/tenants", {
@@ -118,8 +119,16 @@ export const fetchTenants = async (
 
 export const getTenants = fetchTenants;
 
-export const getActiveTenants = async (): Promise<Tenant[]> =>
-  (await fetchTenants()).filter(t => t.status === "Active");
+
+export const getActiveTenants = async (
+  page = 0,
+  size = 1000
+): Promise<Tenant[]> => {
+
+  const tenants = await fetchTenants(page, size);
+
+  return tenants.filter(t => t.status === "Active");
+};
 
 export const getActiveTenantsByRoom = async (roomId: number): Promise<Tenant[]> =>
   (await getActiveTenants()).filter(t => Number(t.roomId) === Number(roomId));
@@ -293,12 +302,15 @@ export const createBranch = async (data: BranchRequest): Promise<Branch> => {
   return res.data.data ?? res.data;
 };
 
-export const getBranchById = async (id: number): Promise<Branch> => {
-  assertAccess();
-  const res = await api.get(`/units/${id}`);
-  return res.data.data ?? res.data;
-};
+export const getBranchId = (): number | null => {
 
+  const id = sessionStorage.getItem("branchId");
+
+  if (!id) return null;
+
+  return Number(id);
+
+};
 export const updateBranch = async (id: number, data: BranchRequest): Promise<Branch> => {
   assertAccess();
   const res = await api.put(`/units/${id}`, data);
@@ -326,4 +338,22 @@ export const sendEBBillWhatsApp = async (roomNumber: string): Promise<void> => {
 export const getDashboard = async () => {
   const res = await api.get("/dashboard");
   return res.data.data;
+};
+
+export const registerUser = async (data: {
+  email: string;
+  password: string;
+  role: Role;
+  branchId: number;
+}) => {
+  const res = await api.post("/register", data);
+  return res.data;
+};
+
+export const getUsers = async (): Promise<User[]> => {
+
+  const res = await api.get("/users");
+
+  return res.data.data ?? [];
+
 };

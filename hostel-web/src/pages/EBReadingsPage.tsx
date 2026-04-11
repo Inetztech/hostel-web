@@ -8,6 +8,7 @@ import {
   sendEBBillWhatsApp,
   getUserRole,
   getTenants,
+  getBranchId,
 } from "@/lib/store";
 
 import { Room, EBReading, EBStatus, Tenant } from "@/lib/types";
@@ -89,6 +90,8 @@ const EBReadingsPage = () => {
 
 
   const role = getUserRole()?.toUpperCase();
+  const branchId = getBranchId();
+  const isAdmin = role === "ADMIN";
   const hasAccess = true;
 
 
@@ -110,6 +113,9 @@ const getRateForRoom = (roomId: string | number) => {
   return 13;
 };
 
+
+
+
   /* LOAD DATA */
   const reload = async () => {
 
@@ -119,41 +125,39 @@ const getRateForRoom = (roomId: string | number) => {
     getTenants(0,1000),
   ]);
 
-  setRooms(roomData);
-  setReadings(readingData);
-  setTenants(tenantData);
+  let filteredRooms = roomData;
+  let filteredTenants = tenantData;
+  let filteredReadings = readingData;
+
+  if (!isAdmin) {
+
+    /* only branch rooms */
+    filteredRooms = roomData.filter(
+      r => r.unitId === branchId
+    );
+
+    const roomIds = filteredRooms.map(r => r.id);
+
+    /* tenants only from branch rooms */
+    filteredTenants = tenantData.filter(
+      t => roomIds.includes(t.roomId)
+    );
+
+    /* readings only from branch rooms */
+    filteredReadings = readingData.filter(
+      r => roomIds.includes(r.roomId)
+    );
+  }
+
+  setRooms(filteredRooms);
+  setReadings(filteredReadings);
+  setTenants(filteredTenants);
 };
 
   useEffect(() => {
     reload();
   }, []);
 
-
-  const calculateTenantShareProportional = (
-  previousReading: number,
-  currentReading: number,
-  tenants: Tenant[],
-  rate: number
-) => {
-  const totalRoomUnits = currentReading - previousReading;
-
-  if (totalRoomUnits <= 0) return tenants.map(t => ({ ...t, units: 0, amount: 0 }));
-
-  // Calculate each tenant's individual units (difference from their join reading)
-  const tenantUnitsRaw = tenants.map(t => {
-    const join = Number(t.joinReading || previousReading);
-    return currentReading - join > 0 ? currentReading - join : 0;
-  });
-
-  const totalRawUnits = tenantUnitsRaw.reduce((a, b) => a + b, 0);
-
-  // Proportional allocation
-  return tenants.map((t, i) => {
-    const units = +(tenantUnitsRaw[i] / totalRawUnits * totalRoomUnits).toFixed(2);
-    const amount = +(units * rate).toFixed(2);
-    return { ...t, units, amount };
-  });
-};
 
   /* ROOM MAP */
   const roomMap = useMemo(() => {
@@ -163,10 +167,11 @@ const getRateForRoom = (roomId: string | number) => {
   }, [rooms]);
 
   /* FILTER MONTH */
-  const filteredReadings = useMemo(
-    () => readings.filter((r) => r.month === selMonth && r.year === selYear),
-    [readings]
+const filteredReadings = useMemo(() => {
+  return readings.filter(
+    (r) => r.month === selMonth && r.year === selYear
   );
+}, [readings]);
 
   // calculate EB amount based on manual or automatic mode
     const calculateEBAmount = (units: number, roomId: string | number) => {
@@ -186,83 +191,81 @@ const calculateTenantShare = (totalAmount: number, tenants: any[]) => {
   /* TOTALS */
   const totalUnits = filteredReadings.reduce(
     (s, r) => s + (r.unitsConsumed ?? 0),
-    0
-  );
+    0);
 
-  const totalCost = filteredReadings.reduce(
-    (s, r) => s + (r.ebAmount ?? 0),
-    0
-  );
-
-      const getRoomStartingReading = useCallback(
-      (roomId: string | number) => {
-        /* last EB reading */
-        const lastReading = readings
-          .filter((r) => String(r.roomId) === String(roomId))
-          .sort((a, b) => {
-            if (b.year !== a.year) return b.year - a.year;
-            return b.month - a.month;
-          })[0];
-
-        if (lastReading) {
-          return lastReading.currentReading;
-        }
-
-        /* MIN join reading of tenants */
-        const roomTenants = tenants.filter(
-          (t) => String(t.roomId) === String(roomId)
-        );
-
-        if (roomTenants.length === 0) return 0;
-
-        return Math.min(
-          ...roomTenants.map((t) => Number(t.joinReading ?? 0))
-        );
-      },
-      [readings, tenants]
+    const totalCost = tenantRows.reduce(
+      (s, r) => s + (r.tenantAmount ?? 0),
+      0
     );
 
+    const getRoomStartingReading = useCallback(
+  (roomId: string | number) => {
+
+    const roomReadings = readings.filter(
+      r => String(r.roomId) === String(roomId)
+    );
+
+    if (roomReadings.length > 0) {
+
+      const latestMonthReading = roomReadings
+        .sort((a, b) => {
+          if (b.year !== a.year) return b.year - a.year;
+          return b.month - a.month;
+        });
+
+      const maxReading = Math.max(
+        ...latestMonthReading.map(r => Number(r.currentReading))
+      );
+
+      return maxReading;
+    }
+
+    const roomTenants = tenants.filter(
+      t => String(t.roomId) === String(roomId)
+    );
+
+    if (roomTenants.length === 0) return 0;
+
+    return Math.min(
+      ...roomTenants.map(t => Number(t.joinReading ?? 0))
+    );
+  },
+  [readings, tenants]
+);
+
       /* BUILD TENANT ROWS */
-      useEffect(() => {
-        const buildTenantRows = async () => {
-          if (filteredReadings.length === 0) {
-            setTenantRows([]);
-            return;
-          }
+    useEffect(() => {
+  const loadTenantBills = async () => {
+    const rows: any[] = [];
 
-          const roomNumbers = [
-            ...new Set(filteredReadings.map((r) => roomMap[r.roomId])),
-          ];
+    const processedRooms = new Set<string>();
 
-          const billResults = await Promise.all(
-            roomNumbers.map((rn) => getTenantWiseEBBill(rn))
-          );
+    for (const r of filteredReadings) {
+      const roomNumber = roomMap[String(r.roomId)];
+      if (!roomNumber || processedRooms.has(roomNumber)) continue;
 
-          const billMap: Record<string, any[]> = {};
-          roomNumbers.forEach((rn, i) => {
-            billMap[rn] = billResults[i] || [];
-          });
+      processedRooms.add(roomNumber);
 
-          const rows: any[] = [];
+      const bills = await getTenantWiseEBBill(roomNumber);
 
-          filteredReadings.forEach((r) => {
-            const roomNumber = roomMap[r.roomId];
-            const bills = billMap[roomNumber];
+      bills.forEach((b: any) => {
+        rows.push({
+          id: r.id,
+          roomId: r.roomId,
+          tenantName: b.tenantName,
+          previousReading: b.previousReading,
+          currentReading: b.currentReading,
+          unitsConsumed: b.unitsConsumed,
+          tenantAmount: b.amount,
+        });
+      });
+    }
 
-            bills?.forEach((b: any) => {
-              rows.push({
-                ...r,
-                tenantName: b.tenantName || b.name,
-                tenantAmount: Number(b.amount ?? b.tenantAmount ?? 0),
-              });
-            });
-          });
+    setTenantRows(rows);
+  };
 
-          setTenantRows(rows);
-        };
-
-        buildTenantRows();
-      }, [filteredReadings, roomMap]);
+  loadTenantBills();
+}, [filteredReadings, roomMap]);
 
 
       /* STATUS COLOR */
@@ -322,6 +325,7 @@ const calculateTenantShare = (totalAmount: number, tenants: any[]) => {
     currentReading: Number(formCurrReading),
     ebAmount,
     ebRate: getRateForRoom(selectedRoomId),
+    isCheckout: true,
   });
 
   toast.success("Reading added");
@@ -409,6 +413,7 @@ const handleBulkSave = async () => {
         acUnits: Number(row.acUnits || 0),
         ebAmount,
         ebRate: getRateForRoom(row.roomId),
+        isCheckout: true,
       });
     }
 
@@ -426,24 +431,6 @@ const handleBulkSave = async () => {
     toast.success("Deleted");
     reload();
   };
-
-  const handleViewBill = async (roomId: string) => {
-  const roomNumber = roomMap[roomId];
-  if (!roomNumber) return toast.error("Room not found");
-
-  const reading = filteredReadings.find(
-    (r) => String(r.roomId) === String(roomId)
-  );
-
-  if (!reading) return toast.error("Reading not found");
-
-  // fetch already calculated tenant bills
-  const bills = await getTenantWiseEBBill(roomNumber);
-
-  setTenantBills(bills);
-  setBillRoom(roomNumber);
-  setBillOpen(true);
-};
 
   /* AGGRID */
   const columns: ColDef[] = useMemo(
@@ -463,29 +450,6 @@ const handleBulkSave = async () => {
   field: "tenantAmount",
   flex: 1,
   valueGetter: (p) => {
-    // Use saved tenantAmount if present
-    if (p.data.tenantAmount !== undefined && p.data.tenantAmount !== null) {
-      return Number(p.data.tenantAmount);
-    }
-
-    // Otherwise, calculate for manual rooms
-    const rateForRoom = roomManualRates[String(p.data.roomId)];
-    if (rateForRoom !== undefined) {
-      const roomTenants = tenants.filter(
-        (t) => String(t.roomId) === String(p.data.roomId)
-      );
-
-      const result = calculateTenantShareProportional(
-        Number(p.data.previousReading),
-        Number(p.data.currentReading),
-        roomTenants,
-        rateForRoom
-      );
-
-      const tenant = result.find((r) => r.name === p.data.tenantName);
-      return tenant?.amount || 0;
-    }
-
     return Number(p.data.tenantAmount ?? 0);
   },
   valueFormatter: (p) => `₹${Number(p.value).toFixed(2)}`,
@@ -495,14 +459,6 @@ const handleBulkSave = async () => {
       flex: 1,
       cellRenderer: (p: any) => (
         <div className="flex gap-2">
-          {/* VIEW BILL */}
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => handleViewBill(p.data.roomId)}
-          >
-            <Eye className="h-4 w-4" />
-          </Button>
 
           {/* WHATSAPP */}
           <Button
@@ -852,4 +808,4 @@ const handleBulkSave = async () => {
   );
 };
 
-export default EBReadingsPage;    
+export default EBReadingsPage;

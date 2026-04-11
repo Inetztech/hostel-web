@@ -12,6 +12,7 @@ import {
   recordPayment,
   deleteRent,
   getUserRole,
+  getBranchId,
 } from "@/lib/store";
 
 import {
@@ -48,6 +49,7 @@ import { CreditCard, Trash2 } from "lucide-react";
 const RentPage = () => {
   
 const role = getUserRole()?.toUpperCase();
+const branchId = getBranchId();
 const hasAccess = true;
 
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -84,6 +86,24 @@ const hasAccess = true;
       : "border-red-500 text-red-600";
   };
 
+  const scopedRents = useMemo(() => {
+  return rents.filter((r) => {
+    const matchMonthYear =
+      Number(r.rentMonth) === month &&
+      Number(r.rentYear) === year;
+
+    if (!matchMonthYear) return false;
+
+    if (role === "ADMIN") return true;
+
+    const room = rooms.find(
+      (rm) => String(rm.id) === String(r.roomId)
+    );
+
+    return room && String(room.unitId) === String(branchId);
+  });
+}, [rents, rooms, month, year, role, branchId]);
+
   /* ================= LOAD DATA ================= */
 
  const reload = async () => {
@@ -91,15 +111,24 @@ const hasAccess = true;
   loadingRef.current = true;
 
   try {
+
     const [roomData, rentData] = await Promise.all([
       getRooms(0,1000),
       getRents(0,1000),
     ]);
 
-    setRooms(roomData);
+    const filteredRooms =
+      role === "ADMIN"
+        ? roomData
+        : roomData.filter(
+            (room) =>
+              String(room.unitId) === String(branchId)
+          );
+
+    setRooms(filteredRooms);
     setRents(rentData);
 
-    await loadAllRoomsEB(roomData);
+    await loadAllRoomsEB(filteredRooms);
 
   } catch (err) {
     toast.error("Failed to load data");
@@ -187,7 +216,7 @@ const hasAccess = true;
       rentRecord,
     };
   });
-}, [filteredBills, rents, rooms, month, year]);
+}, [filteredBills, scopedRents, rooms, month, year]);
 
 
 
@@ -421,19 +450,13 @@ const columnDefs = useMemo<ColDef[]>(() => [
   let totalCollected = 0;
   let totalPending = 0;
 
-  rents
-    .filter(
-      (r) =>
-        Number(r.rentMonth) === month &&
-        Number(r.rentYear) === year
-    )
-    .forEach((r) => {
-      const total = Number(r.totalAmount) || 0;
-      const status = normalizeStatus(r.paymentStatus);
+scopedRents.forEach((r) => {
+  const total = Number(r.totalAmount) || 0;
+  const status = normalizeStatus(r.paymentStatus);
 
-      if (status === "PAID") totalCollected += total;
-      else totalPending += total;
-    });
+  if (status === "PAID") totalCollected += total;
+  else totalPending += total;
+});
 
   const totalAmount = totalCollected + totalPending;
 
@@ -528,8 +551,8 @@ const columnDefs = useMemo<ColDef[]>(() => [
 
       {/* TABLE */}
       <Card>
-      <CardContent className="pt-4">
-        <div className="ag-theme-alpine" style={{ height: 513, width: "100%" }}>
+      <CardContent className="pt-3">
+        <div className="ag-theme-alpine" style={{ height: 513 }}>
         <AgGridReact
           rowData={rowData}
           columnDefs={columnDefs}

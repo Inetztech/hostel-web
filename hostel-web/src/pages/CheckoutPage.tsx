@@ -5,10 +5,12 @@ import {
   getCheckoutSummary,
   checkoutTenant,
   addEBReading,
+  getTenants,
   getUserRole,
   getTenantWiseEBBill,
   getEBReadings,
-  updateBedStatus
+  updateBedStatus,
+   getBranchId
 } from "@/lib/store";
 import { Room, Tenant, Rent, DEFAULT_EB_RATE } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,17 +55,38 @@ const CheckoutPage = () => {
 } | null>(null);
 
   const role = getUserRole();
+  const branchId = getBranchId();
   
   // -------------------- Load Rooms & Tenants --------------------
 const reload = async () => {
   try {
+
     const [fetchedRooms, fetchedTenants] = await Promise.all([
       getRooms(0, 1000),
-      getActiveTenants()
+      getActiveTenants(0, 1000)
     ]);
 
-    setRooms(fetchedRooms);
-    setTenants(fetchedTenants ?? []);
+    const filteredRooms =
+      role === "ADMIN"
+        ? fetchedRooms
+        : fetchedRooms.filter(
+            (room) =>
+              String(room.unitId) === String(branchId)
+          );
+
+    const filteredTenants =
+      role === "ADMIN"
+        ? fetchedTenants
+        : fetchedTenants.filter((tenant) =>
+            filteredRooms.some(
+              (room) =>
+                String(room.id) === String(tenant.roomId)
+            )
+          );
+
+    setRooms(filteredRooms);
+    setTenants(filteredTenants ?? []);
+
   } catch (err) {
     console.error("Reload error:", err);
     toast.error("Failed to load rooms or tenants");
@@ -102,6 +125,8 @@ const roomReadings = readings
 if (roomReadings.length > 0) {
   const lastReading = roomReadings[0];
   setFinalPrev(String(lastReading.currentReading));
+} else {
+  setFinalPrev(String(selected.joinReading ?? 0));
 }
 
     /* ---------------- RENT SUMMARY ---------------- */
@@ -377,6 +402,8 @@ const filteredTenants = tenants.filter(
         previousReading: Number(finalPrev),
         currentReading: Number(finalCurr),
         ebRate: DEFAULT_EB_RATE,
+        isCheckout: false,
+
       });
     }
 

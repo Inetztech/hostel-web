@@ -10,12 +10,6 @@ import {
   loginUser,
 } from "@/lib/store";
 
-interface LoginResponse {
-  token: string;
-  refreshToken: string;
-  role: "ADMIN" | "USER" | "VIEWER";
-  message?: string;
-}
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -41,7 +35,9 @@ export default function Login() {
       sessionStorage.setItem("token", data.token);
       sessionStorage.setItem("refreshToken", data.refreshToken);
       sessionStorage.setItem("role", data.role);
-
+      if (data.branchId) {
+      sessionStorage.setItem("branchId", String(data.branchId));
+    }
 
       // Redirect to dashboard
       navigate("/dashboard", { replace: true });

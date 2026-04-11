@@ -37,6 +37,41 @@ const ReportsPage = () => {
   const [selMonth, setSelMonth] = useState(new Date().getMonth() + 1);
   const [selYear, setSelYear] = useState(new Date().getFullYear());
 
+  const downloadRentCSV = () => {
+  const rows = filteredRent.map(r => {
+    const tenant = allTenants.find(
+      t => Number(t.id) === Number(r.tenantId)
+    );
+
+    const roomNumber =
+      rooms.find(
+        rm => Number(rm.id) === Number(tenant?.roomId)
+      )?.roomNumber ?? "N/A";
+
+    return {
+      Tenant: tenant?.name || "N/A",
+      RoomNumber: roomNumber,
+      Total: r.totalAmount,
+      Status: r.paymentStatus,
+      Month: MONTHS[selMonth - 1],
+      Year: selYear,
+    };
+  });
+
+  const header = Object.keys(rows[0]).join(",");
+  const csv = [
+    header,
+    ...rows.map(row => Object.values(row).join(","))
+  ].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `rent-report-${selMonth}-${selYear}.csv`;
+  link.click();
+};
+
   // Loading data properly with async/await
   useEffect(() => {
   const fetchData = async () => {
@@ -252,14 +287,22 @@ const ReportsPage = () => {
 
       <TabsContent value="rent">
         <Card>
-          <CardHeader>
-            <CardTitle>Rent Report</CardTitle>
-          </CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Rent Report</CardTitle>
+
+          <button
+            onClick={downloadRentCSV}
+            className="px-3 py-1 text-sm rounded-lg border"
+          >
+            Download CSV
+          </button>
+        </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Tenant</TableHead>
+                  <TableHead>RoomNumber</TableHead>
                   <TableHead>Total</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
@@ -270,6 +313,7 @@ const ReportsPage = () => {
                   return (
                     <TableRow key={i}>
                       <TableCell>{tenant?.name || "N/A"}</TableCell>
+                      <TableCell>{rooms.find(r => Number(r.id) === Number(tenant?.roomId))?.roomNumber ?? "N/A"}</TableCell>
                       <TableCell>₹{r.totalAmount}</TableCell>
                       <TableCell>
                         <Badge

@@ -12,6 +12,7 @@ import {
   getBranches,
   importTenantsExcel,
   getUserRole,
+  getBranchId,
 } from "@/lib/store";
  
 import { Room, Bed, Tenant, IdProofType, Branch  } from "@/lib/types";
@@ -44,6 +45,8 @@ import { UserPlus, Eye, Search, Pencil , Trash2} from "lucide-react";
 
 const TenantsPage = () => {
 const role = getUserRole()?.toUpperCase();
+const branchId = getBranchId();
+const isAdmin = role === "ADMIN";
 const hasAccess = true;
 
   /* ================= STATE ================= */
@@ -83,17 +86,36 @@ const hasAccess = true;
   /* ================= LOAD DATA ================= */
 
   const load = async () => {
+
   const [r, b, t, br] = await Promise.all([
     getRooms(0, 1000),
     getBeds(0, 1000),
-    getTenants(0, 1000),  
+    getTenants(0, 1000),
     getBranches(0, 1000),
   ]);
 
+  /* ================= FILTER BASED ON LOGIN ================= */
 
-  setRooms(r);
-  setBeds(b);
-  setTenants(t || []);
+  let filteredRooms = r;
+  let filteredBeds = b;
+  let filteredTenants = t;
+
+  if (!isAdmin) {
+
+    filteredRooms = r.filter(room => room.unitId === branchId);
+
+    const roomIds = filteredRooms.map(room => room.id);
+
+    filteredBeds = b.filter(bed => roomIds.includes(bed.roomId));
+
+    filteredTenants = t.filter(tenant =>
+      roomIds.includes(tenant.roomId)
+    );
+  }
+
+  setRooms(filteredRooms);
+  setBeds(filteredBeds);
+  setTenants(filteredTenants || []);
   setBranches(br);
 };
 
@@ -129,13 +151,6 @@ useEffect(() => {
       //   t.phone.includes(search)
     );
   }, [search, tenants]);
-
-  /* ================= AVAILABLE ROOMS ================= */
-
-  // const roomsWithBeds = useMemo(
-  //   () => rooms.filter((r) => beds.some((b) => b.roomId === r.id && !b.occupied)),
-  //   [rooms, beds]
-  // );
 
   const availableBeds = useMemo(() => {
   return beds.filter(
@@ -437,6 +452,7 @@ const handleExcelImport = async () => {
   {
     headerName: "Action",
     flex: 1,
+    minWidth:200,
     cellRenderer: (params: any) => (
       <div className="flex justify-center gap-2">
         {/* View */}
