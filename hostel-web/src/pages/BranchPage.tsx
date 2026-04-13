@@ -264,8 +264,6 @@ const BranchPage = () => {
       </Dialog>
 
       {/* GRID */}
-      <Card>
-      <CardContent>
         <div className="ag-theme-alpine" style={{ height: 513 }}>
           <AgGridReact
             rowData={rowData}
@@ -276,8 +274,6 @@ const BranchPage = () => {
             paginationPageSizeSelector={[10, 20, 50, 100]}
           />
         </div>
-      </CardContent>
-    </Card>
     </div>
   );
 };

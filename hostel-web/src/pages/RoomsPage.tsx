@@ -807,15 +807,7 @@ const RoomsPage = () => {
 
           <TabsContent value="all">
 
-            <Card>
-
-              <CardContent>
-
                 <Grid data={rowData} />
-
-              </CardContent>
-
-            </Card>
 
           </TabsContent>
 
@@ -827,11 +819,6 @@ const RoomsPage = () => {
             key={b.id}
             value={String(b.id)}
           >
-
-            <Card>
-
-              <CardContent>
-
                 <Grid
                   data={
                     rowData.filter(
@@ -842,9 +829,6 @@ const RoomsPage = () => {
                   }
                 />
 
-              </CardContent>
-
-            </Card>
 
           </TabsContent>
 

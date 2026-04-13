@@ -550,8 +550,6 @@ scopedRents.forEach((r) => {
       />
 
       {/* TABLE */}
-      <Card>
-      <CardContent className="pt-3">
         <div className="ag-theme-alpine" style={{ height: 513 }}>
         <AgGridReact
           rowData={rowData}
@@ -563,8 +561,6 @@ scopedRents.forEach((r) => {
           animateRows={true}
         />
       </div>
-      </CardContent>
-    </Card>
     </div>
   );
 };

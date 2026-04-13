@@ -790,11 +790,9 @@ const handleBulkSave = async () => {
         <span>{totalUnits} units</span>
         <span className="font-bold">₹{totalCost}</span>
       </div>
-
-      <Card>
-        <CardContent className="pt-4 px-0">
+      
           <div className="ag-theme-alpine" style={{ height: 513 }}>
-        <AgGridReact
+          <AgGridReact
           rowData={tenantRows}
           columnDefs={columns}
           pagination={true}
@@ -802,8 +800,7 @@ const handleBulkSave = async () => {
           paginationPageSizeSelector={[10,20,50,100]}
         />
       </div>
-        </CardContent>
-      </Card>
+        
     </div>
   );
 };

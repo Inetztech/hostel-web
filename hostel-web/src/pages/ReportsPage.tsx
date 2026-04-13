@@ -160,7 +160,12 @@ const ReportsPage = () => {
   const totalRentPending = filteredRent.filter(r => r.paymentStatus?.toUpperCase() !== "PAID").reduce((s, r) => s + r.totalAmount, 0);
   const checkedOut = allTenants.filter(t => t.status === "Checked_Out");
 
-  const years = [2024, 2025, 2026, 2027, 2028];
+  const currentYear = new Date().getFullYear();
+ 
+  const years = Array.from(
+    { length: 10 },
+    (_, i) => currentYear - 5 + i
+  );
 
   return (
     <div>
