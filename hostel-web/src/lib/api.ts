@@ -1,59 +1,136 @@
+// import axios from "axios";
+// import {
+//   getToken,
+//   getRefreshToken,
+//   setToken,
+//   logout,
+// } from "./auth";
+
+// const api = axios.create({
+//   baseURL: "http://localhost:8080/api",
+//   headers: {
+//     Accept: "application/json",
+//   },
+// });
+
+// // ---------- REQUEST ----------
+// api.interceptors.request.use((config) => {
+
+//   const token = getToken();
+
+//   if (token) {
+//     config.headers.Authorization = `Bearer ${token}`;
+//   }
+
+//   // IMPORTANT FIX
+//   // For FormData → let browser automatically generate multipart boundary
+//   if (config.data instanceof FormData) {
+
+//     delete config.headers["Content-Type"];
+
+//   } else {
+
+//     // Normal JSON requests
+//     config.headers["Content-Type"] = "application/json";
+//   }
+
+//   return config;
+// });
+
+// // ---------- RESPONSE ----------
+// api.interceptors.response.use(
+//   (res) => res,
+
+//   async (err) => {
+
+//     const originalRequest = err.config;
+
+//     if (
+//       err.response?.status === 401 &&
+//       !originalRequest._retry
+//     ) {
+
+//       originalRequest._retry = true;
+
+//       try {
+
+//         const refreshToken = getRefreshToken();
+
+//         const response = await axios.post(
+//           "http://localhost:8080/api/auth/refresh",
+//           { refreshToken }
+//         );
+
+//         const newToken = response.data.data.token;
+
+//         setToken(newToken);
+
+//         originalRequest.headers.Authorization =
+//           `Bearer ${newToken}`;
+
+//         return api(originalRequest);
+
+//       } catch (e) {
+
+//         logout();
+//       }
+//     }
+
+//     return Promise.reject(err);
+//   }
+// );
+
+// export default api;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import axios from "axios";
-import {
-  getToken,
-  getRefreshToken,
-  setToken,
-  logout,
-} from "./auth";
+import { getToken, getRefreshToken, setToken, logout } from "./auth";
 
 const api = axios.create({
   baseURL: "http://localhost:8080/api",
-  headers: { "Content-Type": "application/json" },
+  headers: { Accept: "application/json" },
 });
 
-
-// ---------- REQUEST ----------
-api.interceptors.request.use(config => {
+api.interceptors.request.use((config) => {
   const token = getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (config.data instanceof FormData) delete config.headers["Content-Type"];
+  else config.headers["Content-Type"] = "application/json";
   return config;
 });
 
-
-// ---------- RESPONSE ----------
 api.interceptors.response.use(
-  res => res,
-  async err => {
-    const originalRequest = err.config;
-
-    if (err.response?.status === 401 && !originalRequest._retry) {
-
-      originalRequest._retry = true;
-
+  (res) => res,
+  async (err) => {
+    const orig = err.config;
+    if (err.response?.status === 401 && !orig._retry) {
+      orig._retry = true;
       try {
-        const refreshToken = getRefreshToken();
-
-        const response = await axios.post(
-          "http://localhost:8080/api/auth/refresh",
-          { refreshToken }
-        );
-
-        const newToken = response.data.data.token;
-
-        setToken(newToken);
-
-        originalRequest.headers.Authorization =
-          `Bearer ${newToken}`;
-
-        return api(originalRequest);
-
-      } catch (e) {
+        const { data } = await axios.post("http://localhost:8080/api/auth/refresh", {
+          refreshToken: getRefreshToken(),
+        });
+        const token = data.data.token;
+        setToken(token);
+        orig.headers.Authorization = `Bearer ${token}`;
+        return api(orig);
+      } catch {
         logout();
       }
     }
-
     return Promise.reject(err);
   }
 );

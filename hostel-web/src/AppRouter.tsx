@@ -18,6 +18,10 @@ import NotFound from "@/pages/NotFound";
 import Unauthorized from "@/pages/Unauthorized";
 import BranchPage from "@/pages/BranchPage";
 import UserRegisterPage from "@/pages/UserRegisterPage";
+import ComplaintsPage from "@/pages/ComplaintPage";
+import FlatPage from "@/pages/FlatPage";
+import FoodTimetablePage from "@/pages/FoodTimetablePage";
+import AnnouncementPage from "@/pages/AnnouncementPage";
 
 export const router = createBrowserRouter([
   // Public routes
@@ -26,7 +30,7 @@ export const router = createBrowserRouter([
   
   {
     element: (
-      <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
+      <ProtectedRoute allow={["ADMIN", "WARDEN", "TENANT"]}>
         <AppLayout />
       </ProtectedRoute>
     ),
@@ -36,7 +40,7 @@ export const router = createBrowserRouter([
       {
         path: "/tenants",
         element: (
-          <ProtectedRoute allow={["ADMIN","VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN","WARDEN"]}>
             <TenantsPage />
           </ProtectedRoute>
         ),
@@ -44,7 +48,7 @@ export const router = createBrowserRouter([
       {
         path: "/eb-readings",
         element: (
-          <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
             <EBReadingsPage />
           </ProtectedRoute>
         ),
@@ -52,7 +56,7 @@ export const router = createBrowserRouter([
       {
         path: "/rent",
         element: (
-          <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
             <RentPage />
           </ProtectedRoute>
         ),
@@ -79,15 +83,52 @@ export const router = createBrowserRouter([
       {
         path: "/rooms",
         element: (
-          <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
             <RoomsPage />
+          </ProtectedRoute>
+        ),
+      },
+
+      {
+        path: "/flat",
+        element: (
+          <ProtectedRoute allow={["ADMIN" , "WARDEN"]}>
+            <FlatPage />
+          </ProtectedRoute>
+        ),
+      },
+
+      {
+        path: "/announcements",
+        element: (
+          <ProtectedRoute allow={["ADMIN" , "WARDEN"]}>
+            <AnnouncementPage />
+          </ProtectedRoute>
+        ),
+      },
+
+      {
+        path: "/food-timetable",
+        element: (
+          <ProtectedRoute allow={["ADMIN", "TENANT", "WARDEN"]}>
+            <FoodTimetablePage />
+          </ProtectedRoute>
+        ),
+      },
+
+
+      {
+        path: "/complaints",
+        element: (
+          <ProtectedRoute allow={["ADMIN", "TENANT", "WARDEN"]}>
+            <ComplaintsPage />
           </ProtectedRoute>
         ),
       },
       {
         path: "/checkout",
         element: (
-          <ProtectedRoute allow={["ADMIN", "VIEWER"]}>
+          <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
             <CheckoutPage />
           </ProtectedRoute>
         ),

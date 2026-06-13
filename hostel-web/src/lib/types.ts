@@ -1,10 +1,11 @@
-export type Role = "ADMIN" | "VIEWER";
-export type HostelType = "Boys" | "Girls";
+export type Role = "ADMIN" | "WARDEN" | "TENANT";
+export type HostelType = "AC" | "NON_AC";
 export type TenantStatus = "Active" | "Checked_Out";
 export type EBStatus = "Pending" | "Billed" | "Paid";
 export type PaymentStatus = "PENDING" | "PAID" | "PARTIAL";
 export type PaymentMode = "CASH" | "UPI";
 export type IdProofType = "AADHAR" | "PAN" | "VOTER_ID" | "DRIVING_LICENSE" | "PASSPORT";
+export type ComplaintStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED";
 
 export interface User {
   id: number;
@@ -13,6 +14,66 @@ export interface User {
   branch: Branch;
 }
 
+export interface FoodTimetable {
+  id: number;
+
+  dayName: string;
+
+  breakfast: string;
+
+  lunch: string;
+
+  dinner: string;
+}
+
+export interface FoodTimetableRequest {
+  dayName: string;
+
+  breakfast: string;
+
+  lunch: string;
+
+  dinner: string;
+}
+
+export interface Announcement {
+  id: number;
+
+  title: string;
+
+  content: string;
+
+  createdBy: string;
+
+  createdAt: string;
+}
+
+export interface AnnouncementRequest {
+  title: string;
+
+  content: string;
+
+  createdBy: string;
+}
+
+export interface WhatsAppShare {
+  tenantName: string;
+
+  phone: string;
+
+  whatsappUrl: string;
+}
+
+export interface Complaint {
+  id: number;
+  subject: string;
+  description: string;
+  status: ComplaintStatus;
+  createdAt: string;
+  tenantId: number;
+  tenantName?: string;
+  roomNumber?: string;
+}
 export interface LoginResponse {
   token: string;
   refreshToken: string;
@@ -31,20 +92,32 @@ export interface AuthResponse {
 export interface Branch {
   id: number;
   unitName: string;
+  location: string;
 }
 
 export interface BranchRequest {
   unitName: string;
+  location: string;
 }
 
 export interface Room {
-  id: number;     
-  roomNumber: string;
-  hostelType: HostelType;
-  totalBeds: number;
-  rentPerBed: number;
-  unitId: number;   
-  unitName?: string;
+id: number;
+roomNumber: string;
+hostelType: HostelType;
+totalBeds: number;
+rentPerBed: number;
+
+unitId: number;
+unitName?: string;
+
+
+flatId?: number | null;
+flatName?: string | null;
+
+beds?: Bed[];
+
+occupiedBeds?: number;
+availableBeds?: number;
 }
 
 export interface Bed {
@@ -54,27 +127,46 @@ export interface Bed {
   roomId: number;
 }
 
+
+export interface Flat {
+  id: number;
+  flatNumber: string;
+  branchId: number;
+  branchName?: string;
+}
+
+export interface FlatRequest {
+  flatNumber: string;
+  branchId: number;
+}
+
 export interface Tenant {
   id: number;
+
   name: string;
   phone: string;
   email: string;
+
   idProofType: IdProofType;
   idProofNumber: string;
 
+  idProofDocument?: string | null
+  
   roomId: number;
   bedId: number;
 
   advance: number;
   monthlyRent: number;
 
-  acUser: boolean;
-
   joinReading: number;
   checkoutReading: number | null;
 
+  acJoinReading: number | null;
+  acCheckoutReading: number | null;
+
   checkInDate: string;
   checkOutDate: string | null;
+
   status: TenantStatus;
 }
 
@@ -84,11 +176,12 @@ export interface TenantRequest {
   email?: string;
   idProofType: IdProofType;
   idProofNumber: string;
+  idProofDocument?: File | null;
   roomId: number;
   bedId: number;
 
   joinReading: number;
-  acUser: boolean;
+  acJoinReading: number | null;
   advance: number;
   monthlyRent: number;
   checkInDate: string;
@@ -96,24 +189,33 @@ export interface TenantRequest {
 
 export interface EBReading {
   id?: number;
-  roomId: number;
+  flatId?: number;
+  roomId?: number; 
   month: number;
   year: number;
   previousReading: number;
   currentReading: number;
-  acUnits?: number;
-  unitsConsumed?: number; 
-  ebRate?: number;      
-  ebAmount?: number;      
-  status?: EBStatus;     
-  isCheckout: boolean;
+  acPreviousReading?: number;
+  acCurrentReading?: number;
+  unitsConsumed?: number;  
+  acUnits?: number;         
+  ebRate?: number;
+  ebAmount?: number;
+  isCheckout?: boolean; 
+  status?: EBStatus;
 }
 
 export interface TenantEBBill {
   tenantId: number;
   tenantName: string;
+  roomId: number;
+  roomNumber: string;
+  flatId?: number;
+  flatNumber?: string;
   previousReading: number;
   currentReading: number;
+  acPreviousReading: number;
+  acCurrentReading: number;
   unitsConsumed: number;
   amount: number;
 }
@@ -121,11 +223,14 @@ export interface TenantEBBill {
 export interface Rent {
   id: number;
   tenantId: number;
+  tenantName?: string;
   roomId: number;
   rentMonth: number;
   rentYear: number;
   rentAmount: number;
   ebAmount: number;
+  paidAmount?: number;
+  pendingAmount?: number;
   totalAmount: number;
   paymentStatus: PaymentStatus;
   paymentMode: PaymentMode | null;
