@@ -11,8 +11,8 @@ export const setToken = (token: string) =>
 
 export const getUserRole = (): Role | null => {
   const role = sessionStorage.getItem("role");
-  if (role === "ADMIN" || role === "WARDEN" || role === "TENANT") {
-    return role;
+  if (role === "SUPER_ADMIN" || role === "ADMIN" || role === "WARDEN" || role === "TENANT") {
+    return role as Role;
   }
   return null;
 };
@@ -21,5 +21,6 @@ export const logout = () => {
   sessionStorage.removeItem("token");
   sessionStorage.removeItem("refreshToken");
   sessionStorage.removeItem("role");
+  sessionStorage.removeItem("branchId");
   window.location.href = "/";
 };

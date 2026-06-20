@@ -11,16 +11,24 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const role = getUserRole();
-    if (role) navigate("/dashboard", { replace: true });
-  }, [navigate]);
+      useEffect(() => {
+      const role = getUserRole();  // from auth.ts
+      if (!role) return;
+
+      // ✅ Same role-based redirect for already-logged-in users
+      if (role === "SUPER_ADMIN") {
+        navigate("/super-admin", { replace: true });
+      } else {
+        navigate("/dashboard", { replace: true });
+      }
+    }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
+      // Login.tsx — replace the navigate call inside handleLogin
       const data = await loginUser(email, password);
       sessionStorage.setItem("token", data.token);
       sessionStorage.setItem("refreshToken", data.refreshToken);
@@ -28,7 +36,13 @@ export default function Login() {
       if (data.branchId) {
         sessionStorage.setItem("branchId", String(data.branchId));
       }
-      navigate("/dashboard", { replace: true });
+
+      // ✅ Route each role to its correct landing page
+      if (data.role === "SUPER_ADMIN") {
+        navigate("/super-admin", { replace: true });
+      } else {
+        navigate("/dashboard", { replace: true });  // ADMIN, WARDEN, TENANT
+      }
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
         setError(err.response?.data?.message || "Login failed. Please try again.");

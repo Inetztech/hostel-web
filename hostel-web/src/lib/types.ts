@@ -1,4 +1,4 @@
-export type Role = "ADMIN" | "WARDEN" | "TENANT";
+export type Role = "SUPER_ADMIN" | "ADMIN" | "WARDEN" | "TENANT";
 export type HostelType = "AC" | "NON_AC";
 export type TenantStatus = "Active" | "Checked_Out";
 export type EBStatus = "Pending" | "Billed" | "Paid";
@@ -12,6 +12,24 @@ export interface User {
   email: string;
   role: Role;
   branch: Branch;
+}
+
+export interface Admin {
+  id: number;
+  email: string;
+  active: boolean;
+  role: Role;
+}
+
+export interface AdminRequest {
+  email: string;
+  password: string;
+}
+
+export interface AdminPageResponse {
+  content: Admin[];
+  totalElements: number;
+  totalPages: number;
 }
 
 export interface FoodTimetable {

@@ -360,14 +360,10 @@ const UserRegisterPage = () => {
                 value={form.password}
                 onChange={handleChange}
               />
-              <select
-                name="role"
-                value={form.role}
-                onChange={handleChange}
-                className="border p-2 rounded w-full"
-              >
+              
+              <select name="role" value={form.role} onChange={handleChange} className="border p-2 rounded w-full">
                 <option value="">Select Role</option>
-                <option value="ADMIN">ADMIN</option>
+                {/* Remove ADMIN option — only SUPER_ADMIN can create ADMINs */}
                 <option value="WARDEN">WARDEN</option>
                 <option value="TENANT">TENANT</option>
               </select>
