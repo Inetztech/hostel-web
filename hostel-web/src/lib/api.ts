@@ -2,7 +2,7 @@ import axios from "axios";
 import { getToken, getRefreshToken, setToken, logout } from "./auth";
 
 const api = axios.create({
-  baseURL: "http://localhost:8080/api",
+  baseURL: "https://api.brindhavanamhostels.com/api",
   headers: { Accept: "application/json" },
 });
 
@@ -21,7 +21,7 @@ api.interceptors.response.use(
     if (err.response?.status === 401 && !orig._retry) {
       orig._retry = true;
       try {
-        const { data } = await axios.post("http://localhost:8080/api/auth/refresh", {
+        const { data } = await axios.post("https://api.brindhavanamhostels.com/api/auth/refresh", {
           refreshToken: getRefreshToken(),
         });
         const token = data.data.token;
