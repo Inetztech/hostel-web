@@ -570,7 +570,7 @@ export default function Login() {
           <div className="pg-brand">
             <div className="pg-brand-tag">PG Hostel Management</div>
             <h1>
-              Bridha<em>vanam</em>
+              Brindha<em>vanam</em>
             </h1>
             <p>
               A home away from home — managing comfort, community, and care for every resident.
@@ -677,7 +677,7 @@ export default function Login() {
             </div>
 
             <div className="form-footer">
-              <strong>Bridhavanam PG Hostel</strong> &nbsp;·&nbsp; &copy; {new Date().getFullYear()}
+              <strong>Brindhavanam PG Hostel</strong> &nbsp;·&nbsp; &copy; {new Date().getFullYear()}
             </div>
           </div>
         </div>
