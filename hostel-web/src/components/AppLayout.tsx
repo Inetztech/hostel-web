@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 /* ================= NAV ITEMS ================= */
 const navItems = [
   // Add this as the FIRST item:
-{ to: "/super-admin", label: "Admin Mgmt", icon: ShieldCheck, color: "text-violet-400", allow: ["SUPER_ADMIN"] },
+{ to: "/super-admin", label: "Admin Management", icon: ShieldCheck, color: "text-violet-400", allow: ["SUPER_ADMIN"] },
   { to: "/dashboard",      label: "Dashboard",      icon: LayoutDashboard,      color: "text-blue-400",   allow: ["ADMIN", "WARDEN", "TENANT"] },
   { to: "/branch",         label: "Branch",         icon: GitBranch,            color: "text-indigo-400", allow: ["ADMIN"] },
   { to: "/user-register",  label: "User-Register",  icon: Users,                color: "text-purple-400", allow: ["ADMIN"] },
