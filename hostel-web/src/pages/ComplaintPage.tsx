@@ -30,31 +30,49 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
 import { Branch, Room } from "@/lib/types";
 
-import { Plus } from "lucide-react";
+import {
+  Plus,
+  AlertCircle,
+  Search,
+  RefreshCw,
+  PenSquare,
+  Droplets,
+  Zap,
+  Home,
+  Grid,
+  Wifi,
+} from "lucide-react";
 
 import { Complaint, ComplaintStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
-import { AgGridReact } from "ag-grid-react";
-import type { ColDef } from "ag-grid-community";
-
 /* ================= HELPERS ================= */
 
-const getStatusColor = (status: ComplaintStatus) => {
-  switch (status) {
-    case "OPEN":
-      return "bg-red-100 text-red-600";
-    case "IN_PROGRESS":
-      return "bg-yellow-100 text-yellow-700";
-    case "RESOLVED":
-      return "bg-green-100 text-green-600";
-    default:
-      return "";
-  }
+const getCategoryMapping = (subject: string) => {
+  const s = (subject || "").toUpperCase();
+  if (s.includes("WATER") || s.includes("PLUMB"))
+    return { name: "Plumbing", icon: Droplets, color: "text-blue-500 bg-blue-50" };
+  if (s.includes("ELEC") || s.includes("LIGHT") || s.includes("POWER"))
+    return { name: "Electrical", icon: Zap, color: "text-orange-500 bg-orange-50" };
+  if (s.includes("WIFI") || s.includes("INTERNET"))
+    return { name: "Internet", icon: Wifi, color: "text-indigo-500 bg-indigo-50" };
+  if (s.includes("CLEAN") || s.includes("HOUSE"))
+    return { name: "Housekeeping", icon: Home, color: "text-teal-500 bg-teal-50" };
+  if (s.includes("FURN"))
+    return { name: "Furniture", icon: Grid, color: "text-pink-500 bg-pink-50" };
+  return { name: "Other", icon: AlertCircle, color: "text-slate-500 bg-slate-50" };
 };
 
 /* ── Safe array extractor: handles both raw array and { content: [] } shapes ── */
@@ -68,25 +86,28 @@ const toArray = <T,>(val: any): T[] => {
 };
 
 const ComplaintPage = () => {
-  const role     = getUserRole()?.toUpperCase();
+  const role = getUserRole()?.toUpperCase();
   const branchId = getBranchId();
-  const isAdmin  = role === "ADMIN";
-  const isWarden = role === "WARDEN";
+  const isAdmin = role === "ADMIN";
 
-  const [complaints,    setComplaints]    = useState<Complaint[]>([]);
-  const [subject,       setSubject]       = useState("");
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [subject, setSubject] = useState("");
   const [customSubject, setCustomSubject] = useState("");
-  const [description,   setDescription]  = useState("");
-  const [searchText,    setSearchText]    = useState("");
-  const [addOpen,       setAddOpen]       = useState(false);
-  const [loading,       setLoading]       = useState(false);
-  const [tableLoading,  setTableLoading]  = useState(true);
-  const [updatingId,    setUpdatingId]    = useState<number | null>(null);
-  const [rooms,         setRooms]         = useState<Room[]>([]);
-  const [branches,      setBranches]      = useState<Branch[]>([]);
+  const [description, setDescription] = useState("");
+  const [searchText, setSearchText] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [tableLoading, setTableLoading] = useState(true);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>(
     role === "ADMIN" ? "all" : String(getBranchId() ?? "all")
   );
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(0);
+  const pageSize = 8;
 
   const didFetch = useRef(false);
 
@@ -105,7 +126,7 @@ const ComplaintPage = () => {
 
   /* ================= LOAD ================= */
 
-const loadComplaints = useCallback(async () => {
+  const loadComplaints = useCallback(async () => {
     try {
       setTableLoading(true);
 
@@ -174,9 +195,7 @@ const loadComplaints = useCallback(async () => {
     try {
       setUpdatingId(id);
       await updateComplaintStatus(id, status);
-      setComplaints((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, status } : c))
-      );
+      setComplaints((prev) => prev.map((c) => (c.id === id ? { ...c, status } : c)));
       toast.success("Status updated");
     } catch (err) {
       console.error(err);
@@ -187,7 +206,7 @@ const loadComplaints = useCallback(async () => {
     }
   };
 
-  /* ================= GRID ================= */
+  /* ================= FILTERED DATA ================= */
 
   const rowData = useMemo(() => {
     let data = complaints;
@@ -208,214 +227,436 @@ const loadComplaints = useCallback(async () => {
       });
     }
 
+    if (statusFilter !== "all") {
+      data = data.filter((c) => c.status === statusFilter);
+    }
+
+    if (categoryFilter !== "all") {
+      data = data.filter((c) => getCategoryMapping(c.subject).name === categoryFilter);
+    }
+
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      data = data.filter(
+        (c) =>
+          c.subject?.toLowerCase().includes(q) ||
+          c.description?.toLowerCase().includes(q) ||
+          c.tenantName?.toLowerCase().includes(q) ||
+          c.roomNumber?.toLowerCase().includes(q)
+      );
+    }
+
     return data;
-  }, [complaints, selectedBranch, rooms, role, branchId]);
+  }, [complaints, selectedBranch, rooms, role, branchId, statusFilter, categoryFilter, searchText]);
 
-  const columnDefs: ColDef[] = useMemo(
-    () => [
-      { headerName: "ID", field: "id", width: 90 },
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [selectedBranch, statusFilter, categoryFilter, searchText]);
 
-      ...(role === "ADMIN" || role === "WARDEN"
-        ? [
-            {
-              headerName: "Tenant / Room",
-              flex: 1.5,
-              valueGetter: (params: any) =>
-                `${params.data.tenantName ?? "-"} (${params.data.roomNumber ?? "-"})`,
-            },
-          ]
-        : []),
+  const paginatedRows = rowData.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
-      { headerName: "Subject", field: "subject", filter: true },
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-      {
-        headerName: "Description",
-        field: "description",
-        wrapText: true,
-        autoHeight: true,
-        flex: 2,
-      },
+  const categoryOptions = useMemo(() => {
+    const names = new Set(complaints.map((c) => getCategoryMapping(c.subject).name));
+    return Array.from(names);
+  }, [complaints]);
 
-      {
-        headerName: "Status",
-        field: "status",
-        cellRenderer: (params: any) => (
-          <span className={`px-2 py-1 rounded ${getStatusColor(params.value)}`}>
-            {params.value}
-          </span>
-        ),
-      },
-
-      {
-        headerName: "Date",
-        field: "createdAt",
-        valueFormatter: (params: any) =>
-          params.value ? params.value.slice(0, 10) : "",
-      },
-
-      ...(role === "ADMIN" || role === "WARDEN"
-        ? [
-            {
-              headerName: "Action",
-              cellRenderer: (params: any) => {
-                const c = params.data;
-                return (
-                  <select
-                    value={c.status}
-                    disabled={updatingId !== null}
-                    onChange={(e) =>
-                      handleStatusChange(c.id, e.target.value as ComplaintStatus)
-                    }
-                  >
-                    <option value="OPEN">OPEN</option>
-                    <option value="IN_PROGRESS">IN_PROGRESS</option>
-                    <option value="RESOLVED">RESOLVED</option>
-                  </select>
-                );
-              },
-            },
-          ]
-        : []),
-    ],
-    [role, updatingId]
-  );
-
-  const defaultColDef = useMemo(
-    () => ({ sortable: true, filter: true, resizable: true, flex: 1 }),
-    []
-  );
+  const clearFilters = () => {
+    setSelectedBranch(role === "ADMIN" ? "all" : String(branchId ?? "all"));
+    setStatusFilter("all");
+    setCategoryFilter("all");
+    setSearchText("");
+  };
 
   /* ================= UI ================= */
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Complaints</h1>
+    <div className="min-h-full bg-[#fcfcfc] text-slate-900 font-sans pb-10">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        .cp-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: 1600px; margin: 0 auto; }
 
-        {role === "TENANT" && (
-          <Dialog
-            open={addOpen}
-            onOpenChange={(open) => {
-              setAddOpen(open);
-              if (!open) resetComplaintForm();
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Complaint
-              </Button>
-            </DialogTrigger>
+        .cp-panel { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; margin-bottom: 24px; }
+        .cp-panel-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
+        .cp-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; }
 
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Complaint</DialogTitle>
-                <DialogDescription>Submit a new complaint</DialogDescription>
-              </DialogHeader>
+        .cp-table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+        .cp-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
+        .cp-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+        .cp-table tr:hover { background: #fdfcff; }
 
-              <Select
-                value={subject}
-                onValueChange={(value) => {
-                  setSubject(value);
-                  if (value !== "OTHER") setCustomSubject("");
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select Subject" />
+        .cp-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-right: 12px; flex-shrink: 0; }
+        .cp-tenant-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+
+        .cp-room { font-size: 13px; font-weight: 600; color: #0f172a; }
+        .cp-room-type { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 4px; }
+
+        .cp-branch { font-size: 13px; font-weight: 500; color: #0f172a; }
+
+        .cp-cid { font-size: 13px; font-weight: 600; color: #0f172a; }
+        .cp-desc { font-size: 13px; color: #475569; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cp-date { font-size: 13px; font-weight: 600; color: #0f172a; }
+        .cp-time { font-size: 11px; color: #64748b; margin-top: 2px; }
+
+        .cp-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #fff; }
+        .cp-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+        .cp-status.resolved { color: #16a34a; }
+        .cp-status.resolved::before { background: #16a34a; }
+        .cp-status.inprogress { color: #f97316; }
+        .cp-status.inprogress::before { background: #f97316; }
+        .cp-status.open { color: #e11d48; }
+        .cp-status.open::before { background: #e11d48; }
+
+        .cp-category { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+      `}</style>
+
+      <div className="cp-wrap">
+        <div className="cp-panel">
+          <div className="cp-panel-header">
+            <div className="cp-panel-title">All Complaints</div>
+            <div className="flex gap-2">
+              {role === "TENANT" || isAdmin || role === "WARDEN" ? (
+                <Dialog
+                  open={addOpen}
+                  onOpenChange={(open) => {
+                    setAddOpen(open);
+                    if (!open) resetComplaintForm();
+                  }}
+                >
+                  {role === "TENANT" && (
+                    <DialogTrigger asChild>
+                      <Button size="sm" className="h-8 bg-[#5200FF] hover:bg-[#4200cc] text-white">
+                        <Plus className="h-4 w-4 mr-2" /> Add Complaint
+                      </Button>
+                    </DialogTrigger>
+                  )}
+
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add Complaint</DialogTitle>
+                      <DialogDescription>Submit a new complaint</DialogDescription>
+                    </DialogHeader>
+
+                    <Select
+                      value={subject}
+                      onValueChange={(value) => {
+                        setSubject(value);
+                        if (value !== "OTHER") setCustomSubject("");
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Subject" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="WIFI">Wifi</SelectItem>
+                        <SelectItem value="FOOD">Food</SelectItem>
+                        <SelectItem value="WATER">Water</SelectItem>
+                        <SelectItem value="OTHER">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {subject === "OTHER" && (
+                      <Input
+                        placeholder="Enter subject"
+                        value={customSubject}
+                        onChange={(e) => setCustomSubject(e.target.value)}
+                      />
+                    )}
+
+                    <textarea
+                      placeholder="Describe your issue..."
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      className="border p-2 rounded w-full h-32 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+
+                    <DialogFooter>
+                      <DialogClose asChild>
+                        <Button variant="outline" onClick={closeComplaintDialog}>
+                          Cancel
+                        </Button>
+                      </DialogClose>
+                      <Button
+                        className="bg-[#5200FF] hover:bg-[#4200cc] text-white"
+                        onClick={handleCreate}
+                        disabled={
+                          loading ||
+                          !description.trim() ||
+                          !(subject === "OTHER" ? customSubject.trim() : subject.trim())
+                        }
+                      >
+                        {loading ? "Submitting..." : "Submit"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="flex items-center gap-3 p-4 border-b border-[#f1f5f9] bg-white flex-wrap">
+            <div className="flex bg-white border border-[#e2e8f0] rounded-md h-9 px-3 w-[220px] items-center">
+              <input
+                type="text"
+                placeholder="Search complaints..."
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                className="border-0 bg-transparent outline-none text-sm w-full font-medium text-slate-600 placeholder:font-normal"
+              />
+              <Search size={14} className="text-slate-400" />
+            </div>
+
+            <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[160px]">
+              <Select value={selectedBranch} onValueChange={setSelectedBranch} disabled={!isAdmin}>
+                <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                  <SelectValue placeholder="All Branches" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="WIFI">Wifi</SelectItem>
-                  <SelectItem value="FOOD">Food</SelectItem>
-                  <SelectItem value="WATER">Water</SelectItem>
-                  <SelectItem value="OTHER">Other</SelectItem>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>
+                      {b.unitName}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+            </div>
 
-              {subject === "OTHER" && (
-                <Input
-                  placeholder="Enter subject"
-                  value={customSubject}
-                  onChange={(e) => setCustomSubject(e.target.value)}
-                />
-              )}
+            <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[160px]">
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {categoryOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-              <textarea
-                placeholder="Describe your issue..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="border p-2 rounded w-full"
-              />
+            <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[150px]">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="OPEN">Open</SelectItem>
+                  <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                  <SelectItem value="RESOLVED">Resolved</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-              <DialogFooter>
-                <DialogClose asChild>
-                  <Button variant="outline" onClick={closeComplaintDialog}>
-                    Cancel
-                  </Button>
-                </DialogClose>
-                <Button
-                  onClick={handleCreate}
-                  disabled={
-                    loading ||
-                    !description.trim() ||
-                    !(subject === "OTHER"
-                      ? customSubject.trim()
-                      : subject.trim())
-                  }
-                >
-                  {loading ? "Submitting..." : "Submit"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
-
-      {/* BRANCH FILTER */}
-      <div className="w-60">
-        {isAdmin ? (
-          <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select Branch" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={String(b.id)}>
-                  {b.unitName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : role === "TENANT" ? null : (
-          /* Warden: static branch label */
-          <div className="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted text-sm font-medium text-muted-foreground">
-            <span className="text-foreground font-semibold">
-              {branches.find((b) => String(b.id) === String(branchId))
-                ?.unitName ?? `Branch ${branchId}`}
-            </span>
+            <button
+              className="flex items-center gap-1.5 text-sm text-[#64748b] font-medium hover:text-[#0f172a] ml-auto"
+              onClick={clearFilters}
+            >
+              <RefreshCw size={14} /> Clear Filters
+            </button>
           </div>
-        )}
-      </div>
 
-      {/* SEARCH */}
-      <Input
-        placeholder="Search complaints..."
-        value={searchText}
-        onChange={(e) => setSearchText(e.target.value)}
-      />
+          <div className="overflow-x-auto">
+            <table className="cp-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  {(isAdmin || role === "WARDEN") && <th>TENANT / ROOM</th>}
+                  {(isAdmin || role === "WARDEN") && <th>BRANCH</th>}
+                  <th>CATEGORY</th>
+                  <th>DESCRIPTION</th>
+                  <th>STATUS</th>
+                  <th>REPORTED ON</th>
+                  {(isAdmin || role === "WARDEN") && <th>ACTIONS</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {tableLoading ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12 text-slate-400">
+                      Loading complaints...
+                    </td>
+                  </tr>
+                ) : paginatedRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12 text-slate-400">
+                      No complaints found.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedRows.map((row, i) => {
+                    const tenantName = row.tenantName || "Unknown Tenant";
+                    const initials = tenantName.substring(0, 2).toUpperCase();
+                    const colors = [
+                      "bg-indigo-100 text-indigo-600",
+                      "bg-blue-100 text-blue-600",
+                      "bg-emerald-100 text-emerald-600",
+                      "bg-rose-100 text-rose-600",
+                      "bg-orange-100 text-orange-600",
+                    ];
+                    const avatarClass = colors[i % colors.length];
+                    const roomObj = rooms.find((r) => r.roomNumber === row.roomNumber);
+                    const isAc = roomObj?.hostelType === "AC";
+                    const branchName =
+                      branches.find((b) => String(b.id) === String(roomObj?.unitId))?.unitName ?? "-";
 
-      {/* GRID */}
-      <div className="ag-theme-alpine" style={{ height: 513, width: "100%" }}>
-        <AgGridReact
-          rowData={rowData}
-          columnDefs={columnDefs}
-          defaultColDef={defaultColDef}
-          pagination
-          paginationPageSize={10}
-          paginationPageSizeSelector={[10, 20, 50, 100]}
-          quickFilterText={searchText}
-        />
+                    const cat = getCategoryMapping(row.subject || "");
+                    const CatIcon = cat.icon;
+
+                    let statusClass = "open";
+                    let displayStatus = "Open";
+                    if (row.status === "RESOLVED") {
+                      statusClass = "resolved";
+                      displayStatus = "Resolved";
+                    } else if (row.status === "IN_PROGRESS") {
+                      statusClass = "inprogress";
+                      displayStatus = "In Progress";
+                    }
+
+                    const dateObj = row.createdAt ? new Date(row.createdAt) : null;
+                    const dateStr = dateObj
+                      ? `${String(dateObj.getDate()).padStart(2, "0")} ${MONTHS[dateObj.getMonth()]} ${dateObj.getFullYear()}`
+                      : "-";
+                    const timeStr = dateObj
+                      ? `${dateObj.getHours() % 12 || 12}:${String(dateObj.getMinutes()).padStart(2, "0")} ${
+                          dateObj.getHours() >= 12 ? "PM" : "AM"
+                        }`
+                      : "";
+
+                    return (
+                      <tr key={row.id}>
+                        <td>
+                          <div className="cp-cid">{row.id}</div>
+                        </td>
+
+                        {(isAdmin || role === "WARDEN") && (
+                          <td>
+                            <div className="flex items-center">
+                              <div className={`cp-avatar ${avatarClass}`}>{initials}</div>
+                              <div>
+                                <div className="cp-tenant-name">{tenantName}</div>
+                                <div className="cp-room">{row.roomNumber || "-"}</div>
+                              </div>
+                            </div>
+                          </td>
+                        )}
+
+                        {(isAdmin || role === "WARDEN") && (
+                          <td>
+                            <div className="cp-branch">{branchName}</div>
+                            {roomObj && (
+                              <div
+                                className={`cp-room-type ${
+                                  isAc ? "bg-green-100 text-green-700" : "bg-indigo-100 text-indigo-700"
+                                }`}
+                              >
+                                {isAc ? "AC" : "Non-AC"}
+                              </div>
+                            )}
+                          </td>
+                        )}
+
+                        <td>
+                          <div className={`cp-category ${cat.color}`}>
+                            <CatIcon size={12} /> {cat.name}
+                          </div>
+                        </td>
+
+                        <td>
+                          <div className="cp-desc" title={row.description || "-"}>
+                            {row.description || "-"}
+                          </div>
+                        </td>
+
+                        <td>
+                          <div className={`cp-status ${statusClass}`}>{displayStatus}</div>
+                        </td>
+
+                        <td>
+                          <div className="cp-date">{dateStr}</div>
+                          {timeStr && <div className="cp-time">{timeStr}</div>}
+                        </td>
+
+                        {(isAdmin || role === "WARDEN") && (
+                          <td>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 rounded-md shadow-sm"
+                                  disabled={updatingId === row.id}
+                                  title="Change status"
+                                >
+                                  <PenSquare size={14} />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-36 bg-white border border-slate-200 shadow-md rounded-md p-1">
+                                <DropdownMenuLabel className="text-[10px] font-bold text-slate-400 px-2 py-1 uppercase">
+                                  Set Status
+                                </DropdownMenuLabel>
+                                <DropdownMenuItem
+                                  onClick={() => handleStatusChange(row.id!, "OPEN")}
+                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded"
+                                >
+                                  Open
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleStatusChange(row.id!, "IN_PROGRESS")}
+                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded"
+                                >
+                                  In Progress
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleStatusChange(row.id!, "RESOLVED")}
+                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded"
+                                >
+                                  Resolved
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between px-5 py-4 border-t border-[#f1f5f9]">
+            <div className="text-[13px] text-[#64748b]">
+              Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to{" "}
+              {Math.min((currentPage + 1) * pageSize, rowData.length)} of {rowData.length} complaints
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="w-8 h-8 rounded border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
+                disabled={currentPage === 0}
+                onClick={() => setCurrentPage((p) => p - 1)}
+              >
+                &lt;
+              </button>
+              <button className="w-8 h-8 rounded bg-[#5200FF] text-white flex items-center justify-center font-medium text-sm">
+                {currentPage + 1}
+              </button>
+              <button
+                className="w-8 h-8 rounded border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
+                disabled={(currentPage + 1) * pageSize >= rowData.length}
+                onClick={() => setCurrentPage((p) => p + 1)}
+              >
+                &gt;
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

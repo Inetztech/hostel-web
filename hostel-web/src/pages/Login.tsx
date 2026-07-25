@@ -1,23 +1,27 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 import { getUserRole } from "@/lib/auth";
 import { loginUser } from "@/lib/store";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-      useEffect(() => {
+    useEffect(() => {
       const role = getUserRole();  // from auth.ts
       if (!role) return;
 
       // ✅ Same role-based redirect for already-logged-in users
       if (role === "SUPER_ADMIN") {
         navigate("/super-admin", { replace: true });
+      } else if (role === "ADMIN") {
+        navigate("/admin", { replace: true });
       } else {
         navigate("/dashboard", { replace: true });
       }
@@ -40,6 +44,9 @@ export default function Login() {
       // ✅ Route each role to its correct landing page
       if (data.role === "SUPER_ADMIN") {
         navigate("/super-admin", { replace: true });
+      } else if (data.role === "ADMIN" && data.subscriptionExpired) {
+        // Subscription Expired mode: skip the dashboard entirely.
+        navigate("/subscription", { replace: true });
       } else {
         navigate("/dashboard", { replace: true });  // ADMIN, WARDEN, TENANT
       }
@@ -399,6 +406,11 @@ export default function Login() {
           transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
         }
 
+        /* Room for the eye toggle button on the password field */
+        .field-input.has-toggle {
+          padding-right: 48px;
+        }
+
         .field-input:focus {
           background: #e8d9cc;
           border-bottom-color: #c47a45;
@@ -408,6 +420,35 @@ export default function Login() {
         .field-input::placeholder {
           color: #b89a88;
           font-weight: 300;
+        }
+
+        /* Password visibility toggle */
+        .field-toggle-btn {
+          position: absolute;
+          right: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          background: transparent;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+          color: #9a7a6a;
+          transition: color 0.2s;
+        }
+
+        .field-toggle-btn:hover {
+          color: #c47a45;
+        }
+
+        .field-toggle-btn:focus-visible {
+          outline: 2px solid #c47a45;
+          outline-offset: 2px;
+          border-radius: 4px;
         }
 
         /* Error */
@@ -634,15 +675,25 @@ export default function Login() {
                 </label>
                 <div className="field-input-wrap">
                   <input
-                    className="field-input"
+                    className="field-input has-toggle"
                     id="password"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     placeholder="••••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     autoComplete="current-password"
                     required
                   />
+                  <button
+                    type="button"
+                    className="field-toggle-btn"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                    tabIndex={0}
+                  >
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
                 </div>
               </div>
 

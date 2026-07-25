@@ -60,7 +60,7 @@ import type { ColDef, IGetRowsParams } from "ag-grid-community";
 ───────────────────────────────────────────────────────────── */
 const DEFAULT_PAGE_SIZE  = 10;
 const BRANCH_PAGE_SIZE   = 10;
-const GRID_HEIGHT        = 513;   // same fixed height as UserRegisterPage
+const GRID_HEIGHT        = 513;
 
 /* ─────────────────────────────────────────────────────────────
    BRANCH FETCHER  (two-step: read total → fetch all)
@@ -167,7 +167,6 @@ const BranchDropdown = ({
       `Branch #${value}`
     : placeholder;
 
-  /* close on outside click */
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
@@ -178,7 +177,6 @@ const BranchDropdown = ({
 
   return (
     <div ref={containerRef} className="relative w-full">
-      {/* Trigger button */}
       <button
         type="button"
         onClick={handleOpen}
@@ -192,7 +190,6 @@ const BranchDropdown = ({
         <ChevronRight className="h-4 w-4 opacity-50 rotate-90" />
       </button>
 
-      {/* Dropdown panel */}
       {open && (
         <div
           className="absolute z-50 mt-1 w-full rounded-md shadow-lg"
@@ -202,7 +199,6 @@ const BranchDropdown = ({
             color:           "#1a202c",
           }}
         >
-          {/* Search row */}
           <div
             className="flex items-center gap-2 px-3 py-2"
             style={{ borderBottom: "1px solid #e2e8f0" }}
@@ -219,7 +215,6 @@ const BranchDropdown = ({
             {loading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
           </div>
 
-          {/* List */}
           <div
             ref={listRef}
             onScroll={handleScroll}
@@ -281,11 +276,9 @@ const BranchDropdown = ({
 ═══════════════════════════════════════════════════════════ */
 const FlatPage = () => {
 
-  /* ── Auth ── */
   const role      = getUserRole()?.toUpperCase();
   const hasAccess = role === "ADMIN";
 
-  /* ── State ── */
   const [totalCount,       setTotalCount]       = useState(0);
   const [addOpen,          setAddOpen]          = useState(false);
   const [editOpen,         setEditOpen]         = useState(false);
@@ -298,10 +291,6 @@ const FlatPage = () => {
   const gridRef = useRef<AgGridReact>(null);
   const didLoad = useRef(false);
 
-  /* ── AG Grid infinite datasource ──
-     Mirrors UserRegisterPage datasource exactly.
-     AG Grid calls getRows with startRow/endRow;
-     we convert to page/size and hand back the slice + total.        */
   const datasource = useMemo(() => ({
     getRows: async (params: IGetRowsParams) => {
       const pageSize = DEFAULT_PAGE_SIZE;
@@ -323,18 +312,13 @@ const FlatPage = () => {
     },
   }), []);
 
-  /* ── Refresh helper ── */
   const refreshGrid = useCallback(() => {
     gridRef.current?.api?.refreshInfiniteCache();
   }, []);
 
-  /* ── Initial trigger (AgGridReact fires datasource on mount;
-        this ref guard prevents double-fire in StrictMode)         ── */
   useEffect(() => {
     didLoad.current = true;
   }, []);
-
-  /* ── CRUD ── */
 
   const handleAdd = async () => {
     if (!flatNumber.trim()) {
@@ -403,7 +387,6 @@ const FlatPage = () => {
     setEditOpen(true);
   }, []);
 
-  /* ── Column definitions ── */
   const columnDefs: ColDef<Flat>[] = useMemo(() => [
     {
       headerName: "Flat",
@@ -445,7 +428,7 @@ const FlatPage = () => {
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button size="icon" variant="ghost" className="h-8 w-8">
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4 text-red-600" />
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
@@ -460,7 +443,7 @@ const FlatPage = () => {
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction
-                        className="bg-destructive hover:bg-destructive/90 text-white"
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
                         onClick={() => handleDelete(params.data.id)}
                       >
                         Delete
@@ -481,9 +464,6 @@ const FlatPage = () => {
     flex:      1,
   }), []);
 
-  /* ─────────────────────────────────────────────────────────
-     UI
-  ───────────────────────────────────────────────────────── */
   return (
     <div className="space-y-6">
 
@@ -496,7 +476,6 @@ const FlatPage = () => {
           </p>
         </div>
 
-        {/* ── ADD DIALOG ── */}
         {hasAccess && (
           <Dialog
             open={addOpen}
@@ -599,13 +578,6 @@ const FlatPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── AG GRID — infinite row model, built-in pagination
-            Matches UserRegisterPage exactly:
-            • rowModelType="infinite"
-            • pagination + paginationPageSize
-            • paginationPageSizeSelector
-            AG Grid renders its own footer with:
-            "Page Size: [10▼]  1 to 10 of 12  |< < Page 1 of 2 > >|"   ── */}
       <div
         className="ag-theme-alpine"
         style={{ height: GRID_HEIGHT, width: "100%" }}
@@ -634,625 +606,3 @@ const FlatPage = () => {
 };
 
 export default FlatPage;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// import {
-//   useEffect,
-//   useMemo,
-//   useState,
-//   useRef,
-//   useCallback,
-// } from "react";
-
-// import {
-//   getFlats,
-//   createFlat,
-//   updateFlat,
-//   deleteFlat,
-//   getBranches,
-//   getUserRole,
-// } from "@/lib/store";
-
-// import { Flat, FlatRequest, Branch } from "@/lib/types";
-
-// import { Button } from "@/components/ui/button";
-// import { Input } from "@/components/ui/input";
-
-// import {
-//   Dialog,
-//   DialogContent,
-//   DialogHeader,
-//   DialogTitle,
-//   DialogTrigger,
-//   DialogDescription,
-//   DialogFooter,
-//   DialogClose,
-// } from "@/components/ui/dialog";
-
-// import {
-//   AlertDialog,
-//   AlertDialogAction,
-//   AlertDialogCancel,
-//   AlertDialogContent,
-//   AlertDialogFooter,
-//   AlertDialogHeader,
-//   AlertDialogTitle,
-//   AlertDialogDescription,
-//   AlertDialogTrigger,
-// } from "@/components/ui/alert-dialog";
-
-// import {
-//   Select,
-//   SelectContent,
-//   SelectItem,
-//   SelectTrigger,
-//   SelectValue,
-// } from "@/components/ui/select";
-
-// import { toast } from "sonner";
-
-// import {
-//   Plus,
-//   Pencil,
-//   Trash2,
-//   Building2,
-//   Home,
-//   Layers3,
-// } from "lucide-react";
-
-// import { AgGridReact } from "ag-grid-react";
-// import type { ColDef } from "ag-grid-community";
-
-// /* ================= COMPONENT ================= */
-
-// const FlatPage = () => {
-//   /* ================= STATE ================= */
-
-//   const [flats, setFlats] = useState<Flat[]>([]);
-//   const [branches, setBranches] = useState<Branch[]>([]);
-
-//   const [flatNumber, setFlatNumber] = useState("");
-//   const [branchId, setBranchId] = useState<string>("");
-
-//   const [addOpen, setAddOpen] = useState(false);
-//   const [editOpen, setEditOpen] = useState(false);
-
-//   const [editFlat, setEditFlat] = useState<Flat | null>(null);
-
-//   const role = getUserRole()?.toUpperCase();
-//   const hasAccess = role === "ADMIN";
-
-//   const didLoad = useRef(false);
-
-//   /* ================= LOAD ================= */
-
-//   const reload = useCallback(async () => {
-//     try {
-//       const [flatData, branchData] = await Promise.all([
-//         getFlats(0, 100),
-//         getBranches(0, 100),
-//       ]);
-
-//       setFlats(flatData);
-//       setBranches(branchData);
-//     } catch (err) {
-//       console.error(err);
-//       toast.error("Failed to load data");
-//     }
-//   }, []);
-
-//   /* ================= INIT ================= */
-
-//   useEffect(() => {
-//     if (didLoad.current) return;
-
-//     didLoad.current = true;
-
-//     reload();
-//   }, [reload]);
-
-//   /* ================= CRUD ================= */
-
-//   const handleAdd = async () => {
-//     if (!flatNumber || !branchId) {
-//       toast.error("All fields required");
-//       return;
-//     }
-
-//     try {
-//       await createFlat({
-//         flatNumber,
-//         branchId: Number(branchId),
-//       } as FlatRequest);
-
-//       toast.success("Flat created");
-
-//       setFlatNumber("");
-//       setBranchId("");
-
-//       setAddOpen(false);
-
-//       await reload();
-//     } catch (e: any) {
-//       toast.error(e?.response?.data?.message || "Create failed");
-//     }
-//   };
-
-//   const handleEdit = async () => {
-//     if (!editFlat) return;
-
-//     try {
-//       await updateFlat(editFlat.id, {
-//         flatNumber: editFlat.flatNumber,
-//         branchId: editFlat.branchId,
-//       });
-
-//       toast.success("Flat updated");
-
-//       setEditOpen(false);
-//       setEditFlat(null);
-
-//       await reload();
-//     } catch (e: any) {
-//       toast.error(e?.response?.data?.message || "Update failed");
-//     }
-//   };
-
-//   const handleDelete = async (id: number) => {
-//     try {
-//       await deleteFlat(id);
-
-//       toast.success("Flat deleted");
-
-//       await reload();
-//     } catch (e: any) {
-//       toast.error(e?.response?.data?.message || "Delete failed");
-//     }
-//   };
-
-//   /* ================= GRID ================= */
-
-//   const columnDefs: ColDef<Flat>[] = useMemo(
-//     () => [
-//       {
-//         headerName: "Flat Number",
-//         field: "flatNumber",
-//         flex: 1.2,
-//         filter: true,
-
-//         cellRenderer: (params: any) => (
-//           <div className="flex items-center gap-3 h-full">
-//             <div className="bg-blue-100 p-2 rounded-xl">
-//               <Home className="h-4 w-4 text-blue-600" />
-//             </div>
-
-//             <span className="font-medium text-slate-700">
-//               {params.value}
-//             </span>
-//           </div>
-//         ),
-//       },
-
-//       {
-//         headerName: "Branch",
-//         field: "branchName",
-//         flex: 1.2,
-//         filter: true,
-
-//         cellRenderer: (params: any) => (
-//           <div className="flex items-center gap-3 h-full">
-//             <div className="bg-indigo-100 p-2 rounded-xl">
-//               <Building2 className="h-4 w-4 text-indigo-600" />
-//             </div>
-
-//             <span className="text-slate-700">
-//               {params.value}
-//             </span>
-//           </div>
-//         ),
-//       },
-
-//       ...(hasAccess
-//         ? [
-//             {
-//               headerName: "Actions",
-//               width: 160,
-//               sortable: false,
-
-//               cellRenderer: (params: { data: Flat }) => (
-//                 <div className="flex items-center gap-2 h-full">
-
-//                   {/* EDIT */}
-
-//                   <Button
-//                     size="icon"
-//                     className="h-9 w-9 rounded-xl bg-blue-500 hover:bg-blue-600 text-white"
-//                     onClick={() => {
-//                       setEditFlat({ ...params.data });
-//                       setEditOpen(true);
-//                     }}
-//                   >
-//                     <Pencil className="h-4 w-4" />
-//                   </Button>
-
-//                   {/* DELETE */}
-
-//                   <AlertDialog>
-//                     <AlertDialogTrigger asChild>
-//                       <Button
-//                         size="icon"
-//                         className="h-9 w-9 rounded-xl bg-red-500 hover:bg-red-600 text-white"
-//                       >
-//                         <Trash2 className="h-4 w-4" />
-//                       </Button>
-//                     </AlertDialogTrigger>
-
-//                     <AlertDialogContent className="rounded-3xl">
-//                       <AlertDialogHeader>
-//                         <AlertDialogTitle>
-//                           Delete {params.data.flatNumber} ?
-//                         </AlertDialogTitle>
-
-//                         <AlertDialogDescription>
-//                           This action cannot be undone.
-//                         </AlertDialogDescription>
-//                       </AlertDialogHeader>
-
-//                       <AlertDialogFooter>
-//                         <AlertDialogCancel>
-//                           Cancel
-//                         </AlertDialogCancel>
-
-//                         <AlertDialogAction
-//                           className="bg-red-600 hover:bg-red-700"
-//                           onClick={() =>
-//                             handleDelete(params.data.id)
-//                           }
-//                         >
-//                           Delete
-//                         </AlertDialogAction>
-//                       </AlertDialogFooter>
-//                     </AlertDialogContent>
-//                   </AlertDialog>
-//                 </div>
-//               ),
-//             },
-//           ]
-//         : []),
-//     ],
-//     [hasAccess]
-//   );
-
-//   const defaultColDef = useMemo(
-//     () => ({
-//       sortable: true,
-//       resizable: true,
-//       flex: 1,
-//     }),
-//     []
-//   );
-
-//   /* ================= UI ================= */
-
-//   return (
-//     <div className="space-y-6 p-1">
-
-//       {/* HEADER */}
-
-//       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-
-//         <div>
-//           <h1 className="text-3xl font-bold text-slate-800">
-//             Flats
-//           </h1>
-
-//           <p className="text-sm text-slate-500 mt-1">
-//             Manage hostel flats and branches
-//           </p>
-//         </div>
-
-//         {/* ADD FLAT */}
-
-//         {hasAccess && (
-//           <Dialog
-//             open={addOpen}
-//             onOpenChange={(open) => {
-//               setAddOpen(open);
-
-//               if (!open) {
-//                 setFlatNumber("");
-//                 setBranchId("");
-//               }
-//             }}
-//           >
-//             <DialogTrigger asChild>
-//               <Button className="h-11 rounded-xl px-5 bg-blue-600 hover:bg-blue-700 shadow-md">
-//                 <Plus className="h-4 w-4 mr-2" />
-//                 Add Flat
-//               </Button>
-//             </DialogTrigger>
-
-//             <DialogContent className="rounded-3xl">
-
-//               <DialogHeader>
-//                 <DialogTitle className="text-2xl">
-//                   Add Flat
-//                 </DialogTitle>
-
-//                 <DialogDescription>
-//                   Create a new flat
-//                 </DialogDescription>
-//               </DialogHeader>
-
-//               <div className="space-y-4 py-2">
-
-//                 <div className="space-y-2">
-//                   <label className="text-sm font-medium">
-//                     Flat Number
-//                   </label>
-
-//                   <Input
-//                     className="h-11 rounded-xl"
-//                     placeholder="Enter flat number"
-//                     value={flatNumber}
-//                     onChange={(e) =>
-//                       setFlatNumber(e.target.value)
-//                     }
-//                   />
-//                 </div>
-
-//                 <div className="space-y-2">
-//                   <label className="text-sm font-medium">
-//                     Branch
-//                   </label>
-
-//                   <Select
-//                     value={branchId}
-//                     onValueChange={setBranchId}
-//                   >
-//                     <SelectTrigger className="h-11 rounded-xl">
-//                       <SelectValue placeholder="Select Branch" />
-//                     </SelectTrigger>
-
-//                     <SelectContent>
-//                       {branches.map((b) => (
-//                         <SelectItem
-//                           key={b.id}
-//                           value={String(b.id)}
-//                         >
-//                           {b.unitName}
-//                         </SelectItem>
-//                       ))}
-//                     </SelectContent>
-//                   </Select>
-//                 </div>
-//               </div>
-
-//               <DialogFooter>
-//                 <DialogClose asChild>
-//                   <Button
-//                     variant="outline"
-//                     className="rounded-xl"
-//                   >
-//                     Cancel
-//                   </Button>
-//                 </DialogClose>
-
-//                 <Button
-//                   className="rounded-xl bg-blue-600 hover:bg-blue-700"
-//                   onClick={handleAdd}
-//                 >
-//                   Create Flat
-//                 </Button>
-//               </DialogFooter>
-//             </DialogContent>
-//           </Dialog>
-//         )}
-//       </div>
-
-//       {/* STATS */}
-
-//       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-//         <div className="rounded-3xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 shadow-lg">
-
-//           <div className="flex items-center justify-between">
-
-//             <div>
-//               <p className="text-sm text-blue-100">
-//                 Total Flats
-//               </p>
-
-//               <h2 className="text-3xl font-bold mt-2">
-//                 {flats.length}
-//               </h2>
-//             </div>
-
-//             <div className="bg-white/20 p-3 rounded-2xl">
-//               <Layers3 className="h-7 w-7" />
-//             </div>
-//           </div>
-//         </div>
-
-//         <div className="rounded-3xl border bg-white p-6 shadow-sm">
-//           <p className="text-sm text-slate-500">
-//             Active Branches
-//           </p>
-
-//           <h2 className="text-3xl font-bold mt-2 text-slate-800">
-//             {branches.length}
-//           </h2>
-//         </div>
-
-//         <div className="rounded-3xl border bg-white p-6 shadow-sm">
-//           <p className="text-sm text-slate-500">
-//             System Status
-//           </p>
-
-//           <h2 className="text-3xl font-bold mt-2 text-green-600">
-//             Active
-//           </h2>
-//         </div>
-//       </div>
-
-//       {/* EDIT DIALOG */}
-
-//       <Dialog
-//         open={editOpen}
-//         onOpenChange={(open) => {
-//           setEditOpen(open);
-
-//           if (!open) {
-//             setEditFlat(null);
-//           }
-//         }}
-//       >
-//         <DialogContent className="rounded-3xl">
-
-//           <DialogHeader>
-//             <DialogTitle className="text-2xl">
-//               Edit Flat
-//             </DialogTitle>
-
-//             <DialogDescription>
-//               Update flat details
-//             </DialogDescription>
-//           </DialogHeader>
-
-//           {editFlat && (
-//             <div className="space-y-4 py-2">
-
-//               <div className="space-y-2">
-//                 <label className="text-sm font-medium">
-//                   Flat Number
-//                 </label>
-
-//                 <Input
-//                   className="h-11 rounded-xl"
-//                   value={editFlat.flatNumber}
-//                   onChange={(e) =>
-//                     setEditFlat({
-//                       ...editFlat,
-//                       flatNumber: e.target.value,
-//                     })
-//                   }
-//                 />
-//               </div>
-
-//               <div className="space-y-2">
-//                 <label className="text-sm font-medium">
-//                   Branch
-//                 </label>
-
-//                 <Select
-//                   value={String(editFlat.branchId)}
-//                   onValueChange={(val) =>
-//                     setEditFlat({
-//                       ...editFlat,
-//                       branchId: Number(val),
-//                     })
-//                   }
-//                 >
-//                   <SelectTrigger className="h-11 rounded-xl">
-//                     <SelectValue />
-//                   </SelectTrigger>
-
-//                   <SelectContent>
-//                     {branches.map((b) => (
-//                       <SelectItem
-//                         key={b.id}
-//                         value={String(b.id)}
-//                       >
-//                         {b.unitName}
-//                       </SelectItem>
-//                     ))}
-//                   </SelectContent>
-//                 </Select>
-//               </div>
-//             </div>
-//           )}
-
-//           <DialogFooter>
-//             <Button
-//               variant="outline"
-//               className="rounded-xl"
-//               onClick={() => setEditOpen(false)}
-//             >
-//               Cancel
-//             </Button>
-
-//             <Button
-//               className="rounded-xl bg-blue-600 hover:bg-blue-700"
-//               onClick={handleEdit}
-//             >
-//               Save Changes
-//             </Button>
-//           </DialogFooter>
-//         </DialogContent>
-//       </Dialog>
-
-//       {/* GRID */}
-
-//       <div className="rounded-3xl overflow-hidden border bg-white shadow-sm">
-
-//         <div className="px-6 py-5 border-b bg-slate-50">
-//           <h2 className="text-lg font-semibold text-slate-800">
-//             Flat List
-//           </h2>
-
-//           <p className="text-sm text-slate-500">
-//             View and manage all flats
-//           </p>
-//         </div>
-
-//         <div
-//           className="ag-theme-alpine"
-//           style={{
-//             height: 825,
-//             width: "100%",
-//           }}
-//         >
-//           <AgGridReact
-//             rowData={flats}
-//             columnDefs={columnDefs}
-//             defaultColDef={defaultColDef}
-//             pagination
-//             animateRows
-//             rowHeight={72}
-//             headerHeight={60}
-//             paginationPageSize={10}
-//             paginationPageSizeSelector={[10, 20, 50, 100]}
-//           />
-//         </div>
-//       </div>
-//     </div>
-//   );
-// };
-
-// export default FlatPage;

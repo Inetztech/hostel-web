@@ -1,12 +1,14 @@
 import { useEffect, useState, useRef } from "react";
+import { Link } from "react-router-dom";
 import { getDashboard, getUserRole, getBranchId } from "@/lib/store";
 import api from "@/lib/api";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Building2, Users, Zap, BedDouble, AlertTriangle, GitBranch,
   CheckCircle2, Home, Bed, TrendingUp, TrendingDown, X, Search,
-  ChevronDown, ChevronUp, RefreshCw, CreditCard, Banknote, Hash, Calendar,
+  ChevronDown, ChevronUp, RefreshCw, CreditCard, Banknote, Calendar,
+  MessageSquare, CalendarCheck, Wallet
 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Types
@@ -91,9 +93,7 @@ const adminModeLabels: Record<NonNullable<DetailMode>, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ✅ fetchAll — Dynamic paginated fetcher (replaces hardcoded size: 5000)
-//  Fetches page 0 first to get totalElements, then fetches all remaining
-//  pages in parallel. Automatically handles any data size.
+//  fetchAll — Dynamic paginated fetcher
 // ─────────────────────────────────────────────────────────────────────────────
 const fetchAll = async (url: string, extraParams?: Record<string, any>): Promise<any[]> => {
   const first = await api.get(url, {
@@ -105,12 +105,10 @@ const fetchAll = async (url: string, extraParams?: Record<string, any>): Promise
   const total: number =
     first.data?.data?.totalElements ?? first.data?.totalElements ?? 0;
 
-  // If all data fits in first page, return immediately
   if (total <= PAGE_SIZE || firstContent.length === 0) return firstContent;
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  // Fetch all remaining pages in parallel
   const remaining = await Promise.all(
     Array.from({ length: totalPages - 1 }, (_, i) =>
       api.get(url, { params: { page: i + 1, size: PAGE_SIZE, ...extraParams } })
@@ -187,11 +185,11 @@ interface StatCardProps {
 }
 
 const StatCard = ({ label, value, sub, icon: Icon, color, iconBg }: StatCardProps) => (
-  <div className="bg-background border rounded-xl px-5 py-4 flex items-center justify-between gap-4">
+  <div className="bg-white border border-gray-100 rounded-2xl px-5 py-4 flex items-center justify-between gap-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)] hover:-translate-y-[1px] transition-all duration-200">
     <div className="min-w-0">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground truncate">{label}</p>
-      <p className="text-[26px] font-bold leading-tight mt-0.5">{value}</p>
-      {sub && <p className="text-xs text-muted-foreground mt-0.5 truncate">{sub}</p>}
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 truncate">{label}</p>
+      <p className="text-[26px] font-bold leading-tight mt-1 text-gray-900 tabular-nums">{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-1 truncate">{sub}</p>}
     </div>
     <div className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center ${iconBg}`}>
       <Icon className={`h-5 w-5 ${color}`} />
@@ -204,21 +202,22 @@ const StatCard = ({ label, value, sub, icon: Icon, color, iconBg }: StatCardProp
 // ─────────────────────────────────────────────────────────────────────────────
 interface FinCardProps {
   label: string; value: number; icon: React.ElementType;
-  color: string; iconBg: string; border: string;
+  color: string; iconBg: string; accent: string;
   onClick?: () => void;
 }
 
-const FinCard = ({ label, value, icon: Icon, color, iconBg, border, onClick }: FinCardProps) => (
+const FinCard = ({ label, value, icon: Icon, color, iconBg, accent, onClick }: FinCardProps) => (
   <div
     onClick={onClick}
-    className={`bg-background border-2 ${border} rounded-xl px-5 py-4 flex items-center justify-between gap-4 ${onClick ? "cursor-pointer hover:shadow-md hover:scale-[1.015] active:scale-[0.99] transition-all duration-150" : ""}`}
+    className={`relative bg-white border border-gray-100 rounded-2xl px-5 py-4 flex items-center justify-between gap-4 overflow-hidden shadow-[0_1px_2px_rgba(16,24,40,0.04)] ${onClick ? "cursor-pointer hover:shadow-[0_8px_20px_rgba(16,24,40,0.08)] hover:-translate-y-[2px] active:translate-y-0 transition-all duration-200" : ""}`}
   >
-    <div className="min-w-0">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground truncate">{label}</p>
-      <p className={`text-[22px] font-bold leading-tight mt-0.5 ${color}`}>
+    <span className={`absolute left-0 top-0 h-full w-1 ${accent}`} />
+    <div className="min-w-0 pl-1.5">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 truncate">{label}</p>
+      <p className={`text-[22px] font-bold leading-tight mt-1 tabular-nums ${color}`}>
         ₹{Math.round(value).toLocaleString()}
       </p>
-      {onClick && <p className="text-[10px] text-muted-foreground mt-0.5">Click to view details →</p>}
+      {onClick && <p className="text-[10.5px] text-gray-400 mt-1 font-medium">View details →</p>}
     </div>
     <div className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center ${iconBg}`}>
       <Icon className={`h-5 w-5 ${color}`} />
@@ -243,29 +242,39 @@ const FinanceCardsSection = ({
   <div className="grid grid-cols-2 gap-4">
     <FinCard label="Collected This Month" value={currentCollected}
       icon={CheckCircle2} color="text-emerald-600"
-      iconBg="bg-emerald-50 dark:bg-emerald-950/30"
-      border="border-emerald-200 dark:border-emerald-800"
+      iconBg="bg-emerald-50"
+      accent="bg-emerald-400"
       onClick={onCardClick ? () => onCardClick("currentCollected") : undefined} />
     <FinCard label="Pending This Month" value={currentPending}
       icon={AlertTriangle} color="text-rose-600"
-      iconBg="bg-rose-50 dark:bg-rose-950/30"
-      border="border-rose-200 dark:border-rose-800"
+      iconBg="bg-rose-50"
+      accent="bg-rose-400"
       onClick={onCardClick ? () => onCardClick("currentPending") : undefined} />
     <FinCard label="Overall Collected" value={overallCollected}
-      icon={TrendingUp} color="text-indigo-600"
-      iconBg="bg-indigo-50 dark:bg-indigo-950/30"
-      border="border-indigo-200 dark:border-indigo-800"
+      icon={TrendingUp} color="text-[#6A35FF]"
+      iconBg="bg-[#6A35FF]/10"
+      accent="bg-[#6A35FF]"
       onClick={onCardClick ? () => onCardClick("overallCollected") : undefined} />
     <FinCard label="Overall Pending" value={overallPending}
       icon={TrendingDown} color="text-orange-600"
-      iconBg="bg-orange-50 dark:bg-orange-950/30"
-      border="border-orange-200 dark:border-orange-800"
+      iconBg="bg-orange-50"
+      accent="bg-orange-400"
       onClick={onCardClick ? () => onCardClick("overallPending") : undefined} />
   </div>
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  fetchTenantDetailsFromRents  ✅ now uses fetchAll — dynamic pagination
+//  Section heading helper
+// ─────────────────────────────────────────────────────────────────────────────
+const SectionHeading = ({ children }: { children: React.ReactNode }) => (
+  <h2 className="text-[11px] font-semibold mb-4 text-gray-400 uppercase tracking-wider flex items-center gap-2">
+    <span className="h-3 w-[3px] rounded-full bg-blue-500/70" />
+    {children}
+  </h2>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  fetchTenantDetailsFromRents
 // ─────────────────────────────────────────────────────────────────────────────
 const fetchTenantDetailsFromRents = async (
   mode: NonNullable<DetailMode>,
@@ -275,7 +284,6 @@ const fetchTenantDetailsFromRents = async (
   const currentMonth = now.getMonth() + 1;
   const currentYear  = now.getFullYear();
 
-  // ✅ REPLACED: hardcoded size:5000 → dynamic fetchAll
   const [rents, tenants, rooms] = await Promise.all([
     fetchAll("/rents", { _ts: Date.now() }),
     fetchAll("/tenants"),
@@ -356,14 +364,13 @@ const fetchTenantDetailsFromRents = async (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  computeWardenFinancials  ✅ now uses fetchAll — dynamic pagination
+//  computeWardenFinancials
 // ─────────────────────────────────────────────────────────────────────────────
 const computeWardenFinancials = async (branchId: number) => {
   const now          = new Date();
   const currentMonth = now.getMonth() + 1;
   const currentYear  = now.getFullYear();
 
-  // ✅ REPLACED: hardcoded size:5000 → dynamic fetchAll
   const [rents, rooms, tenants] = await Promise.all([
     fetchAll("/rents", { _ts: Date.now() }),
     fetchAll("/rooms"),
@@ -414,7 +421,7 @@ const computeWardenFinancials = async (branchId: number) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  computeTenantFinancials — unchanged (uses tenant-specific endpoint)
+//  computeTenantFinancials
 // ─────────────────────────────────────────────────────────────────────────────
 const computeTenantFinancials = async (tenantId: number) => {
   const now          = new Date();
@@ -801,38 +808,136 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ADMIN Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
-const AdminDashboard = ({ data, userName }: { data: GlobalDashboard; userName?: string }) => {
+const getMockMonthlyData = () => {
+  const data = [];
+  const start = new Date();
+  start.setDate(start.getDate() - 30);
+  for (let i = 0; i <= 30; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    data.push({
+      date: d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }),
+      rent: 0,
+      eb: 0,
+    });
+  }
+  return data;
+};
+
+const AdminDashboard = ({ data }: { data: GlobalDashboard; userName?: string }) => {
   const [detailMode, setDetailMode] = useState<DetailMode>(null);
 
   const stats: StatCardProps[] = [
-    { label: "Total Branches", value: data.totalBranches ?? 0, sub: "Active hostel units",   icon: GitBranch, color: "text-indigo-600", iconBg: "bg-indigo-50 dark:bg-indigo-950/30" },
-    { label: "Total Rooms",    value: data.totalRooms    ?? 0, sub: "All branches combined", icon: Building2, color: "text-sky-600",    iconBg: "bg-sky-50 dark:bg-sky-950/30" },
-    { label: "Total Beds",     value: data.totalBeds     ?? 0, sub: `${data.occupiedBeds ?? 0} Occupied · ${data.availableBeds ?? 0} Available`, icon: BedDouble, color: "text-cyan-600", iconBg: "bg-cyan-50 dark:bg-cyan-950/30" },
-    { label: "Active Tenants", value: data.activeTenants ?? 0, sub: "Currently staying",     icon: Users,     color: "text-blue-600",   iconBg: "bg-blue-50 dark:bg-blue-950/30" },
-    { label: "EB Units",       value: (data.totalUnits ?? 0).toLocaleString(), sub: "Current Month", icon: Zap, color: "text-amber-600", iconBg: "bg-amber-50 dark:bg-amber-950/30" },
+    { label: "Total Branches", value: data.totalBranches ?? 0, sub: "Active hostel units",   icon: GitBranch, color: "text-[#6A35FF]", iconBg: "bg-[#6A35FF]/10" },
+    { label: "Total Rooms",    value: data.totalRooms    ?? 0, sub: "All branches combined", icon: Building2, color: "text-sky-600",    iconBg: "bg-sky-50" },
+    { label: "Total Beds",     value: data.totalBeds     ?? 0, sub: `${data.occupiedBeds ?? 0} Occupied · ${data.availableBeds ?? 0} Available`, icon: BedDouble, color: "text-blue-600", iconBg: "bg-blue-50" },
+    { label: "Active Tenants", value: data.activeTenants ?? 0, sub: "Currently staying",     icon: Users,     color: "text-emerald-600",   iconBg: "bg-emerald-50" },
+    { label: "EB Units",       value: (data.totalUnits ?? 0).toLocaleString(), sub: "Current Month", icon: Zap, color: "text-orange-500", iconBg: "bg-orange-50" },
   ];
 
   return (
     <div>
       {detailMode && <AdminDetailModal mode={detailMode} branchId={null} onClose={() => setDetailMode(null)} />}
-      <div className="mb-7">
-        <h1 className="text-2xl font-bold tracking-tight">Welcome, {userName ?? "Admin"}</h1>
-        <p className="text-sm text-muted-foreground mt-1">Admin Dashboard</p>
+
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-[14px] font-bold text-gray-900">Overview</h2>
+        <div className="text-[12px] font-medium text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg flex items-center gap-2 shadow-sm">
+          <Calendar className="h-3.5 w-3.5 text-gray-400" />
+          May 28, 2025 - Jun 27, 2025
+          <ChevronDown className="h-3.5 w-3.5 text-gray-400 ml-1" />
+        </div>
       </div>
-      <div className="grid grid-cols-3 gap-4 mb-4">
-        {stats.slice(0, 3).map((s) => <StatCard key={s.label} {...s} />)}
+
+      <div className="grid grid-cols-5 gap-4 mb-6">
+        {stats.map((s) => <StatCard key={s.label} {...s} />)}
       </div>
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        {stats.slice(3).map((s) => <StatCard key={s.label} {...s} />)}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div>
+          <h2 className="text-[14px] font-bold text-gray-900 mb-4">Financial Summary (Rent + EB)</h2>
+          <FinanceCardsSection
+            currentCollected={data.rentCollected    ?? 0}
+            currentPending={data.pendingDues        ?? 0}
+            overallCollected={data.overallCollected ?? 0}
+            overallPending={data.overallPending     ?? 0}
+            onCardClick={setDetailMode}
+          />
+        </div>
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04)] overflow-hidden flex flex-col">
+          <div className="px-5 py-4 flex items-center justify-between">
+            <h2 className="text-[14px] font-bold text-gray-900">Monthly Overview</h2>
+            <div className="text-[12px] font-medium text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg flex items-center gap-2 cursor-pointer">
+              This Month <ChevronDown className="h-3.5 w-3.5 text-gray-400 ml-1" />
+            </div>
+          </div>
+          <div className="flex-1 p-5 pt-0 pb-3">
+            <div className="flex items-center justify-center gap-6 mb-4">
+              <div className="flex items-center gap-2 text-[12px] font-medium text-gray-500">
+                <span className="w-6 h-[2px] bg-transparent border-t-2 border-[#6A35FF]"></span> Rent Collected (₹)
+              </div>
+              <div className="flex items-center gap-2 text-[12px] font-medium text-gray-500">
+                <span className="w-6 h-[2px] bg-transparent border-t-2 border-emerald-500"></span> EB Collected (₹)
+              </div>
+            </div>
+            <div className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={getMockMonthlyData()} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{fontSize: 10, fill: '#9ca3af'}} axisLine={false} tickLine={false} tickMargin={10} minTickGap={30} />
+                  <YAxis tickFormatter={(val) => `₹${val}`} tick={{fontSize: 10, fill: '#9ca3af'}} axisLine={false} tickLine={false} tickMargin={10} domain={[0, 1]} tickCount={6} />
+                  <RechartsTooltip contentStyle={{ borderRadius: '8px', border: '1px solid #f0f0f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '12px' }} />
+                  <Line type="monotone" dataKey="rent" stroke="#6A35FF" strokeWidth={2} dot={{ r: 3, fill: '#6A35FF', strokeWidth: 0 }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="eb" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981', strokeWidth: 0 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
       </div>
-      <h2 className="text-[11px] font-semibold mb-4 text-muted-foreground uppercase tracking-wide">Financial Analysis · Rent + EB</h2>
-      <FinanceCardsSection
-        currentCollected={data.rentCollected    ?? 0}
-        currentPending={data.pendingDues        ?? 0}
-        overallCollected={data.overallCollected ?? 0}
-        overallPending={data.overallPending     ?? 0}
-        onCardClick={setDetailMode}
-      />
+
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex flex-col min-h-[220px]">
+          <h3 className="text-[14px] font-bold text-gray-900 mb-4">Recent Complaints</h3>
+          <div className="flex-1 flex flex-col items-center justify-center text-center">
+            <div className="h-10 w-10 rounded-full bg-[#6A35FF]/10 flex items-center justify-center mb-3">
+              <MessageSquare className="h-5 w-5 text-[#6A35FF]" />
+            </div>
+            <p className="text-[13px] font-semibold text-gray-800">No complaints found.</p>
+            <p className="text-[12px] text-gray-500 mt-1">All clear! No complaints at the moment.</p>
+          </div>
+          <Link to="/complaints" className="mt-4 w-full py-2 border border-gray-100 rounded-lg text-center text-[12px] font-semibold text-[#6A35FF] bg-white hover:bg-gray-50 transition-colors">
+            View All Complaints
+          </Link>
+        </div>
+
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex flex-col min-h-[220px]">
+          <h3 className="text-[14px] font-bold text-gray-900 mb-4">Upcoming Check-Out</h3>
+          <div className="flex-1 flex flex-col items-center justify-center text-center">
+            <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center mb-3">
+              <CalendarCheck className="h-5 w-5 text-blue-500" />
+            </div>
+            <p className="text-[13px] font-semibold text-gray-800">No upcoming check-outs.</p>
+            <p className="text-[12px] text-gray-500 mt-1">No tenants scheduled for check-out.</p>
+          </div>
+          <Link to="/checkout" className="mt-4 w-full py-2 border border-gray-100 rounded-lg text-center text-[12px] font-semibold text-[#6A35FF] bg-white hover:bg-gray-50 transition-colors">
+            View All Check-Outs
+          </Link>
+        </div>
+
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex flex-col min-h-[220px]">
+          <h3 className="text-[14px] font-bold text-gray-900 mb-4">Recent Payments</h3>
+          <div className="flex-1 flex flex-col items-center justify-center text-center">
+            <div className="h-10 w-10 rounded-full bg-emerald-50 flex items-center justify-center mb-3">
+              <Wallet className="h-5 w-5 text-emerald-500" />
+            </div>
+            <p className="text-[13px] font-semibold text-gray-800">No recent payments.</p>
+            <p className="text-[12px] text-gray-500 mt-1">Payment history will appear here.</p>
+          </div>
+          <Link to="/payments" className="mt-4 w-full py-2 border border-gray-100 rounded-lg text-center text-[12px] font-semibold text-[#6A35FF] bg-white hover:bg-gray-50 transition-colors">
+            View All Payments
+          </Link>
+        </div>
+      </div>
     </div>
   );
 };
@@ -846,32 +951,29 @@ interface WardenDashboardProps {
   financials: { currentCollected: number; currentPending: number; overallCollected: number; overallPending: number };
 }
 
-const WardenDashboard = ({ data, userName, unitName, branchId, financials }: WardenDashboardProps) => {
+const WardenDashboard = ({ data, branchId, financials }: WardenDashboardProps) => {
   const [detailMode, setDetailMode] = useState<DetailMode>(null);
 
   const stats: StatCardProps[] = [
-    { label: "Total Rooms",    value: data.totalRooms    ?? 0, sub: "In your branch",     icon: Building2,    color: "text-sky-600",     iconBg: "bg-sky-50 dark:bg-sky-950/30" },
-    { label: "Total Beds",     value: data.totalBeds     ?? 0, sub: "In your branch",     icon: BedDouble,    color: "text-cyan-600",    iconBg: "bg-cyan-50 dark:bg-cyan-950/30" },
-    { label: "Occupied Beds",  value: data.occupiedBeds  ?? 0, sub: "Currently occupied", icon: BedDouble,    color: "text-orange-500",  iconBg: "bg-orange-50 dark:bg-orange-950/30" },
-    { label: "Available Beds", value: data.availableBeds ?? 0, sub: "Ready to occupy",    icon: CheckCircle2, color: "text-emerald-600", iconBg: "bg-emerald-50 dark:bg-emerald-950/30" },
-    { label: "Active Tenants", value: data.activeTenants ?? 0, sub: "Currently staying",  icon: Users,        color: "text-blue-600",    iconBg: "bg-blue-50 dark:bg-blue-950/30" },
-    { label: "EB Units",       value: (data.totalUnits ?? 0).toLocaleString(), sub: "Current Month", icon: Zap, color: "text-amber-600", iconBg: "bg-amber-50 dark:bg-amber-950/30" },
+    { label: "Total Rooms",    value: data.totalRooms    ?? 0, sub: "In your branch",     icon: Building2,    color: "text-sky-600",     iconBg: "bg-sky-50" },
+    { label: "Total Beds",     value: data.totalBeds     ?? 0, sub: "In your branch",     icon: BedDouble,    color: "text-cyan-600",    iconBg: "bg-cyan-50" },
+    { label: "Occupied Beds",  value: data.occupiedBeds  ?? 0, sub: "Currently occupied", icon: BedDouble,    color: "text-orange-500",  iconBg: "bg-orange-50" },
+    { label: "Available Beds", value: data.availableBeds ?? 0, sub: "Ready to occupy",    icon: CheckCircle2, color: "text-emerald-600", iconBg: "bg-emerald-50" },
+    { label: "Active Tenants", value: data.activeTenants ?? 0, sub: "Currently staying",  icon: Users,        color: "text-blue-600",    iconBg: "bg-blue-50" },
+    { label: "EB Units",       value: (data.totalUnits ?? 0).toLocaleString(), sub: "Current Month", icon: Zap, color: "text-amber-600", iconBg: "bg-amber-50" },
   ];
 
   return (
     <div>
       {detailMode && <AdminDetailModal mode={detailMode} branchId={branchId} onClose={() => setDetailMode(null)} />}
-      <div className="mb-7">
-        <h1 className="text-2xl font-bold tracking-tight">Welcome, {userName ?? "Warden"}</h1>
-        <p className="text-sm text-muted-foreground mt-1">{unitName ?? "Branch"} · Warden Dashboard</p>
-      </div>
+      <SectionHeading>Overview</SectionHeading>
       <div className="grid grid-cols-3 gap-4 mb-4">
         {stats.slice(0, 3).map((s) => <StatCard key={s.label} {...s} />)}
       </div>
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-3 gap-4 mb-9">
         {stats.slice(3).map((s) => <StatCard key={s.label} {...s} />)}
       </div>
-      <h2 className="text-[11px] font-semibold mb-4 text-muted-foreground uppercase tracking-wide">Financial Analysis · Rent + EB</h2>
+      <SectionHeading>Financial Analysis · Rent + EB</SectionHeading>
       <FinanceCardsSection
         currentCollected={financials.currentCollected}
         currentPending={financials.currentPending}
@@ -903,29 +1005,42 @@ const TenantDashboardView = ({ data, financials }: { data: TenantDashboard; fina
       {detailMode && tenantId ? (
         <TenantDetailModal mode={detailMode} tenantId={tenantId} onClose={() => setDetailMode(null)} />
       ) : null}
-      <div className="mb-7">
-        <h1 className="text-2xl font-bold tracking-tight">Welcome, {data.tenantName}</h1>
-        <p className="text-sm text-muted-foreground mt-1">{data.myBranchName} · Tenant Dashboard</p>
-      </div>
-      <h2 className="text-[11px] font-semibold mb-4 text-muted-foreground uppercase tracking-wide">My Room &amp; Bed Details</h2>
+      <SectionHeading>My Room &amp; Bed Details</SectionHeading>
       <div className="grid grid-cols-3 gap-4 mb-4">
         <StatCard label="My Room" value={data.myRoomNumber ?? "—"} sub={data.myRoomType ?? "Room type"} icon={Home} color="text-primary" iconBg="bg-primary/10" />
-        <StatCard label="My Bed"  value={data.myBedNumber  ?? "—"} sub="Assigned bed number" icon={Bed} color="text-cyan-600" iconBg="bg-cyan-50 dark:bg-cyan-950/30" />
-        <div className="bg-background border rounded-xl px-5 py-4 col-span-1">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Contact</p>
+        <StatCard label="My Bed"  value={data.myBedNumber  ?? "—"} sub="Assigned bed number" icon={Bed} color="text-cyan-600" iconBg="bg-cyan-50" />
+        <div className="bg-white border border-gray-100 rounded-2xl px-5 py-4 col-span-1 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-3">Contact</p>
           <div className="space-y-1.5 text-sm">
-            <div><span className="text-muted-foreground text-xs">Phone: </span><span className="font-medium">{data.tenantPhone ?? "—"}</span></div>
-            <div><span className="text-muted-foreground text-xs">Email: </span><span className="font-medium text-xs">{data.tenantEmail ?? "—"}</span></div>
-            <div><span className="text-muted-foreground text-xs">Branch: </span><span className="font-medium text-xs">{data.myBranchName ?? "—"}</span></div>
+            <div><span className="text-gray-400 text-xs">Phone: </span><span className="font-medium text-gray-800">{data.tenantPhone ?? "—"}</span></div>
+            <div><span className="text-gray-400 text-xs">Email: </span><span className="font-medium text-xs text-gray-800">{data.tenantEmail ?? "—"}</span></div>
+            <div><span className="text-gray-400 text-xs">Branch: </span><span className="font-medium text-xs text-gray-800">{data.myBranchName ?? "—"}</span></div>
           </div>
         </div>
       </div>
-      <h2 className="text-[11px] font-semibold mb-4 mt-8 text-muted-foreground uppercase tracking-wide">My Financials · Rent + EB</h2>
-      <div className="grid grid-cols-2 gap-4">
-        <FinCard label="This Month Paid"    value={financials.currentMonthPaid}    icon={CheckCircle2} color="text-emerald-600" iconBg="bg-emerald-50 dark:bg-emerald-950/30" border="border-emerald-200 dark:border-emerald-800" onClick={() => setDetailMode("thisMonthPaid")} />
-        <FinCard label="This Month Pending" value={financials.currentMonthPending} icon={AlertTriangle} color="text-rose-600"    iconBg="bg-rose-50 dark:bg-rose-950/30"       border="border-rose-200 dark:border-rose-800"    onClick={() => setDetailMode("thisMonthPending")} />
-        <FinCard label="Overall Paid"       value={financials.overallPaid}         icon={TrendingUp}   color="text-indigo-600"  iconBg="bg-indigo-50 dark:bg-indigo-950/30"   border="border-indigo-200 dark:border-indigo-800" onClick={() => setDetailMode("overallPaid")} />
-        <FinCard label="Overall Pending"    value={financials.overallPending}      icon={TrendingDown} color="text-orange-600"  iconBg="bg-orange-50 dark:bg-orange-950/30"   border="border-orange-200 dark:border-orange-800" onClick={() => setDetailMode("overallPending")} />
+      <div className="mt-9">
+        <div className="flex items-center justify-between mb-1">
+          <SectionHeading>My Financials · Rent + EB</SectionHeading>
+          {financials.currentMonthPending > 0 || financials.overallPending > 0 ? (
+            <Link
+              to="/payments"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-primary hover:opacity-90 transition-opacity px-3.5 py-2 rounded-lg mb-3"
+            >
+              <CreditCard className="h-3.5 w-3.5" /> Pay Now
+            </Link>
+          ) : null}
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <FinCard label="This Month Paid"    value={financials.currentMonthPaid}    icon={CheckCircle2} color="text-emerald-600" iconBg="bg-emerald-50" accent="bg-emerald-400" onClick={() => setDetailMode("thisMonthPaid")} />
+          <FinCard label="This Month Pending" value={financials.currentMonthPending} icon={AlertTriangle} color="text-rose-600"    iconBg="bg-rose-50"    accent="bg-rose-400"    onClick={() => setDetailMode("thisMonthPending")} />
+          <FinCard label="Overall Paid"       value={financials.overallPaid}         icon={TrendingUp}   color="text-indigo-600"  iconBg="bg-indigo-50"  accent="bg-indigo-400"  onClick={() => setDetailMode("overallPaid")} />
+          <FinCard label="Overall Pending"    value={financials.overallPending}      icon={TrendingDown} color="text-orange-600"  iconBg="bg-orange-50"  accent="bg-orange-400"  onClick={() => setDetailMode("overallPending")} />
+        </div>
+        <div className="mt-3">
+          <Link to="/payments" className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors">
+            View full payment history →
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -1063,7 +1178,11 @@ const Dashboard = () => {
   }, []);
 
   if (loading) {
-    return <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">Loading dashboard…</div>;
+    return (
+      <div className="flex items-center justify-center py-24 text-sm text-gray-400 gap-2">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading dashboard…
+      </div>
+    );
   }
 
   if (error) {
@@ -1091,10 +1210,8 @@ const Dashboard = () => {
     return <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">No dashboard data found.</div>;
   }
 
-  const unitName = globalData.unitName ?? globalData.branches?.[0]?.branchName ?? "Branch";
-
   if (role === "WARDEN") {
-    return <WardenDashboard data={globalData} userName={userName} unitName={unitName} branchId={branchId ? Number(branchId) : null} financials={wardenFin} />;
+    return <WardenDashboard data={globalData} userName={userName} branchId={branchId ? Number(branchId) : null} financials={wardenFin} />;
   }
 
   return <AdminDashboard data={globalData} userName={userName} />;

@@ -12,22 +12,32 @@ import {
   updateFoodSchedule,
   deleteFoodSchedule,
   getUserRole,
+  getBranchId,
+  getBranches,
 } from "@/lib/store";
 
 import {
   FoodTimetable,
   FoodTimetableRequest,
+  Branch,
 } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogDescription,
   DialogFooter,
   DialogClose,
@@ -51,12 +61,8 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Download,
-  Printer,
+  Clock,
 } from "lucide-react";
-
-import { AgGridReact } from "ag-grid-react";
-import type { ColDef } from "ag-grid-community";
 
 /* =====================================================
    CONSTANTS
@@ -72,140 +78,104 @@ const ALL_DAYS = [
 ];
 
 /* =====================================================
-   TAMIL DAY NAME MAP
-===================================================== */
-const DAY_TAMIL: Record<string, string> = {
-  monday:    "திங்கள்",
-  tuesday:   "செவ்வாய்",
-  wednesday: "புதன்",
-  thursday:  "வியாழன்",
-  friday:    "வெள்ளி",
-  saturday:  "சனி",
-  sunday:    "ஞாயிறு",
-};
-
-function tamilDay(day: string): string {
-  return DAY_TAMIL[day.trim().toLowerCase()] ?? day;
-}
-
-/* =====================================================
-   TAMIL MEAL NAME MAP
-===================================================== */
-const MEAL_TAMIL: Record<string, string> = {
-  "semiya":              "சேமியா",
-  "khichdi":              "கிச்சடி",
-  "pongal":               "பொங்கல்",
-  "upma":                 "உப்மா",
-  "rava upma":            "ரவா உப்மா",
-  "idli":                 "இட்லி",
-  "idly":                 "இட்லி",
-  "dosa":                 "தோசை",
-  "dosai":                "தோசை",
-  "chapati":              "சப்பாத்தி",
-  "puri":                 "பூரி",
-  "bread":                "பிரட்",
-  "omelette":             "ஆம்லெட்",
-  "egg":                  "முட்டை",
-  "puttu":                "புட்டு",
-  "appam":                "ஆப்பம்",
-  "idiyappam":            "இடியாப்பம்",
-  "poori":                "பூரி",
-  "parotta":              "பரோட்டா",
-  "thakkali sadham":      "தக்காளி சாதம்",
-  "tomato rice":          "தக்காளி சாதம்",
-  "sambar sadham":        "சாம்பார் சாதம்",
-  "thayir sadham":        "தயிர் சாதம்",
-  "curd rice":            "தயிர் சாதம்",
-  "kara kuzhambu":        "கார குழம்பு",
-  "puliyodharai":         "புளியோதரை",
-  "tamarind rice":        "புளியோதரை",
-  "lemon rice":           "எலுமிச்சை சாதம்",
-  "coconut rice":         "தேங்காய் சாதம்",
-  "variety rice":         "வெரைட்டி சாதம்",
-  "fried rice":           "பிரைட் ரைஸ்",
-  "chicken":              "சிக்கன்",
-  "chicken curry":        "சிக்கன் கறி",
-  "fish curry":           "மீன் கறி",
-  "egg curry":            "முட்டை கறி",
-  "pirinji":              "பிரிஞ்சி",
-  "biryani":              "பிரியாணி",
-  "biriyani":             "பிரியாணி",
-  "mutta":                "முட்டை",
-  "rice":                 "சாதம்",
-  "white rice":           "வெள்ளை சாதம்",
-  "sambar":               "சாம்பார்",
-  "rasam":                "ரசம்",
-  "sambar / rasam":       "சாம்பார் / ரசம்",
-  "chutney":              "சட்னி",
-  "coconut chutney":      "தேங்காய் சட்னி",
-  "tomato chutney":       "தக்காளி சட்னி",
-  "pickle":               "ஊறுகாய்",
-  "papad":                "அப்பளம்",
-  "appalam":              "அப்பளம்",
-  "raita":                "ரைத்தா",
-  "dal":                  "பருப்பு",
-  "kootu":                "கூட்டு",
-  "poriyal":              "பொரியல்",
-  "curry":                "கறி",
-  "food":                 "சாப்பாடு",
-};
-
-function tamilMeal(meal: string): string {
-  if (!meal) return meal;
-  const key = meal.trim().toLowerCase();
-  if (MEAL_TAMIL[key]) return MEAL_TAMIL[key];
-  const plusSep  = meal.includes(" + ");
-  const dashSep  = meal.includes(" - ");
-  const separator = plusSep ? " + " : dashSep ? " - " : null;
-  if (separator) {
-    return meal
-      .split(separator)
-      .map((part) => MEAL_TAMIL[part.trim().toLowerCase()] ?? part.trim())
-      .join(separator);
-  }
-  return meal;
-}
-
-/* =====================================================
    COMPONENT
 ===================================================== */
 const FoodTimetablePage = () => {
 
+  const role      = getUserRole()?.toUpperCase();
+  const hasAccess = role === "ADMIN" || role === "SUPER_ADMIN";
+  const branchId  = getBranchId(); 
+
+  /* ── BRANCH STATE ── */
+  const [branches, setBranches] = useState<Branch[]>([]);
+  /* Set initial branch filter to "ALL" */
+  const [selectedBranch, setSelectedBranch] = useState<string>("ALL");
+
+  /* Modal-specific branch selection state */
+  const [modalBranch, setModalBranch] = useState<string>("");
+
   /* ── STATE ── */
   const [schedules,    setSchedules]    = useState<FoodTimetable[]>([]);
-  const [form,         setForm]         = useState<FoodTimetableRequest>({ dayName: "", breakfast: "", lunch: "", dinner: "" });
+  const [form,         setForm]         = useState<FoodTimetableRequest>({
+    dayName: "", breakfast: "", lunch: "", dinner: "",
+    branchId: undefined,
+  });
   const [addOpen,      setAddOpen]      = useState(false);
   const [editOpen,     setEditOpen]     = useState(false);
   const [editSchedule, setEditSchedule] = useState<FoodTimetable | null>(null);
-  const [downloading,  setDownloading]  = useState(false);
-  const [printing,     setPrinting]     = useState(false);
+  const [loading,      setLoading]      = useState(false);
 
-  const role      = getUserRole()?.toUpperCase();
-  const hasAccess = role === "ADMIN";
   const didLoad   = useRef(false);
 
-  /* ── DERIVED: days not yet scheduled ── */
-  const usedDays = useMemo(
-    () => schedules.map((s) => s.dayName.trim().toLowerCase()),
-    [schedules]
+  /* Helper map to quickly lookup branch name by branchId */
+  const branchMap = useMemo(() => {
+    const map = new Map<number, string>();
+    branches.forEach((b) => map.set(b.id, b.unitName));
+    return map;
+  }, [branches]);
+
+  /* ── LOAD BRANCHES ── */
+  useEffect(() => {
+    if (role !== "ADMIN" && role !== "SUPER_ADMIN") return;
+    (async () => {
+      try {
+        const { content } = await getBranches(0, 50);
+        setBranches(content);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  }, [role]);
+
+  useEffect(() => {
+    if (!selectedBranch || selectedBranch === "ALL") return;
+    setForm((f) => ({ ...f, branchId: Number(selectedBranch) }));
+  }, [selectedBranch]);
+
+  /* Filter schedules: if "ALL" is selected, show all branches */
+  const branchSchedules = useMemo(
+    () =>
+      selectedBranch && selectedBranch !== "ALL"
+        ? schedules.filter((s) => s.branchId === Number(selectedBranch))
+        : schedules,
+    [schedules, selectedBranch]
   );
 
-  const availableDays = useMemo(
-    () => ALL_DAYS.filter((d) => !usedDays.includes(d.toLowerCase())),
-    [usedDays]
+  const orderedSchedules = useMemo(
+    () =>
+      [...branchSchedules].sort(
+        (a, b) =>
+          ALL_DAYS.findIndex((d) => d.toLowerCase() === a.dayName.trim().toLowerCase()) -
+          ALL_DAYS.findIndex((d) => d.toLowerCase() === b.dayName.trim().toLowerCase())
+      ),
+    [branchSchedules]
   );
 
-  /* Hide Add button when all 7 days are already scheduled */
-  const allDaysScheduled = schedules.length >= 7;
+  /* Compute available days specifically for the branch selected inside the Add Modal */
+  const modalAvailableDays = useMemo(() => {
+    const activeBranchId = modalBranch ? Number(modalBranch) : form.branchId;
+    if (!activeBranchId) return ALL_DAYS;
+
+    const existingDays = schedules
+      .filter((s) => s.branchId === activeBranchId)
+      .map((s) => s.dayName.trim().toLowerCase());
+
+    return ALL_DAYS.filter((d) => !existingDays.includes(d.toLowerCase()));
+  }, [schedules, modalBranch, form.branchId]);
+
+  const allDaysScheduled = branchSchedules.length >= 7;
 
   /* ── LOAD ── */
   const reload = useCallback(async () => {
     try {
+      setLoading(true);
       const data = await getFoodSchedules();
       setSchedules(data);
     } catch (err) {
       console.error(err);
       toast.error("Failed to load food schedules");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -217,6 +187,10 @@ const FoodTimetablePage = () => {
 
   /* ── ADD ── */
   const handleAdd = async () => {
+    if (!form.branchId) {
+      toast.error("Please select a branch");
+      return;
+    }
     if (!form.dayName || !form.breakfast || !form.lunch || !form.dinner) {
       toast.error("All fields are required");
       return;
@@ -225,7 +199,11 @@ const FoodTimetablePage = () => {
       await createFoodSchedule(form);
       toast.success("Food Schedule Created");
       setAddOpen(false);
-      setForm({ dayName: "", breakfast: "", lunch: "", dinner: "" });
+      setModalBranch("");
+      setForm({
+        dayName: "", breakfast: "", lunch: "", dinner: "",
+        branchId: undefined,
+      });
       await reload();
     } catch (e: any) {
       toast.error(e?.response?.data?.message || "Create failed");
@@ -241,6 +219,7 @@ const FoodTimetablePage = () => {
         breakfast: editSchedule.breakfast,
         lunch:     editSchedule.lunch,
         dinner:    editSchedule.dinner,
+        branchId:  editSchedule.branchId,
       });
       toast.success("Food Schedule Updated");
       setEditOpen(false);
@@ -262,545 +241,333 @@ const FoodTimetablePage = () => {
     }
   };
 
-  /* =====================================================
-     DOWNLOAD – ENGLISH ONLY WORD (.docx)
-  ===================================================== */
-  const handleDownloadDocx = async () => {
-    if (schedules.length === 0) { toast.error("No schedules to download"); return; }
-    setDownloading(true);
-
-    try {
-      const {
-        Document, Packer, Paragraph, TextRun,
-        Table, TableRow, TableCell,
-        AlignmentType, WidthType, BorderStyle,
-        ShadingType, VerticalAlign,
-      } = await import("docx");
-
-      const { saveAs } = await import("file-saver");
-
-      const bHead  = { style: BorderStyle.SINGLE, size: 4, color: "1D4ED8" };
-      const bLight = { style: BorderStyle.SINGLE, size: 1, color: "BFDBFE" };
-      const bordersHead  = { top: bHead,  bottom: bHead,  left: bHead,  right: bHead  };
-      const bordersLight = { top: bLight, bottom: bLight, left: bLight, right: bLight };
-
-      const colW = [1900, 2375, 2375, 2376];
-
-      const hCell = (label: string, i: number) =>
-        new TableCell({
-          borders: bordersHead,
-          width: { size: colW[i], type: WidthType.DXA },
-          shading: { fill: "1D4ED8", type: ShadingType.CLEAR },
-          verticalAlign: VerticalAlign.CENTER,
-          margins: { top: 120, bottom: 120, left: 140, right: 140 },
-          children: [
-            new Paragraph({
-              alignment: AlignmentType.CENTER,
-              children: [
-                new TextRun({ text: label, bold: true, color: "FFFFFF", size: 24, font: "Arial" }),
-              ],
-            }),
-          ],
-        });
-
-      const headerRow = new TableRow({
-        tableHeader: true,
-        children: [
-          hCell("Day",       0),
-          hCell("Breakfast", 1),
-          hCell("Lunch",     2),
-          hCell("Dinner",    3),
-        ],
-      });
-
-      const dataRows = schedules.map((s, idx) => {
-        const rowFill = idx % 2 === 0 ? "EFF6FF" : "FFFFFF";
-        const dayFill = idx % 2 === 0 ? "DBEAFE" : "EFF6FF";
-
-        const mealCell = (text: string, i: number) =>
-          new TableCell({
-            borders: bordersLight,
-            width: { size: colW[i], type: WidthType.DXA },
-            shading: { fill: rowFill, type: ShadingType.CLEAR },
-            verticalAlign: VerticalAlign.CENTER,
-            margins: { top: 90, bottom: 90, left: 140, right: 140 },
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({ text: text ?? "", size: 20, font: "Arial", color: "1E293B" }),
-                ],
-              }),
-            ],
-          });
-
-        return new TableRow({
-          children: [
-            new TableCell({
-              borders: bordersLight,
-              width: { size: colW[0], type: WidthType.DXA },
-              shading: { fill: dayFill, type: ShadingType.CLEAR },
-              verticalAlign: VerticalAlign.CENTER,
-              margins: { top: 90, bottom: 90, left: 140, right: 140 },
-              children: [
-                new Paragraph({
-                  children: [
-                    new TextRun({ text: s.dayName, bold: true, size: 22, font: "Arial", color: "1D4ED8" }),
-                  ],
-                }),
-              ],
-            }),
-            mealCell(s.breakfast, 1),
-            mealCell(s.lunch,     2),
-            mealCell(s.dinner,    3),
-          ],
-        });
-      });
-
-      const doc = new Document({
-        styles: {
-          default: { document: { run: { font: "Arial", size: 20 } } },
-        },
-        sections: [{
-          properties: {
-            page: {
-              size: { width: 11906, height: 16838 },
-              margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
-            },
-          },
-          children: [
-            new Paragraph({
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 60 },
-              children: [
-                new TextRun({ text: "Hostel Food Time Table", bold: true, size: 44, font: "Arial", color: "1D4ED8" }),
-              ],
-            }),
-            new Paragraph({
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 60 },
-              children: [
-                new TextRun({ text: "Weekly Meal Schedule", size: 26, font: "Arial", color: "3B82F6" }),
-              ],
-            }),
-            new Paragraph({
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 80 },
-              children: [
-                new TextRun({ text: "Hostel HMS – Management System", size: 20, font: "Arial", color: "64748B" }),
-              ],
-            }),
-            new Paragraph({
-              spacing: { after: 200 },
-              border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: "1D4ED8", space: 1 } },
-              children: [],
-            }),
-            new Paragraph({
-              spacing: { after: 40 },
-              children: [
-                new TextRun({ text: "Morning (Breakfast) : ",  bold: true, size: 20, font: "Arial", color: "1E293B" }),
-                new TextRun({ text: "8:00 AM – 9:30 AM",       size: 20,   font: "Arial",           color: "475569" }),
-              ],
-            }),
-            new Paragraph({
-              spacing: { after: 40 },
-              children: [
-                new TextRun({ text: "Afternoon (Lunch) : ",    bold: true, size: 20, font: "Arial", color: "1E293B" }),
-                new TextRun({ text: "1:00 PM – 2:00 PM",       size: 20,   font: "Arial",           color: "475569" }),
-              ],
-            }),
-            new Paragraph({
-              spacing: { after: 240 },
-              children: [
-                new TextRun({ text: "Night (Dinner) : ",       bold: true, size: 20, font: "Arial", color: "1E293B" }),
-                new TextRun({ text: "8:30 PM – 9:30 PM",       size: 20,   font: "Arial",           color: "475569" }),
-              ],
-            }),
-            new Table({
-              width: { size: 9026, type: WidthType.DXA },
-              columnWidths: colW,
-              rows: [headerRow, ...dataRows],
-            }),
-            new Paragraph({
-              spacing: { before: 400, after: 60 },
-              children: [
-                new TextRun({ text: "Note: ", bold: true, size: 18, font: "Arial", color: "475569" }),
-                new TextRun({
-                  text: "Items like Chapati, Dosai, Puri are temporarily suspended. They will be resumed once the issue is resolved.",
-                  size: 18, font: "Arial", color: "64748B",
-                }),
-              ],
-            }),
-            new Paragraph({
-              spacing: { before: 80 },
-              children: [
-                new TextRun({ text: "– Hostel Management", size: 18, font: "Arial", italics: true, color: "94A3B8" }),
-              ],
-            }),
-            new Paragraph({
-              alignment: AlignmentType.RIGHT,
-              spacing: { before: 200 },
-              children: [
-                new TextRun({
-                  text: `Generated: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" })}`,
-                  size: 16, font: "Arial", color: "94A3B8", italics: true,
-                }),
-              ],
-            }),
-          ],
-        }],
-      });
-
-      const blob = await Packer.toBlob(doc);
-      saveAs(blob, "food-timetable-english.docx");
-      toast.success("Downloaded");
-
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to generate document");
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  /* =====================================================
-     PRINT – TAMIL ONLY
-  ===================================================== */
-  const handlePrint = () => {
-    if (schedules.length === 0) { toast.error("No schedules to print"); return; }
-    setPrinting(true);
-
-    const rows = schedules
-      .map((s, i) => `
-        <tr style="background:${i % 2 === 0 ? "#eff6ff" : "#fff"}">
-          <td class="day-cell" style="background:${i % 2 === 0 ? "#dbeafe" : "#eff6ff"}">
-            ${tamilDay(s.dayName)}
-          </td>
-          <td>${tamilMeal(s.breakfast)}</td>
-          <td>${tamilMeal(s.lunch)}</td>
-          <td>${tamilMeal(s.dinner)}</td>
-        </tr>`)
-      .join("");
-
-    const dateStr = new Date().toLocaleDateString("ta-IN", {
-      day: "2-digit", month: "long", year: "numeric",
-    });
-
-    const html = `<!DOCTYPE html>
-<html lang="ta">
-<head>
-<meta charset="UTF-8"/>
-<title>விடுதி உணவு அட்டவணை</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&display=swap" rel="stylesheet"/>
-<style>
-  *  { margin:0; padding:0; box-sizing:border-box }
-  body {
-    font-family: 'Noto Sans Tamil', serif;
-    padding: 28px 36px;
-    color: #1e293b;
-    background: #fff;
-    font-size: 11pt;
-  }
-  .title-main {
-    font-size: 22pt;
-    font-weight: 700;
-    color: #1d4ed8;
-    text-align: center;
-    display: block;
-    margin-bottom: 4px;
-  }
-  .title-sub {
-    font-size: 11pt;
-    color: #64748b;
-    text-align: center;
-    display: block;
-    margin-bottom: 12px;
-  }
-  hr { border: none; border-top: 3px solid #1d4ed8; margin: 10px 0 14px }
-  .timings { font-size: 10pt; margin-bottom: 14px; line-height: 2.1 }
-  .timings .lbl { font-weight: 700; color: #1e293b }
-  .timings .val { color: #475569 }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px }
-  thead tr { background: #1d4ed8 }
-  thead th {
-    padding: 10px 12px;
-    color: #fff;
-    border: 1.5px solid #1d4ed8;
-    text-align: center;
-    vertical-align: middle;
-    font-size: 13pt;
-    font-weight: 700;
-  }
-  tbody td {
-    padding: 8px 12px;
-    border: 1px solid #bfdbfe;
-    font-size: 11pt;
-    color: #1e293b;
-    vertical-align: middle;
-  }
-  .day-cell {
-    font-size: 13pt;
-    font-weight: 700;
-    color: #1d4ed8;
-    vertical-align: middle;
-  }
-  .note { font-size: 9.5pt; color: #64748b; line-height: 1.9; margin-top: 6px }
-  .note b { color: #475569 }
-  .sign { margin-top: 12px; font-size: 10pt; color: #475569 }
-  .gen  { text-align: right; font-size: 8pt; color: #94a3b8; font-style: italic; margin-top: 10px }
-  @media print {
-    body { padding: 8mm 12mm }
-    @page { size: A4 portrait; margin: 8mm 12mm }
-  }
-</style>
-</head>
-<body>
-  <span class="title-main">விடுதி உணவு அட்டவணை</span>
-  <span class="title-sub">விடுதி மேலாண்மை அமைப்பு – Hostel HMS</span>
-  <hr/>
-  <div class="timings">
-    <span class="lbl">காலை :</span> <span class="val">காலை 8:00 – 9:30</span><br/>
-    <span class="lbl">மதியம் :</span> <span class="val">மதியம் 1:00 – 2:00</span><br/>
-    <span class="lbl">இரவு :</span> <span class="val">இரவு 8:30 – 9:30</span>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>நாள்</th>
-        <th>காலை</th>
-        <th>மதியம்</th>
-        <th>இரவு</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <div class="note">
-    <p>
-      <b>குறிப்பு:</b>
-      சிவிண்டர் பிரச்சினையால் சப்பாத்தி, தோசை, பூரி போன்ற உணவு தற்காலிகமாக
-      நிறுத்திவைக்கப்பட்டுள்ளன. பிரச்சினை தீர்ந்தபின் மீண்டும் வழங்கப்படும்.
-    </p>
-  </div>
-  <div class="sign">இப்படிக்கு, விடுதி நிர்வாகம்.</div>
-  <div class="gen">உருவாக்கப்பட்ட தேதி: ${dateStr}</div>
-  <script>
-    document.fonts.ready.then(() => {
-      window.print();
-      window.onafterprint = () => window.close();
-    });
-  <\/script>
-</body>
-</html>`;
-
-    const w = window.open("", "_blank", "width=900,height=720");
-    if (w) {
-      w.document.write(html);
-      w.document.close();
-    } else {
-      toast.error("Popup blocked – please allow popups for this site.");
-    }
-    setPrinting(false);
-  };
-
-  /* ── GRID ── */
-  const rowData = useMemo(() => schedules, [schedules]);
-
-  const columnDefs: ColDef<FoodTimetable>[] = useMemo(
-    () => [
-      { headerName: "Day",       field: "dayName",   filter: true },
-      { headerName: "Breakfast", field: "breakfast", filter: true },
-      { headerName: "Lunch",     field: "lunch",     filter: true },
-      { headerName: "Dinner",    field: "dinner",    filter: true },
-      ...(hasAccess
-        ? [{
-            headerName: "Actions",
-            cellRenderer: (params: { data: FoodTimetable }) => (
-              <div className="flex gap-2">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => { setEditSchedule({ ...params.data }); setEditOpen(true); }}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button size="icon" variant="ghost">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete Food Schedule?</AlertDialogTitle>
-                      <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => handleDelete(params.data.id)}>
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            ),
-          }]
-        : []),
-    ],
-    [hasAccess]
-  );
-
-  const defaultColDef = useMemo(
-    () => ({ sortable: true, resizable: true, flex: 1 }),
-    []
-  );
-
-  /* ── UI ── */
+  /* ================= UI ================= */
   return (
-    <div className="space-y-6">
+    <div className="min-h-full bg-[#fcfcfc] text-slate-900 font-sans pb-10">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        .ft-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; width: 100%; }
 
-      {/* HEADER */}
-      <div className="flex justify-between items-center">
+        .ft-main { display: flex; gap: 24px; align-items: flex-start; }
+        .ft-content { flex: 1; min-width: 0; background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
+        .ft-sidebar { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 24px; }
 
-        <div>
-          <h1 className="text-2xl font-bold">Food Timetable</h1>
-          <p className="text-sm text-muted-foreground">{schedules.length} schedules</p>
-        </div>
+        .ft-panel-header { padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; flex-wrap: wrap; gap: 12px; }
+        .ft-panel-title { font-size: 16px; font-weight: 700; color: #0f172a; }
 
-        <div className="flex items-center gap-2">
+        .ft-table { width: 100%; border-collapse: collapse; min-width: 640px; }
+        .ft-table th { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; padding: 16px 24px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fff; letter-spacing: 0.5px; }
+        .ft-table td { padding: 16px 24px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+        .ft-table tr:hover { background: #fdfcff; }
 
-          {/* PRINT – Tamil only */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handlePrint}
-            disabled={printing || schedules.length === 0}
-          >
-            <Printer className="h-4 w-4 mr-2" />
-            {printing ? "Opening..." : "Print (Tamil)"}
-          </Button>
+        .ft-day-badge { display: inline-flex; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; color: #1d4ed8; background: #eff6ff; }
+        .ft-branch-badge { display: inline-flex; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #475569; background: #f1f5f9; }
 
-          {/* DOWNLOAD – English only .docx */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleDownloadDocx}
-            disabled={downloading || schedules.length === 0}
-          >
-            <Download className="h-4 w-4 mr-2" />
-            {downloading ? "Generating..." : "Download (English)"}
-          </Button>
+        /* ACTION BUTTONS */
+        .ft-action-btn { 
+          width: 36px; 
+          height: 36px; 
+          border-radius: 8px; 
+          border: 1px solid;
+          display: inline-flex; 
+          align-items: center; 
+          justify-content: center; 
+          margin-right: 8px; 
+          cursor: pointer; 
+          transition: all 0.2s ease; 
+        }
+        .ft-action-btn:last-child { margin-right: 0; }
+        
+        .ft-action-btn.edit {
+          color: #2563eb !important;
+          border-color: #bfdbfe;
+          background-color: #eff6ff;
+        }
+        .ft-action-btn.edit:hover { 
+          background-color: #dbeafe; 
+          border-color: #93c5fd; 
+          color: #1d4ed8 !important;
+        }
+        
+        .ft-action-btn.del { 
+          color: #dc2626 !important; 
+          border-color: #fca5a5;
+          background-color: #fef2f2;
+        }
+        .ft-action-btn.del:hover { 
+          background-color: #fee2e2; 
+          border-color: #f87171; 
+          color: #b91c1c !important;
+        }
 
-          {/* ADD – admin only, hidden when all 7 days are scheduled */}
-          {hasAccess && !allDaysScheduled && (
-            <Dialog
-              open={addOpen}
-              onOpenChange={(open) => {
-                setAddOpen(open);
-                if (!open) {
-                  setForm({ dayName: "", breakfast: "", lunch: "", dinner: "" });
-                }
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Schedule
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Add Food Schedule</DialogTitle>
-                  <DialogDescription>Create weekly food timetable</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  {/* Day dropdown – only shows unscheduled days */}
-                  <select
-                    value={form.dayName}
-                    onChange={(e) => setForm({ ...form, dayName: e.target.value })}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="">Select Day</option>
-                    {availableDays.map((day) => (
-                      <option key={day} value={day}>{day}</option>
-                    ))}
-                  </select>
-                  <Input
-                    placeholder="Breakfast"
-                    value={form.breakfast}
-                    onChange={(e) => setForm({ ...form, breakfast: e.target.value })}
-                  />
-                  <Input
-                    placeholder="Lunch"
-                    value={form.lunch}
-                    onChange={(e) => setForm({ ...form, lunch: e.target.value })}
-                  />
-                  <Input
-                    placeholder="Dinner"
-                    value={form.dinner}
-                    onChange={(e) => setForm({ ...form, dinner: e.target.value })}
-                  />
+        .ft-sidebar-card { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); padding: 24px; }
+        .ft-sidebar-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
+      `}</style>
+
+      <div className="ft-wrap">
+        {/* MAIN LAYOUT */}
+        <div className="ft-main flex-col lg:flex-row">
+
+          {/* LEFT SIDEBAR: MEAL TIMINGS */}
+          <div className="ft-sidebar w-full lg:w-[320px]">
+            <div className="ft-sidebar-card bg-indigo-50/40 border-indigo-100">
+              <h3 className="ft-sidebar-title text-indigo-950 mb-4">Meal Timings</h3>
+              <div className="flex gap-4">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Clock size={18} />
                 </div>
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button variant="outline">Cancel</Button>
-                  </DialogClose>
-                  <Button onClick={handleAdd}>Create</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+                <div className="text-[13px] text-indigo-900/80 leading-relaxed font-medium space-y-1">
+                  <p><span className="font-bold text-indigo-950">Breakfast:</span> 8:00 AM – 9:30 AM</p>
+                  <p><span className="font-bold text-indigo-950">Lunch:</span> 1:00 PM – 2:00 PM</p>
+                  <p><span className="font-bold text-indigo-950">Dinner:</span> 8:30 PM – 9:30 PM</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT: TABLE */}
+          <div className="ft-content w-full lg:w-auto">
+            <div className="ft-panel-header">
+              <div className="ft-panel-title">Weekly Meal Schedule</div>
+              <div className="flex gap-2 items-center flex-wrap">
+                {/* BRANCH SWITCHER WITH ALL BRANCHES OPTION */}
+                {(role === "ADMIN" || role === "SUPER_ADMIN") && (
+                  <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-10 w-[160px]">
+                    <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                      <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                        <SelectValue placeholder="Select Branch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Branches</SelectItem>
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {hasAccess && !allDaysScheduled && (
+                  <Button
+                    size="sm"
+                    className="h-10 bg-[#5200FF] hover:bg-[#4200cc] text-white px-4 font-semibold"
+                    onClick={() => {
+                      const defaultBranch = selectedBranch !== "ALL" ? selectedBranch : "";
+                      setModalBranch(defaultBranch);
+                      setForm((f) => ({
+                        ...f,
+                        dayName: "",
+                        branchId: defaultBranch ? Number(defaultBranch) : undefined,
+                      }));
+                      setAddOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Add Schedule
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* TABLE */}
+            <div className="overflow-x-auto">
+              <table className="ft-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>BRANCH</th>
+                    <th>DAY</th>
+                    <th>BREAKFAST</th>
+                    <th>LUNCH</th>
+                    <th>DINNER</th>
+                    {hasAccess && <th className="text-right">ACTIONS</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={hasAccess ? 7 : 6} className="text-center py-12 text-slate-400">Loading…</td></tr>
+                  ) : orderedSchedules.length === 0 ? (
+                    <tr><td colSpan={hasAccess ? 7 : 6} className="text-center py-12 text-slate-400">No schedules found.</td></tr>
+                  ) : (
+                    orderedSchedules.map((row, i) => (
+                      <tr key={row.id}>
+                        <td className="text-[13px] font-semibold text-slate-500 w-12">{i + 1}</td>
+                        {/* BRANCH NAME COLUMN */}
+                        <td>
+                          <div className="ft-branch-badge">
+                            {branchMap.get(row.branchId) || `Branch #${row.branchId}`}
+                          </div>
+                        </td>
+                        <td><div className="ft-day-badge">{row.dayName}</div></td>
+                        <td className="text-[13px] font-medium text-slate-700">{row.breakfast}</td>
+                        <td className="text-[13px] font-medium text-slate-700">{row.lunch}</td>
+                        <td className="text-[13px] font-medium text-slate-700">{row.dinner}</td>
+                        {hasAccess && (
+                          <td className="text-right whitespace-nowrap">
+                            {/* EDIT BUTTON */}
+                            <button
+                              type="button"
+                              className="ft-action-btn edit"
+                              title="Edit Schedule"
+                              onClick={() => { setEditSchedule({ ...row }); setEditOpen(true); }}
+                            >
+                              <Pencil 
+                                size={16} 
+                                className="w-4 h-4 stroke-[2.2] text-blue-600 shrink-0" 
+                                style={{ stroke: "#2563eb", display: "block" }} 
+                              />
+                            </button>
+
+                            {/* DELETE BUTTON */}
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <button type="button" className="ft-action-btn del" title="Delete Schedule">
+                                  <Trash2 
+                                    size={16} 
+                                    className="w-4 h-4 stroke-[2.2] text-red-600 shrink-0" 
+                                    style={{ stroke: "#dc2626", display: "block" }} 
+                                  />
+                                </button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete {row.dayName}'s schedule?</AlertDialogTitle>
+                                  <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}>Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
         </div>
+
+        {/* ADD DIALOG */}
+        {hasAccess && (
+          <Dialog
+            open={addOpen}
+            onOpenChange={(open) => {
+              setAddOpen(open);
+              if (!open) {
+                setModalBranch("");
+                setForm({
+                  dayName: "", breakfast: "", lunch: "", dinner: "",
+                  branchId: undefined,
+                });
+              }
+            }}
+          >
+            <DialogContent className="rounded-3xl max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-bold">Add Food Schedule</DialogTitle>
+                <DialogDescription>
+                  Create weekly food timetable.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                {(role === "ADMIN" || role === "SUPER_ADMIN") && branches.length > 0 && (
+                  <Select
+                    value={modalBranch}
+                    onValueChange={(val) => {
+                      setModalBranch(val);
+                      setForm((f) => ({ ...f, branchId: Number(val), dayName: "" }));
+                    }}
+                  >
+                    <SelectTrigger className="w-full h-11 text-slate-600">
+                      <SelectValue placeholder="Select Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={String(b.id)}>
+                          {b.unitName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                <Select value={form.dayName} onValueChange={(v) => setForm({ ...form, dayName: v })}>
+                  <SelectTrigger className="w-full h-11 text-slate-600">
+                    <SelectValue placeholder="Select Day" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modalAvailableDays.map((day) => (
+                      <SelectItem key={day} value={day}>{day}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Input placeholder="Breakfast" className="h-11" value={form.breakfast} onChange={(e) => setForm({ ...form, breakfast: e.target.value })} />
+                <Input placeholder="Lunch" className="h-11" value={form.lunch} onChange={(e) => setForm({ ...form, lunch: e.target.value })} />
+                <Input placeholder="Dinner" className="h-11" value={form.dinner} onChange={(e) => setForm({ ...form, dinner: e.target.value })} />
+              </div>
+              <DialogFooter className="mt-4">
+                <DialogClose asChild><Button variant="outline" className="h-10">Cancel</Button></DialogClose>
+                <Button className="bg-[#5200FF] hover:bg-[#4200cc] text-white h-10 px-6 font-semibold" onClick={handleAdd}>Create</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* EDIT DIALOG */}
+        {hasAccess && (
+          <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditSchedule(null); }}>
+            <DialogContent className="rounded-3xl max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-bold">Edit Food Schedule</DialogTitle>
+                <DialogDescription>Update timetable details.</DialogDescription>
+              </DialogHeader>
+              {editSchedule && (
+                <div className="space-y-4 pt-2">
+                  {/* BRANCH SELECTION IN EDIT MODAL */}
+                  {branches.length > 0 && (
+                    <Select
+                      value={String(editSchedule.branchId)}
+                      onValueChange={(val) =>
+                        setEditSchedule({ ...editSchedule, branchId: Number(val) })
+                      }
+                    >
+                      <SelectTrigger className="w-full h-11 text-slate-600">
+                        <SelectValue placeholder="Select Branch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={String(b.id)}>
+                            {b.unitName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+
+                  <Input 
+                    className="h-11" 
+                    placeholder="Day Name"
+                    value={editSchedule.dayName} 
+                    onChange={(e) => setEditSchedule({ ...editSchedule, dayName: e.target.value })} 
+                  />
+                  <Input className="h-11" placeholder="Breakfast" value={editSchedule.breakfast} onChange={(e) => setEditSchedule({ ...editSchedule, breakfast: e.target.value })} />
+                  <Input className="h-11" placeholder="Lunch" value={editSchedule.lunch} onChange={(e) => setEditSchedule({ ...editSchedule, lunch: e.target.value })} />
+                  <Input className="h-11" placeholder="Dinner" value={editSchedule.dinner} onChange={(e) => setEditSchedule({ ...editSchedule, dinner: e.target.value })} />
+                </div>
+              )}
+              <DialogFooter className="mt-4">
+                <Button variant="outline" className="h-10" onClick={() => setEditOpen(false)}>Cancel</Button>
+                <Button className="bg-[#5200FF] hover:bg-[#4200cc] text-white h-10 px-6 font-semibold" onClick={handleEdit}>Save</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
-
-      {/* EDIT DIALOG */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Food Schedule</DialogTitle>
-            <DialogDescription>Update timetable details</DialogDescription>
-          </DialogHeader>
-          {editSchedule && (
-            <div className="space-y-4">
-              <Input
-                value={editSchedule.dayName}
-                onChange={(e) => setEditSchedule({ ...editSchedule, dayName: e.target.value })}
-              />
-              <Input
-                value={editSchedule.breakfast}
-                onChange={(e) => setEditSchedule({ ...editSchedule, breakfast: e.target.value })}
-              />
-              <Input
-                value={editSchedule.lunch}
-                onChange={(e) => setEditSchedule({ ...editSchedule, lunch: e.target.value })}
-              />
-              <Input
-                value={editSchedule.dinner}
-                onChange={(e) => setEditSchedule({ ...editSchedule, dinner: e.target.value })}
-              />
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button onClick={handleEdit}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* GRID */}
-      <div className="ag-theme-alpine" style={{ height: 513 }}>
-        <AgGridReact
-          rowData={rowData}
-          columnDefs={columnDefs}
-          defaultColDef={defaultColDef}
-          pagination
-          paginationPageSize={10}
-          paginationPageSizeSelector={[10, 20, 50, 100]}
-        />
-      </div>
-
     </div>
   );
 };
