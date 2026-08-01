@@ -151,7 +151,7 @@ import axios from "axios";
 import { getToken, getRefreshToken, setToken, logout } from "./auth";
 
 const api = axios.create({
-  baseURL: ""https://api.brindhavanamhostels.com/api",
+  baseURL: "https://api.brindhavanamhostels.com/api",
   headers: { Accept: "application/json" },
 });
 
@@ -219,7 +219,7 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const { data } = await axios.post(""https://api.brindhavanamhostels.com/api/auth/refresh", {
+        const { data } = await axios.post("https://api.brindhavanamhostels.com/api/auth/refresh", {
           refreshToken: getRefreshToken(),
         });
         const token = data.data.token;
