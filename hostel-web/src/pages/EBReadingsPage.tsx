@@ -50,7 +50,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import { toast } from "sonner";
-import { Plus, Download, RefreshCw, Send, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Download, RefreshCw, Send, Trash2, ChevronLeft, ChevronRight, X } from "lucide-react";
 
 /* ─── Icons ──────────────────────────────────────────────────
    Previously these action/pagination icons were hand-rolled
@@ -131,6 +131,30 @@ const EBReadingsPage = () => {
   const now = new Date();
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
   const [selYear,  setSelYear]  = useState(now.getFullYear());
+
+  /* ── In-app confirm dialog state, replacing window.confirm() so
+     destructive actions (like deleting an EB reading) render inline
+     using the same Dialog component as the rest of the app, instead
+     of the browser's native confirm() popup. `danger` swaps the
+     confirm button to the destructive/red Button variant. Mirrors
+     the same pattern used on the Rooms & Beds, Branch, and Tenants
+     pages, so all delete confirmations look and behave identically
+     across the app. ── */
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const askConfirm = (
+    title: string,
+    onConfirm: () => void,
+    options?: { description?: string; confirmLabel?: string; danger?: boolean }
+  ) => {
+    setConfirmState({ title, onConfirm, ...options });
+  };
 
   // Last 24 months, newest first, for the Month/Year picker.
   const monthYearOptions = useMemo(() => {
@@ -710,6 +734,28 @@ const EBReadingsPage = () => {
     }
   };
 
+  /* ── DELETE CONFIRM (styled, replaces window.confirm) ──
+     Previously the row's delete button called window.confirm(...)
+     directly, which produces the browser's native "localhost:5173
+     says..." popup — visually inconsistent with the rest of the app.
+     This now routes through the same askConfirm() dialog used on
+     Tenants/Rooms/Branch, so the confirmation matches app styling:
+     bold title, "This action cannot be undone." subtext, no close-X,
+     and a red (destructive) "Delete" button. ── */
+  const handleDeleteReadingClick = (row: any) => {
+    askConfirm(
+      "Delete this EB reading?",
+      () => {
+        handleDelete(
+          String(row.id),
+          row.flatId ? Number(row.flatId) : undefined,
+          row.roomId ? Number(row.roomId) : undefined
+        );
+      },
+      { description: "This action cannot be undone.", confirmLabel: "Delete", danger: true }
+    );
+  };
+
   /* ─── WHATSAPP ──────────────────────────────────────────── */
   const handleSendWhatsApp = async (roomId: string) => {
     try {
@@ -1019,11 +1065,11 @@ const EBReadingsPage = () => {
                                   <Send size={14} />
                                 </button>
                                 {hasAccess && (
-                                  <button className="eb-action-btn" onClick={() => {
-                                    if (window.confirm("Delete this EB reading?")) {
-                                      handleDelete(String(row.id), row.flatId ? Number(row.flatId) : undefined, row.roomId ? Number(row.roomId) : undefined);
-                                    }
-                                  }} title="Delete">
+                                  <button
+                                    className="eb-action-btn"
+                                    onClick={() => handleDeleteReadingClick(row)}
+                                    title="Delete"
+                                  >
                                     <Trash2 size={14} />
                                   </button>
                                 )}
@@ -1065,217 +1111,316 @@ const EBReadingsPage = () => {
 
         {hasAccess && (
           <>
-            {/* ── Add Dialog ── */}
+            {/* ── Add Dialog ──
+                Widened to a landscape layout (matches Tenants/Branch/Rooms
+                pages) and rebuilt to the same rounded-2xl + contained-scroll
+                pattern used elsewhere: DialogContent clips to its rounded
+                corners (overflow-hidden, p-0) while the actual scrolling
+                happens on an inner padded wrapper. A custom close (X) button
+                is anchored to that inner wrapper — `[&>button]:hidden` hides
+                shadcn's default close icon, which was rendering unstyled and
+                overflowing past the rounded corner. */}
             <Dialog open={addOpen} onOpenChange={open => { setAddOpen(open); if (!open) resetAddDialog(); }}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Add EB Reading</DialogTitle>
-                  <DialogDescription>Enter the electricity meter readings for this month.</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4">
-                  {/* Branch selector — ADMIN/SUPER_ADMIN pick explicitly
-                      (required before Flat/Room become available); WARDEN's
-                      branch is fixed, so it's shown read-only instead. */}
-                  <Label>Branch</Label>
-                  {canPickBranch ? (
-                    <Select
-                      value={formBranchId}
-                      onValueChange={val => {
-                        setFormBranchId(val);
-                        setFormFlatId("all");
-                        setFormRoomId("");
-                        setRoomSearch("");
-                      }}
+              <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+                <div className="relative max-h-[90vh] overflow-y-auto p-6">
+                  <DialogClose asChild>
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
                     >
-                      <SelectTrigger><SelectValue placeholder="Select Branch" /></SelectTrigger>
-                      <SelectContent>
-                        {branches.map(b => (
-                          <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <div className="flex items-center px-3 py-2 rounded-md border bg-muted text-sm font-medium text-muted-foreground">
-                      <span className="text-foreground font-semibold">
-                        {branches.find(b => Number(b.id) === Number(formBranchId))?.unitName ?? "Unit"}
-                      </span>
-                    </div>
-                  )}
+                      <X className="h-4 w-4 shrink-0" />
+                    </button>
+                  </DialogClose>
 
-                  <Label>Flat</Label>
-                  <Select
-                    value={formFlatId}
-                    onValueChange={setFormFlatId}
-                    disabled={canPickBranch && !formBranchId}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={canPickBranch && !formBranchId ? "Select branch first" : "Select Flat"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">No Flat (standalone room)</SelectItem>
-                      {dialogFlats.map(f => (
-                        <SelectItem key={f.id} value={String(f.id)}>{f.flatNumber}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <DialogHeader>
+                    <DialogTitle>Add EB Reading</DialogTitle>
+                    <DialogDescription>Enter the electricity meter readings for this month.</DialogDescription>
+                  </DialogHeader>
 
-                  {(formFlatId && formFlatId !== "all") ? (
-                    <div className="space-y-3 max-h-[300px] overflow-y-auto">
-                      {flatRoomRows.map(row => {
-                        const cols = row.isAc ? "grid-cols-5" : "grid-cols-3";
-                        return (
-                          <div key={row.roomId}>
-                            <div className={`grid ${cols} font-semibold text-xs text-muted-foreground mb-1`}>
-                              <div>Room</div><div>Prev</div><div>Current</div>
-                              {row.isAc && <div>AC Prev</div>}
-                              {row.isAc && <div>AC Curr</div>}
-                            </div>
-                            <div className={`grid ${cols} gap-2 items-center`}>
-                              <div className="text-sm font-medium">{row.roomNumber}</div>
-                              <Input value={row.previousReading} readOnly />
-                              <Input placeholder="Current" value={row.currentReading}
-                                onChange={e => handleFlatRowChange(row.roomId, "currentReading", e.target.value)} />
-                              {row.isAc && (
-                                <>
-                                  <Input value={row.acPreviousReading} readOnly />
-                                  <Input placeholder="AC Current" value={row.acCurrentReading}
-                                    onChange={e => handleFlatRowChange(row.roomId, "acCurrentReading", e.target.value)} />
-                                </>
-                              )}
-                            </div>
+                  <div className="grid gap-4 mt-2">
+                    {/* Branch + Flat side by side */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground">Branch</Label>
+                        {canPickBranch ? (
+                          <Select
+                            value={formBranchId}
+                            onValueChange={val => {
+                              setFormBranchId(val);
+                              setFormFlatId("all");
+                              setFormRoomId("");
+                              setRoomSearch("");
+                            }}
+                          >
+                            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Branch" /></SelectTrigger>
+                            <SelectContent>
+                              {branches.map(b => (
+                                <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <div className="flex items-center px-3 py-2 rounded-lg border bg-muted text-sm font-medium text-muted-foreground h-9">
+                            <span className="text-foreground font-semibold">
+                              {branches.find(b => Number(b.id) === Number(formBranchId))?.unitName ?? "Unit"}
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <>
-                      <Label>Room</Label>
-                      <Select
-                        value={formRoomId}
-                        onValueChange={val => { setFormRoomId(val); setRoomSearch(""); }}
-                        disabled={canPickBranch && !formBranchId}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={canPickBranch && !formBranchId ? "Select branch first" : "Select room"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
-                            <Input placeholder="Search room..." value={roomSearch}
-                              onChange={e => setRoomSearch(e.target.value)}
-                              onKeyDown={e => e.stopPropagation()}
-                              className="h-8 text-sm" autoFocus />
-                          </div>
-                          {dialogFlatFilteredRooms
-                            .filter(r => r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase()))
-                            .map(r => (
-                              <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground">Flat</Label>
+                        <Select
+                          value={formFlatId}
+                          onValueChange={setFormFlatId}
+                          disabled={canPickBranch && !formBranchId}
+                        >
+                          <SelectTrigger className="rounded-lg">
+                            <SelectValue placeholder={canPickBranch && !formBranchId ? "Select branch first" : "Select Flat"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">No Flat (standalone room)</SelectItem>
+                            {dialogFlats.map(f => (
+                              <SelectItem key={f.id} value={String(f.id)}>{f.flatNumber}</SelectItem>
                             ))}
-                          {dialogFlatFilteredRooms.filter(r =>
-                            r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase())
-                          ).length === 0 && (
-                            <div className="px-3 py-2 text-sm text-muted-foreground">No room found</div>
-                          )}
-                        </SelectContent>
-                      </Select>
-                      <Input placeholder="Previous" value={formPrevReading} readOnly />
-                      <Input placeholder="Current" value={formCurrReading}
-                        onChange={e => setFormCurrReading(e.target.value)} />
-                      {selectedRoomObj?.hostelType === "AC" && (
-                        <div className="space-y-2">
-                          <Label>AC Reading</Label>
-                          <Input type="number" placeholder="Previous" value={formAcPrev} readOnly />
-                          <Input type="number" placeholder="Current" value={formAcCurr}
-                            onChange={e => setFormAcCurr(e.target.value)} />
-                        </div>
-                      )}
-                    </>
-                  )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
 
-                  <div className="flex items-center gap-2 mb-2">
-                    <Label>Mode:</Label>
-                    <Button size="sm" variant={manualMode ? "secondary" : "outline"} onClick={() => setManualMode(false)}>Automatic</Button>
-                    <Button size="sm" variant={manualMode ? "outline" : "secondary"} onClick={() => setManualMode(true)}>Manual</Button>
+                    {(formFlatId && formFlatId !== "all") ? (
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                        {flatRoomRows.map(row => {
+                          const cols = row.isAc ? "grid-cols-5" : "grid-cols-3";
+                          return (
+                            <div key={row.roomId}>
+                              <div className={`grid ${cols} font-semibold text-xs text-muted-foreground mb-1`}>
+                                <div>Room</div><div>Prev</div><div>Current</div>
+                                {row.isAc && <div>AC Prev</div>}
+                                {row.isAc && <div>AC Curr</div>}
+                              </div>
+                              <div className={`grid ${cols} gap-2 items-center`}>
+                                <div className="text-sm font-medium">{row.roomNumber}</div>
+                                <Input className="rounded-lg" value={row.previousReading} readOnly />
+                                <Input className="rounded-lg" placeholder="Current" value={row.currentReading}
+                                  onChange={e => handleFlatRowChange(row.roomId, "currentReading", e.target.value)} />
+                                {row.isAc && (
+                                  <>
+                                    <Input className="rounded-lg" value={row.acPreviousReading} readOnly />
+                                    <Input className="rounded-lg" placeholder="AC Current" value={row.acCurrentReading}
+                                      onChange={e => handleFlatRowChange(row.roomId, "acCurrentReading", e.target.value)} />
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-medium text-muted-foreground">Room</Label>
+                          <Select
+                            value={formRoomId}
+                            onValueChange={val => { setFormRoomId(val); setRoomSearch(""); }}
+                            disabled={canPickBranch && !formBranchId}
+                          >
+                            <SelectTrigger className="rounded-lg">
+                              <SelectValue placeholder={canPickBranch && !formBranchId ? "Select branch first" : "Select room"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
+                                <Input placeholder="Search room..." value={roomSearch}
+                                  onChange={e => setRoomSearch(e.target.value)}
+                                  onKeyDown={e => e.stopPropagation()}
+                                  className="h-8 text-sm rounded-lg" autoFocus />
+                              </div>
+                              {dialogFlatFilteredRooms
+                                .filter(r => r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase()))
+                                .map(r => (
+                                  <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>
+                                ))}
+                              {dialogFlatFilteredRooms.filter(r =>
+                                r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase())
+                              ).length === 0 && (
+                                <div className="px-3 py-2 text-sm text-muted-foreground">No room found</div>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Previous + Current side by side */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-muted-foreground">Previous</Label>
+                            <Input className="rounded-lg" placeholder="Previous" value={formPrevReading} readOnly />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-muted-foreground">Current</Label>
+                            <Input className="rounded-lg" placeholder="Current" value={formCurrReading}
+                              onChange={e => setFormCurrReading(e.target.value)} />
+                          </div>
+                        </div>
+
+                        {selectedRoomObj?.hostelType === "AC" && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-medium text-muted-foreground">AC Previous</Label>
+                              <Input className="rounded-lg" type="number" placeholder="Previous" value={formAcPrev} readOnly />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-medium text-muted-foreground">AC Current</Label>
+                              <Input className="rounded-lg" type="number" placeholder="Current" value={formAcCurr}
+                                onChange={e => setFormAcCurr(e.target.value)} />
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Mode:</Label>
+                      <Button size="sm" className="rounded-lg" variant={manualMode ? "secondary" : "outline"} onClick={() => setManualMode(false)}>Automatic</Button>
+                      <Button size="sm" className="rounded-lg" variant={manualMode ? "outline" : "secondary"} onClick={() => setManualMode(true)}>Manual</Button>
+                    </div>
+
+                    {manualMode && (
+                      <div className="space-y-2">
+                        <Label className="text-xs font-medium text-muted-foreground">Unit Rate (₹)</Label>
+                        {(!formFlatId || formFlatId === "all") && (
+                          <Input className="rounded-lg" type="number" value={roomManualRates[formRoomId] ?? ""}
+                            onChange={e => setRoomManualRates(prev => ({ ...prev, [formRoomId]: Number(e.target.value) }))}
+                            placeholder="Enter rate for this room" />
+                        )}
+                        {(formFlatId && formFlatId !== "all") && (
+                          <div className="space-y-2">
+                            {flatRoomRows.map(row => (
+                              <div key={row.roomId} className="flex gap-2 items-center">
+                                <span className="w-24 text-sm">{row.roomNumber}</span>
+                                <Input className="rounded-lg" type="number" value={manualRate}
+                                  onChange={e => {
+                                    const val = Number(e.target.value);
+                                    setManualRate(val);
+                                    const updated: Record<string, number> = {};
+                                    flatRoomRows.forEach(r => { updated[String(r.roomId)] = val; });
+                                    setRoomManualRates(prev => ({ ...prev, ...updated }));
+                                  }}
+                                  placeholder="Enter unit rate for all rooms" />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {manualMode && (
-                    <div className="space-y-2">
-                      <Label>Unit Rate (₹)</Label>
-                      {(!formFlatId || formFlatId === "all") && (
-                        <Input type="number" value={roomManualRates[formRoomId] ?? ""}
-                          onChange={e => setRoomManualRates(prev => ({ ...prev, [formRoomId]: Number(e.target.value) }))}
-                          placeholder="Enter rate for this room" />
-                      )}
-                      {(formFlatId && formFlatId !== "all") && (
-                        <div className="space-y-2">
-                          {flatRoomRows.map(row => (
-                            <div key={row.roomId} className="flex gap-2 items-center">
-                              <span className="w-24 text-sm">{row.roomNumber}</span>
-                              <Input type="number" value={manualRate}
-                                onChange={e => {
-                                  const val = Number(e.target.value);
-                                  setManualRate(val);
-                                  const updated: Record<string, number> = {};
-                                  flatRoomRows.forEach(r => { updated[String(r.roomId)] = val; });
-                                  setRoomManualRates(prev => ({ ...prev, ...updated }));
-                                }}
-                                placeholder="Enter unit rate for all rooms" />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <DialogFooter className="mt-4">
+                    <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
+                    <Button className="rounded-lg" onClick={handleAdd} disabled={isSaving}>
+                      {isSaving ? "Saving..." : "Save"}
+                    </Button>
+                  </DialogFooter>
                 </div>
-
-                <DialogFooter>
-                  <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-                  <Button onClick={handleAdd} disabled={isSaving}>
-                    {isSaving ? "Saving..." : "Save"}
-                  </Button>
-                </DialogFooter>
               </DialogContent>
             </Dialog>
           </>
         )}
       </div>
 
-      {/* ── Bill Dialog ── */}
+      {/* ── Bill Dialog — rounded-2xl + contained scroll, matching the
+          Add dialog's pattern. */}
       <Dialog open={billOpen} onOpenChange={setBillOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>EB Bill - Room {billRoom}</DialogTitle>
-            <DialogDescription>Tenant wise electricity bill</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 max-h-[400px] overflow-y-auto">
-            {tenantBills.length === 0 && (
-              <p className="text-sm text-muted-foreground">No tenant bill found</p>
-            )}
-            {tenantBills.map((bill, i) => (
-              <div key={i} className="flex justify-between border p-3 rounded-lg">
-                <div>
-                  <p className="font-medium">{bill.tenantName || bill.name}</p>
-                  <p className="text-sm text-muted-foreground">{bill.acUser ? "AC User" : "Non-AC User"}</p>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+          <div className="relative max-h-[90vh] overflow-y-auto p-6">
+            <DialogClose asChild>
+              <button
+                type="button"
+                aria-label="Close"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4 shrink-0" />
+              </button>
+            </DialogClose>
+            <DialogHeader>
+              <DialogTitle>EB Bill - Room {billRoom}</DialogTitle>
+              <DialogDescription>Tenant wise electricity bill</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 max-h-[400px] overflow-y-auto">
+              {tenantBills.length === 0 && (
+                <p className="text-sm text-muted-foreground">No tenant bill found</p>
+              )}
+              {tenantBills.map((bill, i) => (
+                <div key={i} className="flex justify-between border p-3 rounded-lg">
+                  <div>
+                    <p className="font-medium">{bill.tenantName || bill.name}</p>
+                    <p className="text-sm text-muted-foreground">{bill.acUser ? "AC User" : "Non-AC User"}</p>
+                  </div>
+                  <div className="font-semibold">₹{Number(bill.amount ?? bill.tenantAmount ?? 0).toFixed(2)}</div>
                 </div>
-                <div className="font-semibold">₹{Number(bill.amount ?? bill.tenantAmount ?? 0).toFixed(2)}</div>
-              </div>
-            ))}
+              ))}
+            </div>
+            <DialogFooter>
+              <DialogClose asChild><Button variant="outline" className="rounded-lg">Close</Button></DialogClose>
+            </DialogFooter>
           </div>
-          <DialogFooter>
-            <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ── Upload Dialog ── */}
+      {/* ── Upload Dialog — rounded-2xl, matching the Add dialog's pattern. */}
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent>
+        <DialogContent className="rounded-2xl p-0 [&>button]:hidden">
+          <div className="relative p-6">
+            <DialogClose asChild>
+              <button
+                type="button"
+                aria-label="Close"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4 shrink-0" />
+              </button>
+            </DialogClose>
+            <DialogHeader>
+              <DialogTitle>Upload EB Excel</DialogTitle>
+              <DialogDescription>Upload Excel file with RoomNumber, Previous, Current, AcPrevious, AcCurrent, EbRate columns</DialogDescription>
+            </DialogHeader>
+            <Input className="rounded-lg" type="file" accept=".xlsx, .xls" onChange={handleFileUpload} />
+            <DialogFooter>
+              <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── CONFIRM DIALOG — replaces window.confirm() for destructive
+          actions (currently: delete EB reading). Uses the same Dialog
+          component as the rest of the app for visual consistency: bold
+          title, "This action cannot be undone." subtext, no close-X
+          (`[&>button]:hidden` hides shadcn's default top-right X), rounded
+          corners, and a red (destructive) confirm button when `danger` is
+          set. Matches the Tenants / Rooms & Beds / Branch delete-
+          confirmation style exactly. ── */}
+      <Dialog open={!!confirmState} onOpenChange={(open) => { if (!open) setConfirmState(null); }}>
+        <DialogContent className="max-w-sm rounded-2xl [&>button]:hidden">
           <DialogHeader>
-            <DialogTitle>Upload EB Excel</DialogTitle>
-            <DialogDescription>Upload Excel file with RoomNumber, Previous, Current, AcPrevious, AcCurrent, EbRate columns</DialogDescription>
+            <DialogTitle>{confirmState?.title}</DialogTitle>
+            {confirmState?.description && (
+              <DialogDescription>{confirmState.description}</DialogDescription>
+            )}
           </DialogHeader>
-          <Input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} />
           <DialogFooter>
-            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+            <Button variant="outline" className="rounded-lg" onClick={() => setConfirmState(null)}>Cancel</Button>
+            <Button
+              variant={confirmState?.danger ? "destructive" : "default"}
+              className={confirmState?.danger ? "rounded-lg bg-red-600 hover:bg-red-700 text-white" : "rounded-lg"}
+              onClick={() => {
+                const action = confirmState?.onConfirm;
+                setConfirmState(null);
+                action?.();
+              }}
+            >
+              {confirmState?.confirmLabel ?? "OK"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

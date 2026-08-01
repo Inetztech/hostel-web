@@ -189,7 +189,10 @@ export default function TicketDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
+      {/* rounded-2xl + overflow-hidden -> fully rounded card corners.
+          max-w-3xl w-[94vw] -> wider "landscape" card on larger screens,
+          same treatment as the Raise Ticket / Expense modal. */}
+      <DialogContent className="max-w-3xl w-[94vw] max-h-[88vh] overflow-y-auto rounded-2xl overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 flex-wrap">
             {ticket ? (
@@ -225,7 +228,8 @@ export default function TicketDetailDialog({
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {/* landscape: 2-col meta grid on sm+, stacks on narrow screens */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <div>Created: <span className="text-foreground">{fmtDateTime(ticket.createdAt)}</span></div>
               <div>Last updated: <span className="text-foreground">{fmtDateTime(ticket.updatedAt)}</span></div>
               {ticket.resolvedAt && <div>Resolved: <span className="text-foreground">{fmtDateTime(ticket.resolvedAt)}</span></div>}
@@ -233,17 +237,17 @@ export default function TicketDetailDialog({
             </div>
 
             {/* ── Description ──────────────────────────────────────── */}
-            <div className="rounded-md border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
+            <div className="rounded-xl border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
               {ticket.description}
             </div>
 
             {/* ── Bed Limit Increase details ───────────────────────── */}
             {isBedLimitTicket && (
-              <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm font-medium text-emerald-800">
                   <BedDouble className="h-4 w-4" /> Bed Limit Increase Request
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                   <div>Current limit: <span className="font-semibold">{ticket.currentBedLimit ?? "—"}</span></div>
                   <div>Requested limit: <span className="font-semibold">{ticket.requestedBedLimit ?? "—"}</span></div>
                 </div>
@@ -259,17 +263,19 @@ export default function TicketDetailDialog({
                       placeholder={String(ticket.requestedBedLimit ?? "")}
                       value={approvedBedLimit}
                       onChange={(e) => setApprovedBedLimit(e.target.value)}
+                      className="rounded-xl"
                     />
                     <Textarea
                       placeholder="Remarks (optional)"
                       value={bedRemarks}
                       onChange={(e) => setBedRemarks(e.target.value)}
                       rows={2}
+                      className="rounded-xl"
                     />
                     <div className="flex gap-2">
                       <Button
                         size="sm"
-                        className="bg-emerald-600 hover:bg-emerald-700"
+                        className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
                         disabled={decidingBed !== null}
                         onClick={() => handleBedDecision("APPROVED")}
                       >
@@ -279,6 +285,7 @@ export default function TicketDetailDialog({
                       <Button
                         size="sm"
                         variant="destructive"
+                        className="rounded-xl"
                         disabled={decidingBed !== null}
                         onClick={() => handleBedDecision("REJECTED")}
                       >
@@ -293,16 +300,16 @@ export default function TicketDetailDialog({
 
             {/* ── Super Admin: status update ───────────────────────── */}
             {isSuperAdmin && (
-              <div className="rounded-md border p-3 space-y-2">
+              <div className="rounded-xl border p-3 space-y-2">
                 <div className="text-sm font-medium flex items-center gap-2">
                   <ArrowRightCircle className="h-4 w-4" /> Update Status
                 </div>
                 <div className="flex gap-2 flex-wrap items-center">
                   <Select value={statusDraft} onValueChange={(v) => setStatusDraft(v as TicketStatus)}>
-                    <SelectTrigger className="w-44">
+                    <SelectTrigger className="w-44 rounded-xl">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-xl">
                       {TICKET_STATUS_OPTIONS.map((o) => (
                         <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                       ))}
@@ -310,6 +317,7 @@ export default function TicketDetailDialog({
                   </Select>
                   <Button
                     size="sm"
+                    className="rounded-xl"
                     disabled={savingStatus || statusDraft === ticket.status}
                     onClick={handleStatusSave}
                   >
@@ -321,12 +329,13 @@ export default function TicketDetailDialog({
                   value={statusNote}
                   onChange={(e) => setStatusNote(e.target.value)}
                   rows={2}
+                  className="rounded-xl"
                 />
               </div>
             )}
 
             {ticket.resolutionNotes && (
-              <div className="rounded-md border border-blue-200 bg-blue-50/50 p-3 text-sm">
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 text-sm">
                 <span className="font-medium text-blue-800">Resolution notes: </span>
                 {ticket.resolutionNotes}
               </div>
@@ -346,7 +355,7 @@ export default function TicketDetailDialog({
                 {ticket.replies.map((r) => (
                   <div
                     key={r.id}
-                    className={`rounded-md border p-2.5 text-sm ${
+                    className={`rounded-xl border p-2.5 text-sm ${
                       r.type === "STATUS_CHANGE" ? "bg-gray-50 border-gray-200" : "bg-white"
                     }`}
                   >
@@ -379,9 +388,10 @@ export default function TicketDetailDialog({
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
                 rows={3}
+                className="rounded-xl"
               />
               <div className="flex justify-end">
-                <Button size="sm" disabled={replying || !replyText.trim()} onClick={handleReply}>
+                <Button size="sm" className="rounded-xl" disabled={replying || !replyText.trim()} onClick={handleReply}>
                   <Send className="h-4 w-4 mr-1" />
                   {replying ? "Sending…" : "Send Reply"}
                 </Button>

@@ -1,681 +1,5 @@
-// import { useEffect, useMemo, useState, useCallback } from "react";
-// import api from "@/lib/api";
-// import {
-//   createRoom,
-//   editRoom,
-//   removeRoom,
-//   getBranches,
-//   getUserRole,
-//   getBranchId,
-//   getFlats,
-// } from "@/lib/store";
-
-// import { Room, HostelType, Branch, Flat } from "@/lib/types";
-// import { Button } from "@/components/ui/button";
-// import { Input } from "@/components/ui/input";
-// import {
-//   Dialog, DialogContent, DialogHeader, DialogTitle,
-//   DialogTrigger, DialogDescription, DialogFooter, DialogClose,
-// } from "@/components/ui/dialog";
-// import {
-//   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-//   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-//   AlertDialogDescription, AlertDialogTrigger,
-// } from "@/components/ui/alert-dialog";
-// import {
-//   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-// } from "@/components/ui/select";
-// import { toast } from "sonner";
-// import {
-//   Plus, Pencil, Trash2,
-//   Search, Download, RefreshCw,
-//   ChevronLeft, ChevronRight, Building2,
-// } from "lucide-react";
-
-// /* ================= GENERIC HELPER — fetch every page of any paginated store fn ================= */
-// async function fetchAllPages<T>(
-//   fetchFn: (page: number, size: number) => Promise<any>,
-//   pageSize = 10
-// ): Promise<T[]> {
-//   const first = await fetchFn(0, pageSize);
-//   const firstContent: T[] = first?.content ?? first ?? [];
-//   const total: number     = first?.totalElements ?? firstContent.length;
-//   if (total <= pageSize) return firstContent;
-//   const totalPages = Math.ceil(total / pageSize);
-//   const rest = await Promise.all(
-//     Array.from({ length: totalPages - 1 }, (_, i) =>
-//       fetchFn(i + 1, pageSize).then((r: any) => r?.content ?? r ?? [])
-//     )
-//   );
-//   return [...firstContent, ...rest.flat()];
-// }
-
-// /* ================= ID NORMALIZATION HELPER =================
-//    Warden's branch id (getBranchId(), often sourced from sessionStorage
-//    / a JWT claim) can come back as a string ("6") while Branch.id from
-//    the API is numeric (6). Strict `===` silently fails on that mismatch
-//    — always compare via String(...) on both sides. */
-// const idsMatch = (a: unknown, b: unknown): boolean =>
-//   a != null && b != null && String(a) === String(b);
-
-// /* ================= COMPONENT ================= */
-// const RoomsPage = () => {
-
-//   /* ================= STATE ================= */
-//   const [branches,   setBranches]   = useState<Branch[]>([]);
-//   const [flats,      setFlats]      = useState<Flat[]>([]);
-//   const [rooms,      setRooms]      = useState<Room[]>([]);
-//   const [totalCount, setTotalCount] = useState(0);
-
-//   const [page,       setPage]       = useState(0);
-//   const [pageSize]   = useState(10);
-//   const [loading,    setLoading]    = useState(false);
-//   const [searchTerm, setSearchTerm] = useState("");
-
-//   const [addOpen,        setAddOpen]        = useState(false);
-//   const [editOpen,       setEditOpen]       = useState(false);
-//   const [editRoomData,   setEditRoomData]   = useState<Room | null>(null);
-//   const [selectedBranch, setSelectedBranch] = useState<string>("all");
-
-//   const [supporting, setSupporting] = useState<"idle" | "loading" | "done">("idle");
-
-//   const [roomNumber,  setRoomNumber]  = useState("");
-//   const [hostelType,  setHostelType]  = useState<HostelType | "">("");
-//   const [totalBeds,   setTotalBeds]   = useState("");
-//   const [rentPerBed,  setRentPerBed]  = useState("");
-//   const [unitId,      setUnitId]      = useState("");
-//   const [flatId,      setFlatId]      = useState("");
-
-//   const [wardenBranchName, setWardenBranchName] = useState("");
-
-//   const role     = getUserRole()?.toUpperCase();
-//   const isWarden = role === "WARDEN";
-//   const isAdmin  = !isWarden;
-
-//   /* ================= RESET FORM ================= */
-//   const resetAddForm = () => {
-//     setRoomNumber(""); setHostelType(""); setTotalBeds("");
-//     setRentPerBed(""); setUnitId(""); setFlatId("");
-//   };
-
-//   /* ================= LOAD SUPPORTING DATA ================= */
-//   const loadSupportingData = useCallback(async () => {
-//     if (supporting !== "idle") return;
-//     setSupporting("loading");
-//     try {
-//       const [branchesResult, flatsResult] = await Promise.allSettled([
-//         fetchAllPages<Branch>(getBranches),
-//         fetchAllPages<Flat>(getFlats),
-//       ]);
-
-//       const branchesData: Branch[] = branchesResult.status === "fulfilled" ? branchesResult.value : [];
-//       const flatsData:    Flat[]   = flatsResult.status    === "fulfilled" ? flatsResult.value    : [];
-
-//       setBranches(branchesData);
-//       setFlats(flatsData);
-
-//       if (isWarden) {
-//         const bid = getBranchId();
-//         if (!bid) { toast.error("Warden not mapped to a branch"); return; }
-//         // idsMatch guards against the string/number id mismatch noted above
-//         const branch = branchesData.find((b: Branch) => idsMatch(b.id, bid));
-//         setWardenBranchName(branch?.unitName || `Branch ${bid}`);
-//         setSelectedBranch(String(bid));
-//       }
-//     } catch (err) {
-//       console.error(err);
-//       toast.error("Failed loading supporting data");
-//     } finally {
-//       setSupporting("done");
-//     }
-//   }, [isWarden, supporting]);
-
-//   useEffect(() => { loadSupportingData(); }, [loadSupportingData]);
-
-//   /* ================= LOAD ROOMS (real API, page-based) ================= */
-//   const loadRooms = useCallback(async () => {
-//     if (supporting !== "done") return;
-//     setLoading(true);
-//     try {
-//       const queryParams: Record<string, any> = { page, size: pageSize };
-//       if (selectedBranch !== "all") {
-//         queryParams.unitId = selectedBranch;
-//       }
-
-//       const res = await api.get(`/rooms`, { params: queryParams });
-//       const content: Room[]       = res.data?.data?.content      ?? res.data?.content      ?? [];
-//       const totalElements: number = res.data?.data?.totalElements ?? res.data?.totalElements ?? 0;
-
-//       const enriched = content.map((room: Room) => {
-//         const occ   = room.occupiedBeds ?? 0;
-//         const avail = (room.totalBeds   || 0) - occ;
-
-//         // Fall back to resolving the branch name client-side (idsMatch)
-//         // in case this row's unitName ever comes back empty.
-//         const resolvedUnitName =
-//           room.unitName ||
-//           branches.find((b) => idsMatch(b.id, room.unitId))?.unitName ||
-//           "-";
-
-//         return {
-//           ...room,
-//           unitName:  resolvedUnitName,
-//           flatName:  room.flatName ?? "N/A",
-//           occupied:  occ,
-//           available: avail,
-//           status:    avail > 0 ? (occ > 0 ? "Partially Occupied" : "Available") : "Occupied",
-//         };
-//       });
-
-//       setRooms(enriched);
-//       setTotalCount(totalElements);
-//     } catch (err) {
-//       console.error(err);
-//       toast.error("Failed to load rooms");
-//     } finally {
-//       setLoading(false);
-//     }
-//   }, [page, pageSize, selectedBranch, supporting, branches]);
-
-//   useEffect(() => { loadRooms(); }, [loadRooms]);
-
-//   /* ================= HELPERS ================= */
-//   const flatsByBranch = useMemo(() => {
-//     if (!unitId) return [];
-//     return flats.filter(f => String(f.branchId) === unitId);
-//   }, [flats, unitId]);
-
-//   const flatsByEditBranch = useMemo(() => {
-//     if (!editRoomData?.unitId) return [];
-//     return flats.filter(f => String(f.branchId) === String(editRoomData.unitId));
-//   }, [flats, editRoomData?.unitId]);
-
-//   const getRoomTypeName = (beds: number, type: string) => {
-//     const prefix = beds === 1 ? 'Single' : beds === 2 ? 'Double' : beds === 3 ? 'Triple' : beds === 4 ? 'Quad' : `${beds} Bed`;
-//     const suffix = type === 'AC' ? 'AC' : type === 'NON_AC' ? 'Non-AC' : type;
-//     return `${prefix} ${suffix}`;
-//   };
-
-//   const getRoomTypeColor = (typeStr: string) => {
-//     if (typeStr.includes('Single')) return { color: '#3b82f6', bg: '#eff6ff' };
-//     if (typeStr.includes('Double')) return { color: '#22c55e', bg: '#dcfce7' };
-//     if (typeStr.includes('Triple')) return { color: '#8b5cf6', bg: '#f3e8ff' };
-//     if (typeStr.includes('Quad')) return { color: '#f97316', bg: '#ffedd5' };
-//     return { color: '#64748b', bg: '#f1f5f9' };
-//   };
-
-//   /* ================= CRUD ================= */
-//   const handleAdd = async () => {
-//     if (!roomNumber || !unitId || !hostelType) {
-//       toast.error("Room number, branch, and room type are required");
-//       return;
-//     }
-//     try {
-//       await createRoom({
-//         roomNumber,
-//         hostelType: hostelType as HostelType,
-//         totalBeds:  Number(totalBeds)  || 0,
-//         rentPerBed: Number(rentPerBed) || 0,
-//         unitId:     Number(unitId),
-//         flatId:     flatId ? Number(flatId) : null,
-//       });
-//       toast.success("Room created");
-//       setAddOpen(false);
-//       resetAddForm();
-//       loadRooms();
-//     } catch (e: any) {
-//       toast.error(e?.response?.data?.message || "Create failed");
-//     }
-//   };
-
-//   const handleEdit = async () => {
-//     if (!editRoomData) return;
-//     try {
-//       // Spread the full editRoomData so no real field silently drops off
-//       // an edit (matches the corrected AG-Grid version's payload shape).
-//       await editRoom(editRoomData.id, {
-//         ...editRoomData,
-//         totalBeds:  Number(editRoomData.totalBeds)  || 0,
-//         rentPerBed: Number(editRoomData.rentPerBed) || 0,
-//       });
-//       toast.success("Room updated");
-//       setEditOpen(false);
-//       setEditRoomData(null);
-//       loadRooms();
-//     } catch (e: any) {
-//       toast.error(e?.response?.data?.message || "Update failed");
-//     }
-//   };
-
-//   const handleDelete = async (id: number) => {
-//     try {
-//       await removeRoom(id);
-//       toast.success("Room deleted");
-//       loadRooms();
-//     } catch (e: any) {
-//       toast.error(e?.response?.data?.message || "Delete failed");
-//     }
-//   };
-
-//   const filteredRooms = rooms.filter(r =>
-//     r.roomNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-//     (r.unitName && r.unitName.toLowerCase().includes(searchTerm.toLowerCase()))
-//   );
-
-//   /* ================= UI ================= */
-//   return (
-//     <div className="min-h-full bg-[#fcfcfc] text-gray-900 font-sans pb-10">
-//       <style>{`
-//         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-//         .rm-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: 1600px; margin: 0 auto; }
-
-//         .rm-layout { display: flex; gap: 24px; align-items: flex-start; margin-top: 12px; }
-//         .rm-sidebar { width: 260px; flex-shrink: 0; background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; overflow: hidden; }
-//         .rm-main { flex: 1; min-width: 0; }
-
-//         .rm-sidebar-title { font-size: 14px; font-weight: 700; color: #0f172a; padding: 16px 20px 12px; }
-//         .rm-sidebar-search { margin: 0 20px 16px; display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; }
-//         .rm-sidebar-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
-
-//         .rm-branch-list { padding-bottom: 16px; }
-//         .rm-branch-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; cursor: pointer; transition: background 0.2s; }
-//         .rm-branch-item:hover { background: #f8fafc; }
-//         .rm-branch-item.active { background: #f3e8ff; border-left: 3px solid #5200FF; padding-left: 17px; }
-
-//         .rm-branch-item-left { display: flex; align-items: center; gap: 12px; }
-//         .rm-branch-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-//         .rm-branch-name { font-size: 13px; font-weight: 600; color: #0f172a; }
-//         .rm-branch-item.active .rm-branch-name { color: #5200FF; }
-
-//         .rm-main-header { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 20px; gap: 12px; }
-//         .rm-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
-//         .rm-btn-outline:hover { background: #f8fafc; }
-//         .rm-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
-//         .rm-btn-primary:hover { background: #4200cc; }
-
-//         .rm-filters-row { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
-//         .rm-search-main { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 220px; }
-//         .rm-search-main input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
-//         .rm-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #64748b; cursor: pointer; background: transparent; border: none; padding: 6px 12px; margin-left: auto; }
-
-//         .rm-table-container { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
-//         .rm-table { width: 100%; border-collapse: collapse; min-width: 860px; }
-//         .rm-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
-//         .rm-table td { padding: 16px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
-//         .rm-table tr:last-child td { border-bottom: none; }
-//         .rm-table tr:hover { background: #fdfcff; }
-
-//         .rm-col-number { font-size: 14px; font-weight: 600; color: #0f172a; }
-//         .rm-type-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
-
-//         .rm-count { font-size: 14px; font-weight: 600; color: #0f172a; text-align: center; }
-
-//         .rm-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-//         .rm-status-badge.occupied { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
-//         .rm-status-badge.partially { color: #f97316; background: #fff7ed; border: 1px solid #fed7aa; }
-//         .rm-status-badge.available { color: #3b82f6; background: #eff6ff; border: 1px solid #bfdbfe; }
-
-//         .rm-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-top: 1px solid #f1f5f9; background: #fff; }
-//         .rm-page-info { font-size: 13px; color: #64748b; }
-//         .rm-page-controls { display: flex; align-items: center; gap: 8px; }
-//         .rm-page-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
-//         .rm-page-btn:hover:not(:disabled) { background: #f8fafc; }
-//         .rm-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
-//         .rm-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-//       `}</style>
-
-//       <div className="rm-wrap">
-
-//         <div className="rm-layout">
-
-//           {/* Left Sidebar — branch filter, wired to the real selectedBranch/page state */}
-//           <div className="rm-sidebar">
-//             <div className="rm-sidebar-title">Branches</div>
-//             <div className="rm-sidebar-search">
-//               <Search size={14} color="#94a3b8" />
-//               <input type="text" placeholder="Search branches..." />
-//             </div>
-
-//             <div className="rm-branch-list">
-//               <div
-//                 className={`rm-branch-item ${selectedBranch === 'all' ? 'active' : ''} ${isWarden ? 'pointer-events-none opacity-50' : ''}`}
-//                 onClick={() => { if (!isWarden) { setSelectedBranch('all'); setPage(0); } }}
-//               >
-//                 <div className="rm-branch-item-left">
-//                   <div className="rm-branch-icon" style={{ background: '#f5f3ff' }}>
-//                     <Building2 size={16} color="#8b5cf6" />
-//                   </div>
-//                   <span className="rm-branch-name">All Branches</span>
-//                 </div>
-//               </div>
-
-//               {branches.map(branch => {
-//                 const bgColors   = ['#eff6ff', '#dcfce7', '#ffedd5', '#f3e8ff', '#ffe4e6', '#f1f5f9'];
-//                 const textColors = ['#3b82f6', '#22c55e', '#f97316', '#8b5cf6', '#e11d48', '#64748b'];
-//                 const idx = branch.id % 6;
-//                 const disabledForWarden = isWarden && !idsMatch(branch.id, getBranchId());
-
-//                 return (
-//                   <div
-//                     key={branch.id}
-//                     className={`rm-branch-item ${selectedBranch === String(branch.id) ? 'active' : ''} ${disabledForWarden ? 'pointer-events-none opacity-50' : ''}`}
-//                     onClick={() => { if (!disabledForWarden) { setSelectedBranch(String(branch.id)); setPage(0); } }}
-//                   >
-//                     <div className="rm-branch-item-left">
-//                       <div className="rm-branch-icon" style={{ background: bgColors[idx] }}>
-//                         <Building2 size={16} color={textColors[idx]} />
-//                       </div>
-//                       <span className="rm-branch-name">{branch.unitName}</span>
-//                     </div>
-//                   </div>
-//                 );
-//               })}
-//             </div>
-//           </div>
-
-//           {/* Main Content Area */}
-//           <div className="rm-main">
-//             <div className="rm-main-header">
-//               <button className="rm-btn-outline"><Download size={16} /> Export</button>
-
-//               {isAdmin && (
-//                 <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) resetAddForm(); }}>
-//                   <DialogTrigger asChild>
-//                     <button className="rm-btn-primary"><Plus size={16} /> Add Room</button>
-//                   </DialogTrigger>
-//                   <DialogContent>
-//                     <DialogHeader>
-//                       <DialogTitle>Add Room</DialogTitle>
-//                       <DialogDescription>Create a new room and map it to a branch.</DialogDescription>
-//                     </DialogHeader>
-//                     <div className="space-y-3">
-//                       <Input placeholder="Room Number" value={roomNumber} onChange={e => setRoomNumber(e.target.value)} />
-//                       <Select value={hostelType} onValueChange={(v) => setHostelType(v as HostelType)}>
-//                         <SelectTrigger><SelectValue placeholder="Room Type" /></SelectTrigger>
-//                         <SelectContent>
-//                           <SelectItem value="AC">AC</SelectItem>
-//                           <SelectItem value="NON_AC">Non-AC</SelectItem>
-//                         </SelectContent>
-//                       </Select>
-//                       <Input type="number" placeholder="Total Beds" value={totalBeds} onChange={e => setTotalBeds(e.target.value)} />
-//                       <Input type="number" placeholder="Rent per Bed (Monthly)" value={rentPerBed} onChange={e => setRentPerBed(e.target.value)} />
-//                       {isWarden ? (
-//                         <Input value={wardenBranchName} disabled className="bg-slate-50" />
-//                       ) : (
-//                         <Select value={unitId} onValueChange={(v) => { setUnitId(v); setFlatId(""); }}>
-//                           <SelectTrigger><SelectValue placeholder="Select Branch" /></SelectTrigger>
-//                           <SelectContent>
-//                             {branches.length > 0 ? branches.map(b => (
-//                               <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
-//                             )) : (
-//                               <div className="p-2 text-xs text-muted-foreground text-center">No branches found</div>
-//                             )}
-//                           </SelectContent>
-//                         </Select>
-//                       )}
-//                       <Select
-//                         value={flatId}
-//                         onValueChange={setFlatId}
-//                         disabled={!unitId || flatsByBranch.length === 0}
-//                       >
-//                         <SelectTrigger>
-//                           <SelectValue placeholder={
-//                             !unitId ? "Select a Branch first"
-//                             : flatsByBranch.length === 0 ? "No Flats Available"
-//                             : "Select Flat / Floor (Optional)"
-//                           } />
-//                         </SelectTrigger>
-//                         <SelectContent>
-//                           {flatsByBranch.map(f => (
-//                             <SelectItem key={f.id} value={String(f.id)}>{f.flatNumber}</SelectItem>
-//                           ))}
-//                         </SelectContent>
-//                       </Select>
-//                     </div>
-//                     <DialogFooter>
-//                       <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-//                       <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc]">Save Room</Button>
-//                     </DialogFooter>
-//                   </DialogContent>
-//                 </Dialog>
-//               )}
-//             </div>
-
-//             <div className="rm-filters-row">
-//               <div className="rm-search-main">
-//                 <Search size={16} color="#94a3b8" />
-//                 <input type="text" placeholder="Search rooms..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-//               </div>
-//               <button className="rm-clear-btn" onClick={() => { setSearchTerm(""); setSelectedBranch(isWarden ? String(getBranchId()) : "all"); setPage(0); }}>
-//                 <RefreshCw size={14} /> Clear Filters
-//               </button>
-//             </div>
-
-//             <div className="rm-table-container">
-//               <div className="overflow-x-auto">
-//                 <table className="rm-table">
-//                   <thead>
-//                     <tr>
-//                       <th>ROOM NO.</th>
-//                       <th>ROOM TYPE</th>
-//                       <th>BRANCH</th>
-//                       <th className="text-center">BEDS</th>
-//                       <th className="text-center">OCCUPIED</th>
-//                       <th className="text-center">AVAILABLE</th>
-//                       <th>STATUS</th>
-//                       {isAdmin && <th>ACTIONS</th>}
-//                     </tr>
-//                   </thead>
-//                   <tbody>
-//                     {loading ? (
-//                       <tr><td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-slate-400">Loading rooms...</td></tr>
-//                     ) : filteredRooms.length === 0 ? (
-//                       <tr><td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-slate-400">No rooms found.</td></tr>
-//                     ) : (
-//                       filteredRooms.map((room: any) => {
-//                         const typeName  = getRoomTypeName(room.totalBeds, room.hostelType);
-//                         const typeColor = getRoomTypeColor(typeName);
-
-//                         return (
-//                           <tr key={room.id}>
-//                             <td><span className="rm-col-number">{room.roomNumber}</span></td>
-//                             <td>
-//                               <span className="rm-type-badge" style={{ background: typeColor.bg, color: typeColor.color }}>
-//                                 {typeName}
-//                               </span>
-//                             </td>
-//                             <td>
-//                               <div className="rm-branch-name">{room.unitName || "-"}</div>
-//                             </td>
-//                             <td className="text-center"><span className="rm-count">{room.totalBeds}</span></td>
-//                             <td className="text-center"><span className="rm-count">{room.occupied}</span></td>
-//                             <td className="text-center"><span className="rm-count">{room.available}</span></td>
-//                             <td>
-//                               <div className={`rm-status-badge ${room.status === 'Occupied' ? 'occupied' : room.status === 'Partially Occupied' ? 'partially' : 'available'}`}>
-//                                 <div className={`w-1.5 h-1.5 rounded-full ${room.status === 'Occupied' ? 'bg-green-500' : room.status === 'Partially Occupied' ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
-//                                 {room.status}
-//                               </div>
-//                             </td>
-//                             {isAdmin && (
-//                               <td>
-//                                 <div className="flex gap-2">
-//                                   <Button
-//                                     size="icon"
-//                                     variant="outline"
-//                                     className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
-//                                     onClick={() => { setEditRoomData({ ...room }); setEditOpen(true); }}
-//                                   >
-//                                     <Pencil className="h-3.5 w-3.5 text-slate-500" />
-//                                   </Button>
-//                                   <AlertDialog>
-//                                     <AlertDialogTrigger asChild>
-//                                       <Button
-//                                         size="icon"
-//                                         variant="outline"
-//                                         className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
-//                                       >
-//                                         <Trash2 className="h-3.5 w-3.5 text-red-500" />
-//                                       </Button>
-//                                     </AlertDialogTrigger>
-//                                     <AlertDialogContent>
-//                                       <AlertDialogHeader>
-//                                         <AlertDialogTitle>Delete Room {room.roomNumber}?</AlertDialogTitle>
-//                                         <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
-//                                       </AlertDialogHeader>
-//                                       <AlertDialogFooter>
-//                                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-//                                         <AlertDialogAction onClick={() => handleDelete(room.id)} className="bg-red-600 hover:bg-red-700">Delete</AlertDialogAction>
-//                                       </AlertDialogFooter>
-//                                     </AlertDialogContent>
-//                                   </AlertDialog>
-//                                 </div>
-//                               </td>
-//                             )}
-//                           </tr>
-//                         );
-//                       })
-//                     )}
-//                   </tbody>
-//                 </table>
-//               </div>
-
-//               <div className="rm-pagination">
-//                 <div className="rm-page-info">
-//                   Showing {rooms.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} rooms
-//                 </div>
-//                 <div className="rm-page-controls">
-//                   <Button
-//                     size="icon" variant="outline" className="w-8 h-8 rounded-lg"
-//                     disabled={page === 0} onClick={() => setPage(p => p - 1)}
-//                   >
-//                     <ChevronLeft className="h-4 w-4" />
-//                   </Button>
-//                   <button className="rm-page-btn active">{page + 1}</button>
-//                   {page + 1 < Math.ceil(totalCount / pageSize) && (
-//                     <button className="rm-page-btn" onClick={() => setPage(page + 1)}>{page + 2}</button>
-//                   )}
-//                   <Button
-//                     size="icon" variant="outline" className="w-8 h-8 rounded-lg"
-//                     disabled={(page + 1) * pageSize >= totalCount} onClick={() => setPage(p => p + 1)}
-//                   >
-//                     <ChevronRight className="h-4 w-4" />
-//                   </Button>
-//                 </div>
-//               </div>
-//             </div>
-//           </div>
-//         </div>
-
-//         {/* EDIT DIALOG — admin only, matches the corrected version's field shape */}
-//         {isAdmin && (
-//           <Dialog open={editOpen} onOpenChange={(v) => { setEditOpen(v); if (!v) setEditRoomData(null); }}>
-//             <DialogContent>
-//               <DialogHeader>
-//                 <DialogTitle>Edit Room</DialogTitle>
-//                 <DialogDescription>Update room details.</DialogDescription>
-//               </DialogHeader>
-//               {editRoomData && (
-//                 <div className="space-y-3">
-//                   <Input placeholder="Room Number" value={editRoomData.roomNumber} onChange={e => setEditRoomData({ ...editRoomData, roomNumber: e.target.value })} />
-//                   <Select value={String(editRoomData.unitId)} onValueChange={v => setEditRoomData({ ...editRoomData, unitId: Number(v), flatId: null })}>
-//                     <SelectTrigger><SelectValue placeholder="Select Branch" /></SelectTrigger>
-//                     <SelectContent>
-//                       {branches.map(b => (
-//                         <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
-//                       ))}
-//                     </SelectContent>
-//                   </Select>
-//                   <Select
-//                     value={editRoomData.flatId ? String(editRoomData.flatId) : ""}
-//                     onValueChange={v => setEditRoomData({ ...editRoomData, flatId: v ? Number(v) : null })}
-//                     disabled={!editRoomData.unitId || flatsByEditBranch.length === 0}
-//                   >
-//                     <SelectTrigger>
-//                       <SelectValue placeholder={
-//                         !editRoomData.unitId ? "Select a Branch first"
-//                         : flatsByEditBranch.length === 0 ? "No Flats Available"
-//                         : "Select Flat / Floor (Optional)"
-//                       } />
-//                     </SelectTrigger>
-//                     <SelectContent>
-//                       {flatsByEditBranch.map(f => (
-//                         <SelectItem key={f.id} value={String(f.id)}>{f.flatNumber}</SelectItem>
-//                       ))}
-//                     </SelectContent>
-//                   </Select>
-//                   <Select value={editRoomData.hostelType || ""} onValueChange={(v) => setEditRoomData({ ...editRoomData, hostelType: v as HostelType })}>
-//                     <SelectTrigger><SelectValue placeholder="Room Type" /></SelectTrigger>
-//                     <SelectContent>
-//                       <SelectItem value="AC">AC</SelectItem>
-//                       <SelectItem value="NON_AC">Non-AC</SelectItem>
-//                     </SelectContent>
-//                   </Select>
-//                   <Input type="number" placeholder="Total Beds" value={String(editRoomData.totalBeds ?? 0)} onChange={e => setEditRoomData({ ...editRoomData, totalBeds: Number(e.target.value) })} />
-//                   <Input type="number" placeholder="Rent per Bed (Monthly)" value={String(editRoomData.rentPerBed ?? 0)} onChange={e => setEditRoomData({ ...editRoomData, rentPerBed: Number(e.target.value) })} />
-//                 </div>
-//               )}
-//               <DialogFooter>
-//                 <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-//                 <Button onClick={handleEdit} className="bg-[#5200FF] hover:bg-[#4200cc]">Save Changes</Button>
-//               </DialogFooter>
-//             </DialogContent>
-//           </Dialog>
-//         )}
-//       </div>
-//     </div>
-//   );
-// };
-
-// export default RoomsPage;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import {
   createRoom,
@@ -687,6 +11,7 @@ import {
   getFlats,
   createFlat,
 } from "@/lib/store";
+import { showBedLimitToast, isBedLimitError } from "@/lib/limitError";
 
 import { Room, HostelType, Branch, Flat } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -759,6 +84,7 @@ function BedCountPicker({ value, onChange }: { value: string; onChange: (v: stri
       min={1}
       placeholder="Total Beds"
       value={value}
+      className="rounded-lg"
       onChange={e => onChange(e.target.value.replace(/\D/g, ""))}
     />
   );
@@ -821,13 +147,13 @@ function FlatAssignmentField({
       </div>
 
       {value.mode === "flat" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6 }}>
           {flatsForBranch.length > 0 && (
             <Select
               value={value.flatId}
               onValueChange={(v) => onChange({ ...value, flatId: v, newFlatNumber: "" })}
             >
-              <SelectTrigger><SelectValue placeholder="Select an existing Flat" /></SelectTrigger>
+              <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select an existing Flat" /></SelectTrigger>
               <SelectContent>
                 {flatsForBranch.map(f => (
                   <SelectItem key={f.id} value={String(f.id)}>{f.flatNumber}</SelectItem>
@@ -838,6 +164,7 @@ function FlatAssignmentField({
           <Input
             placeholder={flatsForBranch.length > 0 ? "...or type a new Flat Number" : "Flat Number (will be created)"}
             value={value.newFlatNumber}
+            className="rounded-lg"
             onChange={(e) => onChange({ ...value, newFlatNumber: e.target.value, flatId: "" })}
           />
         </div>
@@ -846,13 +173,7 @@ function FlatAssignmentField({
   );
 }
 
-/* ================= Shared Room Entry Row (Flat bulk-create mode) =================
-   When "Assign to Flat" is chosen, the Add Room dialog switches from
-   "one room" to "a batch of rooms under this flat" — e.g. picking flat
-   "F1" and adding three entries builds F1-HALL (4 beds, Non-AC),
-   F1-Room-1 (2 beds, AC), F1-Room-2 (3 beds, Non-AC) in one Save. Each
-   entry only needs a short suffix ("HALL", "Room-1") — the full room
-   number is assembled as `${flatLabel}-${suffix}` at submit time. */
+/* ================= Shared Room Entry Row (Flat bulk-create mode) ================= */
 export interface RoomEntryValue {
   key: string;
   suffix: string;
@@ -867,12 +188,6 @@ const blankRoomEntry = (): RoomEntryValue => ({
   suffix: "", hostelType: "", totalBeds: "", rentPerBed: "",
 });
 
-/** Assembles the final room number from a flat label + a per-entry name.
- *  If the admin already typed the flat prefix into the name field
- *  themselves (e.g. typed "F1-HALL" instead of just "HALL" when the flat
- *  is "F1"), this detects that and does NOT prepend it again — avoiding
- *  a doubled-up "F1-F1-HALL". Comparison is case-insensitive since flat
- *  numbers and typed prefixes may differ only in casing. */
 const buildRoomNumber = (flatLabel: string, rawSuffix: string): string => {
   const suffix = rawSuffix.trim();
   const label = flatLabel.trim();
@@ -900,7 +215,7 @@ function RoomEntryRow({
   canRemove: boolean;
 }) {
   return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 12, position: "relative", display: "flex", flexDirection: "column", gap: 8, background: "#fafafa" }}>
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, position: "relative", display: "flex", flexDirection: "column", gap: 8, background: "#fafafa" }}>
       {canRemove && (
         <button
           type="button"
@@ -916,6 +231,7 @@ function RoomEntryRow({
         placeholder="Room Name (e.g. HALL, Room-1)"
         value={entry.suffix}
         onChange={(e) => onChange({ suffix: e.target.value })}
+        className="rounded-lg"
         style={{ paddingRight: canRemove ? 32 : undefined }}
       />
       {flatLabel && entry.suffix.trim() && (
@@ -929,20 +245,25 @@ function RoomEntryRow({
         <button type="button" onClick={() => onChange({ hostelType: "NON_AC" })} style={pillButtonStyle(entry.hostelType === "NON_AC")}>Non-AC</button>
       </div>
 
-      <BedCountPicker value={entry.totalBeds} onChange={(v) => onChange({ totalBeds: v })} />
-
-      <Input
-        type="number"
-        placeholder="Rent per Bed (Monthly)"
-        value={entry.rentPerBed}
-        onChange={(e) => onChange({ rentPerBed: e.target.value })}
-      />
+      <div style={{ display: "flex", gap: 8 }}>
+        <BedCountPicker value={entry.totalBeds} onChange={(v) => onChange({ totalBeds: v })} />
+        <Input
+          type="number"
+          placeholder="Rent per Bed (Monthly)"
+          value={entry.rentPerBed}
+          className="rounded-lg"
+          onChange={(e) => onChange({ rentPerBed: e.target.value })}
+        />
+      </div>
     </div>
   );
 }
 
 /* ================= COMPONENT ================= */
 const RoomsPage = () => {
+
+  const location = useLocation();
+  const navigate = useNavigate();
 
   /* ================= STATE ================= */
   const [branches,   setBranches]   = useState<Branch[]>([]);
@@ -960,7 +281,10 @@ const RoomsPage = () => {
   const [editRoomData,   setEditRoomData]   = useState<Room | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>("all");
 
-  const [supporting, setSupporting] = useState<"idle" | "loading" | "done">("idle");
+  // "idle" | "loading" | "done" | "error" — surfaced in the UI so a
+  // failed branch fetch doesn't just silently show an empty dropdown.
+  const [supporting, setSupporting] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [branchesLoading, setBranchesLoading] = useState(false);
 
   const [roomNumber,  setRoomNumber]  = useState("");
   const [hostelType,  setHostelType]  = useState<HostelType | "">("");
@@ -968,14 +292,9 @@ const RoomsPage = () => {
   const [rentPerBed,  setRentPerBed]  = useState("");
   const [unitId,      setUnitId]      = useState("");
 
-  // Replaces the old bare `flatId` state — tracks whether the room being
-  // created goes directly under the branch or under a (possibly new) flat.
   const [flatAssign, setFlatAssign] = useState<FlatAssignmentValue>(EMPTY_FLAT_ASSIGNMENT);
   const [editFlatAssign, setEditFlatAssign] = useState<FlatAssignmentValue>(EMPTY_FLAT_ASSIGNMENT);
 
-  // When flatAssign.mode === "flat", Add Room switches to bulk mode: one
-  // or more room entries (each its own name-suffix/type/bed-count),
-  // created together under that one flat in a single Save.
   const [flatRoomEntries, setFlatRoomEntries] = useState<RoomEntryValue[]>([blankRoomEntry()]);
 
   const addRoomEntry = () => setFlatRoomEntries(prev => [...prev, blankRoomEntry()]);
@@ -990,11 +309,6 @@ const RoomsPage = () => {
   const isWarden = role === "WARDEN";
   const isAdmin  = !isWarden;
 
-  // Wardens never see the Branch selector (it's fixed to their own
-  // branch), but the Add form's `unitId` state was never actually being
-  // populated for them — silently breaking Add Room for Warden accounts.
-  // This resolves to the right branch id for both roles everywhere the
-  // Add form needs it.
   const effectiveUnitId = isWarden ? String(getBranchId() ?? "") : unitId;
 
   /* ================= RESET FORM ================= */
@@ -1004,41 +318,64 @@ const RoomsPage = () => {
     setFlatRoomEntries([blankRoomEntry()]);
   };
 
-  /* ================= LOAD SUPPORTING DATA ================= */
+  /* ================= LOAD BRANCHES (standalone, re-runnable) =================
+     FIX: this used to be folded into loadSupportingData and guarded by
+     `if (supporting !== "idle") return`, which meant it only ever ran
+     ONCE per page-lifetime. If that first call failed (slow network,
+     a 401 that recovered, a race with auth token attachment, etc.),
+     `branches` stayed `[]` forever and the "Select Branch" dropdown in
+     Add Room would show "No branches found" for the rest of the
+     session — even though the sidebar (populated from the same array)
+     might have rendered correctly if the retry happened to succeed on
+     a later unrelated re-render.
+
+     Splitting this out lets us re-fetch branches every time the Add
+     Room dialog opens, so a stale/empty/failed load self-heals instead
+     of permanently breaking the selector. ── */
+  const loadBranches = useCallback(async () => {
+    setBranchesLoading(true);
+    try {
+      const branchesData = (await fetchAllPages<Branch>(getBranches)).filter(
+        (b): b is Branch => !!b && b.id != null
+      );
+      setBranches(branchesData);
+
+      if (isWarden) {
+        const bid = getBranchId();
+        if (!bid) {
+          toast.error("Warden not mapped to a branch");
+        } else {
+          const branch = branchesData.find((b) => idsMatch(b.id, bid));
+          setWardenBranchName(branch?.unitName || `Branch ${bid}`);
+          setSelectedBranch(String(bid));
+        }
+      }
+      return branchesData;
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed loading branches");
+      return [];
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, [isWarden]);
+
+  /* ================= LOAD SUPPORTING DATA (branches + flats, once) ================= */
   const loadSupportingData = useCallback(async () => {
     if (supporting !== "idle") return;
     setSupporting("loading");
     try {
-      const [branchesResult, flatsResult] = await Promise.allSettled([
-        fetchAllPages<Branch>(getBranches),
+      const [, flatsResult] = await Promise.allSettled([
+        loadBranches(),
         fetchAllPages<Flat>(getFlats),
       ]);
 
-      const branchesData: Branch[] = branchesResult.status === "fulfilled" ? branchesResult.value : [];
-      const flatsData:    Flat[]   = flatsResult.status    === "fulfilled" ? flatsResult.value    : [];
-
-      // Strip any nullish/undefined rows before they ever hit state — a
-      // single bad entry in a paginated response used to crash every
-      // downstream `.branchId` / `.id` access in this component.
-      setBranches(branchesData.filter(Boolean));
+      const flatsData: Flat[] = flatsResult.status === "fulfilled" ? flatsResult.value : [];
       setFlats(flatsData.filter(Boolean));
 
-      if (branchesResult.status === "rejected") {
-        console.error(branchesResult.reason);
-        toast.error("Failed loading branches");
-      }
       if (flatsResult.status === "rejected") {
         console.error(flatsResult.reason);
         toast.error("Failed loading flats");
-      }
-
-      if (isWarden) {
-        const bid = getBranchId();
-        if (!bid) { toast.error("Warden not mapped to a branch"); return; }
-        // idsMatch guards against the string/number id mismatch noted above
-        const branch = branchesData.filter(Boolean).find((b: Branch) => idsMatch(b.id, bid));
-        setWardenBranchName(branch?.unitName || `Branch ${bid}`);
-        setSelectedBranch(String(bid));
       }
     } catch (err) {
       console.error(err);
@@ -1046,9 +383,39 @@ const RoomsPage = () => {
     } finally {
       setSupporting("done");
     }
-  }, [isWarden, supporting]);
+  }, [loadBranches, supporting]);
 
   useEffect(() => { loadSupportingData(); }, [loadSupportingData]);
+
+  /* ── Re-fetch branches every time Add Room opens ──────────────────
+     Cheap safety net: even if the initial load above silently failed
+     or the branch list changed elsewhere (a branch created on another
+     tab/page), reopening Add Room always gets a fresh list instead of
+     trusting whatever loaded once at mount. ── */
+  useEffect(() => {
+    if (addOpen && isAdmin) {
+      loadBranches();
+    }
+  }, [addOpen, isAdmin, loadBranches]);
+
+  /* ================= INCOMING NAVIGATION STATE ================= */
+  useEffect(() => {
+    if (supporting !== "done") return;
+    const navState = location.state as { unitId?: number | string; openAddRoom?: boolean } | null;
+    if (!navState) return;
+
+    if (navState.unitId != null && !isWarden) {
+      setSelectedBranch(String(navState.unitId));
+      setUnitId(String(navState.unitId));
+      setPage(0);
+    }
+    if (navState.openAddRoom && isAdmin) {
+      setAddOpen(true);
+    }
+
+    window.history.replaceState({}, document.title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supporting, location.state, isWarden, isAdmin]);
 
   /* ================= LOAD ROOMS (real API, page-based) ================= */
   const loadRooms = useCallback(async () => {
@@ -1068,8 +435,6 @@ const RoomsPage = () => {
         const occ   = room.occupiedBeds ?? 0;
         const avail = (room.totalBeds   || 0) - occ;
 
-        // Fall back to resolving the branch name client-side (idsMatch)
-        // in case this row's unitName ever comes back empty.
         const resolvedUnitName =
           room.unitName ||
           branches.find((b) => idsMatch(b.id, room.unitId))?.unitName ||
@@ -1103,8 +468,6 @@ const RoomsPage = () => {
     return flats.filter(f => f && String(f.branchId) === effectiveUnitId);
   }, [flats, effectiveUnitId]);
 
-  // Display label for the flat currently selected/typed in the Add form —
-  // used for the "Will be created as F1-HALL" live preview on each entry.
   const addFlatLabel = flatAssign.flatId
     ? (flatsByBranch.find(f => String(f.id) === flatAssign.flatId)?.flatNumber ?? "")
     : flatAssign.newFlatNumber.trim();
@@ -1128,11 +491,6 @@ const RoomsPage = () => {
     return { color: '#64748b', bg: '#f1f5f9' };
   };
 
-  /** Resolves a FlatAssignmentValue into a flatId to send with the room
-   *  payload — creating the flat first via createFlat() if the admin
-   *  typed a brand-new flat number instead of picking an existing one.
-   *  Shared by both handleAdd and handleEdit so the "create room under a
-   *  new flat in one step" behavior is identical in both dialogs. */
   const resolveFlatId = async (
     assign: FlatAssignmentValue,
     branchId: number
@@ -1143,15 +501,9 @@ const RoomsPage = () => {
     const flatNumber = assign.newFlatNumber.trim();
     const rawResponse = await createFlat({ flatNumber, branchId });
 
-    // createFlat's return shape isn't trustworthy across every backend
-    // response wrapping, so unwrap defensively...
     let newFlat = unwrapEntity<Flat>(rawResponse);
 
     if (!newFlat) {
-      // ...and if that still doesn't give us a usable Flat, re-fetch the
-      // flats list and find the one we just created by flatNumber+branch.
-      // This makes flat creation work regardless of what createFlat
-      // actually returns, as long as the POST itself succeeded server-side.
       console.warn("createFlat did not return a usable Flat object, re-fetching flats list:", rawResponse);
       const allFlats = (await fetchAllPages<Flat>(getFlats)).filter(Boolean);
       setFlats(allFlats);
@@ -1164,7 +516,7 @@ const RoomsPage = () => {
         );
       }
     } else {
-      setFlats(prev => [...prev, newFlat!]); // keep local flats list in sync immediately
+      setFlats(prev => [...prev, newFlat!]);
     }
 
     return newFlat.id;
@@ -1176,11 +528,6 @@ const RoomsPage = () => {
       return;
     }
 
-    /* ── Direct Room mode — unchanged single-room flow.
-       NOTE: beds are created server-side inside addRoom() on the
-       backend (RoomServiceImpl), so there is no separate bed-seeding
-       call here. Doing it client-side too would double the bed count
-       and eat into the hostel/branch bed-capacity guards. ── */
     if (flatAssign.mode === "direct") {
       if (!roomNumber || !hostelType) {
         toast.error("Room number and room type are required");
@@ -1188,7 +535,7 @@ const RoomsPage = () => {
       }
       try {
         const desiredBeds = Number(totalBeds) || 0;
-        await createRoom({
+        const res = await createRoom({
           roomNumber,
           hostelType: hostelType as HostelType,
           totalBeds:  desiredBeds,
@@ -1196,22 +543,29 @@ const RoomsPage = () => {
           unitId:     Number(effectiveUnitId),
           flatId:     null,
         });
+
+        const newRoom = unwrapEntity<Room>(res);
+
         toast.success(`Room created with ${desiredBeds} bed${desiredBeds === 1 ? "" : "s"}`);
         setAddOpen(false);
         resetAddForm();
-        loadRooms();
+
+        navigate("/tenants", {
+          state: {
+            unitId: Number(effectiveUnitId),
+            roomId: newRoom?.id,
+            openAddTenant: true,
+          },
+        });
       } catch (e: any) {
-        toast.error(e?.response?.data?.message || "Create failed");
+        // Hitting the plan's bed cap here shows a persistent toast with a
+        // one-click "Add Beds" action that jumps to /subscription instead
+        // of a plain generic error.
+        showBedLimitToast(e, navigate, "Create failed");
       }
       return;
     }
 
-    /* ── Assign to Flat mode — bulk-create every valid room entry under
-       one flat, e.g. F1-HALL, F1-Room-1, F1-Room-2. Each room is
-       created (and its beds seeded) entirely server-side — the loop
-       here just issues one createRoom call per entry, sequentially,
-       and isolates failures per-room so one bad entry doesn't silently
-       drop the rest of the batch. ── */
     if (!flatAssign.flatId && !flatAssign.newFlatNumber.trim()) {
       toast.error("Select an existing flat or enter a new flat number");
       return;
@@ -1233,10 +587,6 @@ const RoomsPage = () => {
       let created = 0;
       const failedNames: string[] = [];
 
-      // Sequential, not Promise.all — capacity guards on the backend
-      // check remaining capacity against beds already committed to the
-      // DB, so rooms need to land one at a time for those checks to see
-      // an up-to-date count.
       for (const entry of validEntries) {
         const desiredBeds = Number(entry.totalBeds) || 0;
         const roomNumberToCreate = buildRoomNumber(flatLabel, entry.suffix);
@@ -1253,6 +603,12 @@ const RoomsPage = () => {
           created++;
         } catch (innerErr: any) {
           console.error(`Failed creating room "${roomNumberToCreate}":`, innerErr);
+          if (isBedLimitError(innerErr)) {
+            // Limit hit mid-batch — show the "Add Beds" toast once and stop;
+            // every remaining entry in this batch would fail the same way.
+            showBedLimitToast(innerErr, navigate, "Create failed");
+            break;
+          }
           failedNames.push(
             `${roomNumberToCreate} (${innerErr?.response?.data?.message || "unknown error"})`
           );
@@ -1271,7 +627,7 @@ const RoomsPage = () => {
         loadRooms();
       }
     } catch (e: any) {
-      toast.error(e?.response?.data?.message || "Create failed");
+      showBedLimitToast(e, navigate, "Create failed");
     }
   };
 
@@ -1284,10 +640,6 @@ const RoomsPage = () => {
     try {
       const resolvedFlatId = await resolveFlatId(editFlatAssign, Number(editRoomData.unitId));
       const desiredBeds = Number(editRoomData.totalBeds) || 0;
-      // Spread the full editRoomData so no real field silently drops off
-      // an edit. Bed rows are reconciled server-side inside updateRoom()
-      // on the backend (adds/removes to match totalBeds) — no separate
-      // client-side reconciliation call needed here.
       await editRoom(editRoomData.id, {
         ...editRoomData,
         totalBeds:  desiredBeds,
@@ -1299,7 +651,8 @@ const RoomsPage = () => {
       setEditRoomData(null);
       loadRooms();
     } catch (e: any) {
-      toast.error(e?.response?.data?.message || "Update failed");
+      // Bumping totalBeds on an existing room can also push past the cap.
+      showBedLimitToast(e, navigate, "Update failed");
     }
   };
 
@@ -1315,8 +668,6 @@ const RoomsPage = () => {
 
   const openEditRoom = (room: Room) => {
     setEditRoomData({ ...room });
-    // Pre-fill the flat-assignment toggle from the room's current flatId
-    // so editing a room that's already under a flat doesn't reset it.
     setEditFlatAssign({
       mode: room.flatId ? "flat" : "direct",
       flatId: room.flatId ? String(room.flatId) : "",
@@ -1390,6 +741,16 @@ const RoomsPage = () => {
         .rm-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .rm-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .rm-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Landscape dialog layout for Add/Edit Room */
+        .rm-dialog-landscape { max-width: 760px !important; width: 96vw; }
+        .rm-dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+        .rm-dialog-grid .rm-span-2 { grid-column: 1 / -1; }
+        .rm-entry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 640px) {
+          .rm-dialog-grid { grid-template-columns: 1fr; }
+          .rm-entry-grid { grid-template-columns: 1fr; }
+        }
       `}</style>
 
       <div className="rm-wrap">
@@ -1399,10 +760,10 @@ const RoomsPage = () => {
           {/* Left Sidebar — branch filter, wired to the real selectedBranch/page state */}
           <div className="rm-sidebar">
             <div className="rm-sidebar-title">Branches</div>
-            <div className="rm-sidebar-search">
+            {/* <div className="rm-sidebar-search">
               <Search size={14} color="#94a3b8" />
               <input type="text" placeholder="Search branches..." />
-            </div>
+            </div> */}
 
             <div className="rm-branch-list">
               <div
@@ -1444,14 +805,17 @@ const RoomsPage = () => {
           {/* Main Content Area */}
           <div className="rm-main">
             <div className="rm-main-header">
-              <button className="rm-btn-outline"><Download size={16} /> Export</button>
+              {/* <button className="rm-btn-outline"><Download size={16} /> Export</button> */}
 
               {isAdmin && (
                 <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) resetAddForm(); }}>
                   <DialogTrigger asChild>
                     <button className="rm-btn-primary"><Plus size={16} /> Add Room</button>
                   </DialogTrigger>
-                  <DialogContent className={flatAssign.mode === "flat" ? "sm:max-w-[480px]" : undefined}>
+                  {/* Landscape card — wide, 2-column grid layout instead of a
+                      tall single-column stack. Rounded on all four corners for
+                      a softer card look, matching the Branch page dialogs. */}
+                  <DialogContent className="rounded-2xl overflow-hidden rm-dialog-landscape">
                     <DialogHeader>
                       <DialogTitle>{flatAssign.mode === "flat" ? "Add Rooms under a Flat" : "Add Room"}</DialogTitle>
                       <DialogDescription>
@@ -1460,43 +824,74 @@ const RoomsPage = () => {
                           : "Create a new room and map it to a branch."}
                       </DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                      {flatAssign.mode === "direct" && (
-                        <Input placeholder="Room Number" value={roomNumber} onChange={e => setRoomNumber(e.target.value)} />
-                      )}
-
-                      {isWarden ? (
-                        <Input value={wardenBranchName} disabled className="bg-slate-50" />
-                      ) : (
-                        <Select
-                          value={unitId}
-                          onValueChange={(v) => { setUnitId(v); setFlatAssign(EMPTY_FLAT_ASSIGNMENT); }}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Select Branch" /></SelectTrigger>
-                          <SelectContent>
-                            {branches.length > 0 ? branches.map(b => (
-                              <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
-                            )) : (
-                              <div className="p-2 text-xs text-muted-foreground text-center">No branches found</div>
+                    <div className="rm-dialog-grid max-h-[65vh] overflow-y-auto pr-1">
+                      {/* Step 1 — Branch comes first: everything else
+                          (flats, room numbers) depends on which branch is
+                          picked, so it anchors the top of the form. */}
+                      <div className="rm-span-2">
+                        {isWarden ? (
+                          <Input value={wardenBranchName} disabled className="bg-slate-50 rounded-lg" />
+                        ) : (
+                          <div className="space-y-1">
+                            <Select
+                              key={branches.length}
+                              value={unitId}
+                              onValueChange={(v) => { setUnitId(v); setFlatAssign(EMPTY_FLAT_ASSIGNMENT); }}
+                            >
+                              <SelectTrigger className="rounded-lg">
+                                <SelectValue placeholder={branchesLoading ? "Loading branches..." : "Select Branch"} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {branchesLoading ? (
+                                  <div className="p-2 text-xs text-muted-foreground text-center">Loading branches…</div>
+                                ) : branches.length > 0 ? (
+                                  branches
+                                    .filter(b => b && b.id != null)
+                                    .map(b => (
+                                      <SelectItem key={String(b.id)} value={String(b.id)}>
+                                        {b.unitName || `Branch ${b.id}`}
+                                      </SelectItem>
+                                    ))
+                                ) : (
+                                  <div className="p-2 text-xs text-muted-foreground text-center">
+                                    No branches found
+                                  </div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                            {!branchesLoading && branches.length === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => loadBranches()}
+                                className="text-[11px] font-medium text-[#5200FF] hover:underline flex items-center gap-1"
+                              >
+                                <RefreshCw size={11} /> Retry loading branches
+                              </button>
                             )}
-                          </SelectContent>
-                        </Select>
-                      )}
+                          </div>
+                        )}
+                      </div>
 
-                      {/* Choose whether this room sits directly under the
-                          branch, or under one of its flats (existing or
-                          newly typed in) — shared with the Edit dialog. */}
-                      <FlatAssignmentField
-                        unitId={effectiveUnitId}
-                        flatsForBranch={flatsByBranch}
-                        value={flatAssign}
-                        onChange={setFlatAssign}
-                      />
+                      {/* Step 2 — Direct Room vs Assign to Flat, plus the
+                          flat picker/new-flat input when in Flat mode —
+                          shared with the Edit dialog. */}
+                      <div className="rm-span-2">
+                        <FlatAssignmentField
+                          unitId={effectiveUnitId}
+                          flatsForBranch={flatsByBranch}
+                          value={flatAssign}
+                          onChange={setFlatAssign}
+                        />
+                      </div>
 
+                      {/* Step 3 — Room Number balanced alongside Room Type,
+                          then Beds balanced alongside Rent. */}
                       {flatAssign.mode === "direct" ? (
                         <>
+                          <Input placeholder="Room Number" value={roomNumber} className="rounded-lg" onChange={e => setRoomNumber(e.target.value)} />
+
                           <Select value={hostelType} onValueChange={(v) => setHostelType(v as HostelType)}>
-                            <SelectTrigger><SelectValue placeholder="Room Type" /></SelectTrigger>
+                            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Room Type" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="AC">AC</SelectItem>
                               <SelectItem value="NON_AC">Non-AC</SelectItem>
@@ -1507,14 +902,15 @@ const RoomsPage = () => {
                               Quad) or a custom number, shared with Edit. */}
                           <BedCountPicker value={totalBeds} onChange={setTotalBeds} />
 
-                          <Input type="number" placeholder="Rent per Bed (Monthly)" value={rentPerBed} onChange={e => setRentPerBed(e.target.value)} />
+                          <Input type="number" placeholder="Rent per Bed (Monthly)" value={rentPerBed} className="rounded-lg" onChange={e => setRentPerBed(e.target.value)} />
                         </>
                       ) : (
-                        <>
-                          {/* Bulk room builder — one card per room that will
-                              be created under this flat. Each gets its own
-                              name suffix, AC/Non-AC type, and bed count. */}
-                          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div className="rm-span-2" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          {/* Bulk room builder — two cards per row, one per
+                              room that will be created under this flat. Each
+                              gets its own name suffix, AC/Non-AC type, bed
+                              count and rent. */}
+                          <div className="rm-entry-grid">
                             {flatRoomEntries.map(entry => (
                               <RoomEntryRow
                                 key={entry.key}
@@ -1538,12 +934,12 @@ const RoomsPage = () => {
                           >
                             <Plus size={14} /> Add Another Room
                           </button>
-                        </>
+                        </div>
                       )}
                     </div>
                     <DialogFooter>
-                      <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-                      <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc]">
+                      <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
+                      <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">
                         {flatAssign.mode === "flat"
                           ? (() => {
                               const n = flatRoomEntries.filter(e => e.suffix.trim()).length;
@@ -1633,14 +1029,14 @@ const RoomsPage = () => {
                                         <Trash2 className="h-3.5 w-3.5 text-red-500" />
                                       </Button>
                                     </AlertDialogTrigger>
-                                    <AlertDialogContent>
+                                    <AlertDialogContent className="rounded-2xl">
                                       <AlertDialogHeader>
                                         <AlertDialogTitle>Delete Room {room.roomNumber}?</AlertDialogTitle>
                                         <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
                                       </AlertDialogHeader>
                                       <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleDelete(room.id)} className="bg-red-600 hover:bg-red-700">Delete</AlertDialogAction>
+                                        <AlertDialogCancel className="rounded-lg">Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDelete(room.id)} className="bg-red-600 hover:bg-red-700 rounded-lg">Delete</AlertDialogAction>
                                       </AlertDialogFooter>
                                     </AlertDialogContent>
                                   </AlertDialog>
@@ -1684,41 +1080,53 @@ const RoomsPage = () => {
 
         {/* EDIT DIALOG — admin only. Uses the same BedCountPicker and
             FlatAssignmentField as the Add dialog above, so both forms
-            share one implementation and can't drift apart. */}
+            share one implementation and can't drift apart. Also laid
+            out as a wide, 2-column landscape card. */}
         {isAdmin && (
           <Dialog open={editOpen} onOpenChange={(v) => { setEditOpen(v); if (!v) { setEditRoomData(null); setEditFlatAssign(EMPTY_FLAT_ASSIGNMENT); } }}>
-            <DialogContent>
+            {/* Rounded on all four corners for a softer card look,
+                matching the Branch page dialogs */}
+            <DialogContent className="rounded-2xl overflow-hidden rm-dialog-landscape">
               <DialogHeader>
                 <DialogTitle>Edit Room</DialogTitle>
                 <DialogDescription>Update room details.</DialogDescription>
               </DialogHeader>
               {editRoomData && (
-                <div className="space-y-3">
-                  <Input placeholder="Room Number" value={editRoomData.roomNumber} onChange={e => setEditRoomData({ ...editRoomData, roomNumber: e.target.value })} />
-                  <Select
-                    value={String(editRoomData.unitId)}
-                    onValueChange={v => {
-                      setEditRoomData({ ...editRoomData, unitId: Number(v) });
-                      setEditFlatAssign(EMPTY_FLAT_ASSIGNMENT); // branch changed — flat choice no longer valid
-                    }}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Select Branch" /></SelectTrigger>
-                    <SelectContent>
-                      {branches.map(b => (
-                        <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="rm-dialog-grid max-h-[65vh] overflow-y-auto pr-1">
+                  {/* Step 1 — Branch first */}
+                  <div className="rm-span-2">
+                    <Select
+                      value={String(editRoomData.unitId)}
+                      onValueChange={v => {
+                        setEditRoomData({ ...editRoomData, unitId: Number(v) });
+                        setEditFlatAssign(EMPTY_FLAT_ASSIGNMENT); // branch changed — flat choice no longer valid
+                      }}
+                    >
+                      <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Branch" /></SelectTrigger>
+                      <SelectContent>
+                        {branches.map(b => (
+                          <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                  <FlatAssignmentField
-                    unitId={editRoomData.unitId ? String(editRoomData.unitId) : ""}
-                    flatsForBranch={flatsByEditBranch}
-                    value={editFlatAssign}
-                    onChange={setEditFlatAssign}
-                  />
+                  {/* Step 2 — Direct Room vs Assign to Flat */}
+                  <div className="rm-span-2">
+                    <FlatAssignmentField
+                      unitId={editRoomData.unitId ? String(editRoomData.unitId) : ""}
+                      flatsForBranch={flatsByEditBranch}
+                      value={editFlatAssign}
+                      onChange={setEditFlatAssign}
+                    />
+                  </div>
+
+                  {/* Step 3 — Room Number balanced alongside Room Type,
+                      then Beds balanced alongside Rent. */}
+                  <Input placeholder="Room Number" value={editRoomData.roomNumber} className="rounded-lg" onChange={e => setEditRoomData({ ...editRoomData, roomNumber: e.target.value })} />
 
                   <Select value={editRoomData.hostelType || ""} onValueChange={(v) => setEditRoomData({ ...editRoomData, hostelType: v as HostelType })}>
-                    <SelectTrigger><SelectValue placeholder="Room Type" /></SelectTrigger>
+                    <SelectTrigger className="rounded-lg"><SelectValue placeholder="Room Type" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="AC">AC</SelectItem>
                       <SelectItem value="NON_AC">Non-AC</SelectItem>
@@ -1730,12 +1138,12 @@ const RoomsPage = () => {
                     onChange={(v) => setEditRoomData({ ...editRoomData, totalBeds: Number(v) || 0 })}
                   />
 
-                  <Input type="number" placeholder="Rent per Bed (Monthly)" value={String(editRoomData.rentPerBed ?? 0)} onChange={e => setEditRoomData({ ...editRoomData, rentPerBed: Number(e.target.value) })} />
+                  <Input type="number" placeholder="Rent per Bed (Monthly)" value={String(editRoomData.rentPerBed ?? 0)} className="rounded-lg" onChange={e => setEditRoomData({ ...editRoomData, rentPerBed: Number(e.target.value) })} />
                 </div>
               )}
               <DialogFooter>
-                <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-                <Button onClick={handleEdit} className="bg-[#5200FF] hover:bg-[#4200cc]">Save Changes</Button>
+                <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
+                <Button onClick={handleEdit} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Save Changes</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

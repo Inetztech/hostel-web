@@ -1,6 +1,6 @@
 export type Role = "SUPER_ADMIN" | "ADMIN" | "WARDEN" | "TENANT";
 export type HostelType = "AC" | "NON_AC";
-export type TenantStatus = "Active" | "Checked_Out" | "Absconded"; 
+export type TenantStatus = "PENDING" | "Active" | "Checked_Out" | "Absconded"; 
 export type EBStatus = "Pending" | "Billed" | "Paid";
 export type PaymentStatus = "PENDING" | "PAID" | "PARTIAL";
 export type PaymentMode = "CASH" | "UPI";
@@ -68,9 +68,11 @@ export interface User {
   // ─────────────────────────────────────────────────────────────────
 }
 
-// ── Payload for registerUser() / updateUser() in lib/store.ts ─────────
-// Kept separate from AdminRequest, which is the SUPER_ADMIN -> ADMIN-only
-// creation payload (email/password/active only, no role/branch).
+// ── Payload for registerUser() in lib/store.ts (CREATE only) ──────────
+// Role is required and editable here — this is the only place a new
+// account's role is ever set. Kept separate from AdminRequest, which is
+// the SUPER_ADMIN -> ADMIN-only creation payload (email/password/active
+// only, no role/branch).
 export interface RegisterUserRequest {
   name: string;
   phone: string;
@@ -80,6 +82,22 @@ export interface RegisterUserRequest {
   branchId: number | null;
   // Optional initial grant — must be a subset of what the creator holds;
   // validated server-side. Omit to create with no permissions.
+  permissions?: PermissionName[];
+}
+
+// ── Payload for updateUser() / updateMyProfile() in lib/store.ts ──────
+// Used for PUT /users/{id} and PUT /users/me. Deliberately has NO `role`
+// field — role can no longer be changed via these endpoints (the backend
+// stopped reading/applying it). Password is optional: omit or leave
+// blank to keep the user's current password unchanged.
+export interface UpdateUserRequest {
+  name: string;
+  phone: string;
+  email: string;
+  password?: string;
+  branchId?: number | null;
+  // Optional — must be a subset of what the requester holds; validated
+  // server-side. Omitted = leave the user's current permission set untouched.
   permissions?: PermissionName[];
 }
 // ─────────────────────────────────────────────────────────────────────
@@ -229,6 +247,8 @@ export interface LoginResponse {
   hostelName?: string | null;
   /** ADMIN-only: true when this hostel's subscription end date has passed. */
   subscriptionExpired?: boolean | null;
+  /** ADMIN/WARDEN/TENANT: the hostel's operational status. Null for SUPER_ADMIN. */
+  hostelStatus?: HostelStatus | null;
   tenantId?: number | null;
 }
 
@@ -251,8 +271,8 @@ export interface Hostel {
   status?: HostelStatus;
   branchCount?: number;
   tenantCount?: number;
-  planId?: number | null;    // NEW — backend's HostelResponse already returns this
-  planName?: string | null;  // NEW
+  planId?: number | null;
+  planName?: string | null;
 }
 
 export interface HostelRequest {
@@ -278,20 +298,10 @@ export interface HostelAdmin {
   totalRooms?: number;
   totalBeds?: number;
   occupiedBeds?: number;
-  /** Bed capacity entered on the Add/Edit form — distinct from totalBeds
-   *  above, which is the count of beds actually created under rooms. */
   capacityBeds?: number;
-  /** Subscription duration in months — 1, 3, or 12. */
   durationMonths?: number;
-  /** URL of the uploaded hostel document (registration certificate, agreement, etc.), if any. */
   documentUrl?: string | null;
-  /**
-   * Price per bed (INR), set directly on the Add/Edit Hostel + Admin form —
-   * independent of planId/planName above. "Total Price" on this screen is
-   * computed client-side as capacityBeds * bedPrice.
-   */
   bedPrice?: number | null;
-  // ── Assigned admin (null/undefined if none assigned yet) ──
   adminId?: number | null;
   adminName?: string | null;
   adminPhone?: string | null;
@@ -304,23 +314,13 @@ export interface HostelAdminRequest {
   name: string;
   address: string;
   city: string;
-  /** Total bed capacity being set up for this hostel. */
   totalBeds: number;
-  /** Subscription duration in months — 1 (1 Month), 3 (3 Months), 12 (1 Year). */
   durationMonths: number;
-  /**
-   * Price per bed (INR), set directly on this form — decoupled from the
-   * Plans/Subscriptions module. Optional: omit/0 to leave no price set.
-   * Total Price shown on the Hostels screen = totalBeds * bedPrice.
-   */
   bedPrice?: number;
-  /** Supporting document (registration certificate, agreement, etc.). Only present
-   *  when submitting as FormData — plain JSON submissions omit this field. */
   document?: File;
   adminName: string;
   adminPhone: string;
   adminEmail: string;
-  /** Required on create; leave blank on update to keep the current password. */
   adminPassword?: string;
 }
 
@@ -356,14 +356,9 @@ export interface Branch {
   phone?:   string;
   hostelId?:   number;
   hostelName?: string;
-  /** This branch's OPTIONAL split of the parent hostel's total capacityBeds.
-   *  Undefined/null = no individual cap set for this branch — it's still
-   *  bound by the hostel-wide cap, just not an individual per-branch one. */
   capacityBeds?: number | null;
-  /** Live counts from the backend — rooms/beds that already exist under this branch. */
   roomCount?: number;
   bedCount?: number;
-  /** Of bedCount beds, how many are currently occupied. */
   occupiedBedCount?: number;
 }
 
@@ -372,8 +367,6 @@ export interface BranchRequest {
   location: string;
   phone?:   string;
   hostelId: number;
-  /** Optional bed-capacity allocation for this branch, out of the hostel's
-   *  total. Omit/null to leave this branch without an individual cap. */
   capacityBeds?: number | null;
 }
 
@@ -432,8 +425,6 @@ export interface Tenant {
   checkOutDate: string | null;
   status: TenantStatus;
   fraudCheck?: FraudCheckResponse | null;
-  // ─── NEW: hostel/branch context, populated by the backend so tenants
-  // can be grouped by hostel (Super Admin dashboard / Hostels page) ──
   hostelId?: number | null;
   hostelName?: string | null;
   branchId?: number | null;
@@ -612,9 +603,9 @@ export interface Plan {
   billingPeriod: string;
   durationLabel: string;
   description?: string;
-  hostelLimit: number;        // mandatory now
-  branchLimit: number | null; // null = unlimited branches/hostel
-  bedLimit: number | null;    // NEW — the only optional/unlimited limit
+  hostelLimit: number;
+  branchLimit: number | null;
+  bedLimit: number | null;
   features: string[];
   status: "Active" | "Inactive";
   colorHex?: string;
@@ -626,17 +617,12 @@ export interface PlanRequest {
   name: string;
   price: number;
   billingPeriod: string;
-  /** Optional — auto-derived from billingPeriod server-side if omitted. */
   durationLabel?: string;
   description?: string;
-  /** Optional — fixed at 1 server-side (Admin<->Hostel is always 1:1). */
   hostelLimit?: number;
-  /** Optional — null/omitted = unlimited branches per hostel. */
   branchLimit?: number | null;
-  /** null = unlimited beds per hostel on this plan. */
   bedLimit: number | null;
   features?: string[];
-  /** Optional on create (defaults "Active"); use the table's toggle to change it later. */
   status?: "Active" | "Inactive";
   colorHex?: string;
 }
@@ -727,7 +713,6 @@ export type TicketReplyType = "REPLY" | "STATUS_CHANGE";
 
 export const TICKET_CATEGORY_OPTIONS: { value: TicketCategory; label: string }[] = [
   { value: "TECHNICAL_ISSUE",    label: "Technical Issue" },
-  { value: "BED_LIMIT_INCREASE", label: "Bed Size / Bed Limit Increase Request" },
   { value: "FEATURE_REQUEST",    label: "Feature Request" },
   { value: "BILLING_ISSUE",      label: "Billing Issue" },
   { value: "OTHER",              label: "Other" },
@@ -748,12 +733,12 @@ export const TICKET_STATUS_OPTIONS: { value: TicketStatus; label: string }[] = [
 
 /** Payload for ADMIN raising a new support ticket. */
 export interface TicketRequest {
-  subject: string;
-  description: string;
-  category: TicketCategory;
-  priority?: TicketPriority;
-  /** Required only when category === "BED_LIMIT_INCREASE". */
-  requestedBedLimit?: number;
+}
+
+
+export interface AddOnBedsRequest {
+  additionalBedsRequested: number;
+  remarks?: string;
 }
 
 /** Payload for either ADMIN or SUPER_ADMIN posting a reply on a ticket. */
@@ -786,7 +771,7 @@ export interface TicketReply {
   createdAt: string;
 }
 
-/** Lightweight row for ticket list views (Admin's "My Tickets", Super Admin dashboard table). */
+/** Lightweight row for ticket list views. */
 export interface TicketSummary {
   id: number;
   ticketNumber: string;
@@ -844,14 +829,6 @@ export interface TicketStats {
   closed: number;
   pendingBedLimitRequests: number;
 }
-
-
-
-
-
-
-
-
 
 export interface Cleaner {
   id: number;

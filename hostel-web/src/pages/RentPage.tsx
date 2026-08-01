@@ -1058,12 +1058,12 @@ const RentPage = () => {
               <div className="rt-panel-header">
                 <div className="rt-panel-title">Rent Collection</div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="h-8">
+                  {/* <Button variant="outline" size="sm" className="h-8">
                     <Download size={14} className="mr-2" /> Export
-                  </Button>
+                  </Button> */}
                   {hasAccess && (
                     <Button size="sm" className="h-8 bg-[#5200FF] hover:bg-[#4200cc] text-white" onClick={handleGenerateAll}>
-                      <Plus size={14} className="mr-2" /> Add Rent
+                       ALL Generation
                     </Button>
                   )}
                 </div>
@@ -1207,12 +1207,14 @@ const RentPage = () => {
                             </td>
                             <td>
                               <div className="rt-branch">{branchOptions.find(b => String(b.id) === String(row.unitId))?.name || "Main Branch"}</div>
-                              <div className="rt-branch-sub">Tamil Nadu</div>
+                              {/* <div className="rt-branch-sub">Tamil Nadu</div> */}
                             </td>
-                            <td><span className="rt-value">{new Intl.NumberFormat('en-IN').format(row.total)}</span></td>
+                            {/* ROUNDED: Math.round() applied so decimal values (e.g. 7,708.5) display as whole numbers */}
+                            <td><span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.total))}</span></td>
                             <td><div className={`rt-status ${statusClass}`}>{displayStatus}</div></td>
                             <td>
-                              <div className="rt-value">{new Intl.NumberFormat('en-IN').format(row.pending > 0 ? row.pending : row.total)}</div>
+                              {/* ROUNDED: Math.round() applied so decimal values (e.g. 7,708.5) display as whole numbers */}
+                              <div className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.pending > 0 ? row.pending : row.total))}</div>
                               
                             </td>
                             <td>
@@ -1253,7 +1255,7 @@ const RentPage = () => {
                       <div className="text-xs font-medium text-slate-500 mt-0.5">{t.roomNumber} - Bed 1</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm font-bold text-slate-900">₹{new Intl.NumberFormat('en-IN').format(t.pending)}</div>
+                      <div className="text-sm font-bold text-slate-900">₹{new Intl.NumberFormat('en-IN').format(Math.round(t.pending))}</div>
                       <div className="text-[10px] font-semibold text-rose-500 mt-0.5">{(i % 5) + 3} days overdue</div>
                     </div>
                   </div>

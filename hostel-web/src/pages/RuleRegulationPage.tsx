@@ -288,9 +288,9 @@ const RuleRegulationPage = () => {
             <div className="rr-panel-header">
               <div className="rr-panel-title">Rules &amp; Regulations List</div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="h-10 font-semibold text-slate-700 px-4">
+                {/* <Button variant="outline" size="sm" className="h-10 font-semibold text-slate-700 px-4">
                   <Download size={16} className="mr-2" /> Export
-                </Button>
+                </Button> */}
 
                 {canManage && (
                   <Button size="sm" className="h-10 bg-[#5200FF] hover:bg-[#4200cc] text-white px-4 font-semibold" onClick={() => setAddOpen(true)}>
@@ -416,7 +416,12 @@ const RuleRegulationPage = () => {
                                   </AlertDialogHeader>
                                   <AlertDialogFooter>
                                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}>Delete</AlertDialogAction>
+                                    <AlertDialogAction
+                                      className="bg-red-600 hover:bg-red-700 focus:ring-red-600 text-white"
+                                      onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}
+                                    >
+                                      Delete
+                                    </AlertDialogAction>
                                   </AlertDialogFooter>
                                 </AlertDialogContent>
                               </AlertDialog>

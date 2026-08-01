@@ -67,13 +67,13 @@ export const ExpenseDialogModal = memo(({
     e.preventDefault();
     if (!description.trim()) return toast.error("Please enter a valid expense description.");
     if (!selectedMenuCat) return toast.error("Please select a target category.");
-    
+
     let finalCategory = selectedMenuCat;
     if (selectedMenuCat === "OTHER") {
       if (!customCategory.trim()) return toast.error("Please define custom category name.");
       finalCategory = customCategory.trim().toUpperCase();
     }
-    
+
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) return toast.error("Provide a valid numeric amount.");
     if (!expenseDate) return toast.error("Please select a valid transaction date.");
     if (currentBranch === "all" && !editingExpense) return toast.error("Please pick a branch target location.");
@@ -84,7 +84,10 @@ export const ExpenseDialogModal = memo(({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[540px]">
+      {/* rounded-2xl + overflow-hidden ensures every corner (including any
+          header/footer background) is clipped to the rounded shape instead
+          of the default sharp/square corners */}
+      <DialogContent className="sm:max-w-[540px] rounded-2xl overflow-hidden p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <FolderPlus className="h-4 w-4 text-primary" />
@@ -103,7 +106,7 @@ export const ExpenseDialogModal = memo(({
               placeholder="e.g., Internet Bill / Maintenance repair"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="border rounded-md px-3 h-9 text-sm w-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+              className="border rounded-xl px-3 h-9 text-sm w-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
           </div>
 
@@ -113,10 +116,10 @@ export const ExpenseDialogModal = memo(({
                 <Tag className="h-3 w-3" /> Category
               </label>
               <Select value={selectedMenuCat} onValueChange={setSelectedMenuCat}>
-                <SelectTrigger className="h-9 text-sm bg-background">
+                <SelectTrigger className="h-9 text-sm bg-background rounded-xl">
                   <SelectValue placeholder="Select Category" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-xl">
                   {Object.keys(HARDCODED_CATEGORIES).map((cat) => (
                     <SelectItem key={cat} value={cat}>{HARDCODED_CATEGORIES[cat].label}</SelectItem>
                   ))}
@@ -133,7 +136,7 @@ export const ExpenseDialogModal = memo(({
                 type="date"
                 value={expenseDate}
                 onChange={(e) => setExpenseDate(e.target.value)}
-                className="border rounded-md px-3 h-9 text-sm w-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="border rounded-xl px-3 h-9 text-sm w-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
             </div>
           </div>
@@ -148,7 +151,7 @@ export const ExpenseDialogModal = memo(({
                 placeholder="e.g., Food, Marketing"
                 value={customCategory}
                 onChange={(e) => setCustomCategory(e.target.value)}
-                className="border border-indigo-200 rounded-md px-3 h-9 text-sm w-full bg-indigo-50/10 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                className="border border-indigo-200 rounded-xl px-3 h-9 text-sm w-full bg-indigo-50/10 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               />
             </div>
           )}
@@ -162,16 +165,16 @@ export const ExpenseDialogModal = memo(({
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="border rounded-md pl-6 pr-3 h-9 w-full text-sm bg-background font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="border rounded-xl pl-6 pr-3 h-9 w-full text-sm bg-background font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
             </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t">
-            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" size="sm">
+            <Button type="submit" size="sm" className="rounded-xl">
               {editingExpense ? <Edit className="h-4 w-4 mr-1.5" /> : <Plus className="h-4 w-4 mr-1.5" />}
               {editingExpense ? "Update Expense" : "Save Expense"}
             </Button>

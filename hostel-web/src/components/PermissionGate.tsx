@@ -1,22 +1,3 @@
-// src/components/PermissionGate.tsx
-//
-// Hide/show wrapper for buttons, menu items, table actions, etc.
-// SUPER_ADMIN always passes (see hasPermission/hasAnyPermission/
-// hasAllPermissions in lib/auth.ts, which special-case that role).
-//
-// Usage:
-//   <PermissionGate permission="MANAGE_TENANTS">
-//     <button onClick={addTenant}>Add Tenant</button>
-//   </PermissionGate>
-//
-//   <PermissionGate anyOf={["MANAGE_PAYMENTS", "VIEW_PAYMENTS"]}>
-//     <PaymentsTab />
-//   </PermissionGate>
-//
-//   <PermissionGate allOf={["MANAGE_RENTS", "MANAGE_TENANTS"]} fallback={<Locked />}>
-//     <BulkRentTools />
-//   </PermissionGate>
-
 import React from "react";
 import { PermissionName } from "../lib/types";
 import { hasPermission, hasAnyPermission, hasAllPermissions } from "../lib/auth";

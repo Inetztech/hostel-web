@@ -32,11 +32,16 @@ import SuperAdminTicketsPage from "@/pages/SuperAdminTicketsPage";
 import ExpensePage from "./pages/ExpenseTracker";
 import VisitorPage from "./pages/Visitor";
 import MaintenancePage from "@/pages/MaintenancePage";
+// ── NEW: subscription / renewal (ADMIN) ──
+import SubscriptionPage from "@/pages/SubscriptionPage";
+
+import HomePage from "./pages/Home";
 
 export const router = createBrowserRouter([
 
   // ── Public ──────────────────────────────────────────────────────────────
-  { path: "/",             element: <Login /> },
+  { path: "/",             element: <HomePage /> },
+  { path: "/login",             element: <Login /> },
   { path: "/unauthorized", element: <Unauthorized /> },
 
   // ── ONE shared layout tree — all authenticated roles ────────────────────
@@ -175,14 +180,23 @@ export const router = createBrowserRouter([
       //     </ProtectedRoute>
       //   ),
       // },
-      // {
-      //   path: "/subscription",
-      //   element: (
-      //     <ProtectedRoute allow={["ADMIN"]}>
-      //       <AdminSubscriptionPage />
-      //     </ProtectedRoute>
-      //   ),
-      // },
+
+      // ── NEW: ADMIN — Subscription / Renewal ─────────────────────────────
+      // Deliberately NOT gated by a `permission` prop like most ADMIN-only
+      // routes above — an admin whose subscription just expired may not
+      // have any permission context loaded/valid yet, and this is the one
+      // page they must always be able to reach to pay and restore access
+      // (mirrors the server-side whitelist in SubscriptionAccessFilter,
+      // which always allows /api/subscriptions/**). Role-gating alone
+      // (ADMIN) is intentional and sufficient here.
+      {
+        path: "/subscription",
+        element: (
+          <ProtectedRoute allow={["ADMIN"]}>
+            <SubscriptionPage />
+          </ProtectedRoute>
+        ),
+      },
 
       // ── ADMIN + WARDEN ─────────────────────────────────────────────────
       {

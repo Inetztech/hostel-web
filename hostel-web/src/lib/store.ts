@@ -5,7 +5,7 @@ import {
   PaymentMode, TenantEBBill, Branch, BranchRequest, TenantRequest,
   LoginResponse, User, Complaint, ComplaintStatus, FoodTimetable,
   FoodTimetableRequest, Announcement, AnnouncementRequest, Admin,
-  AdminPageResponse, AdminRequest, RegisterUserRequest,
+  AdminPageResponse, AdminRequest, RegisterUserRequest, UpdateUserRequest,
   Hostel, HostelRequest, PaymentTransaction,BranchCleaningSummary,
   PermissionCatalogItem, UserPermissionsResponse,CleaningStatus,
   RuleRegulation, RuleRegulationRequest,
@@ -13,7 +13,12 @@ import {
   Ticket, TicketSummary, TicketStats, TicketRequest, TicketReplyRequest,
   TicketStatusUpdateRequest, BedLimitDecisionRequest, TicketStatus, TicketCategory,
   MaintenanceDashboardStats, Cleaner, MaintenanceTask,CleanerWorkSummary,MaintenanceRequest,CleanerRequest,
+  HostelStatus,AddOnBedsRequest,
 } from "./types";
+
+
+export const addOnBeds = async (data: AddOnBedsRequest): Promise<Subscription> =>
+  d(await api.post("/subscriptions/my/add-on-beds", data));
 
 /* ── Shared helpers ───────────────────────────────────────────────────── */
 
@@ -86,8 +91,8 @@ export const loginUser = async (email: string, password: string): Promise<LoginR
 
   if (res.branchId != null) sessionStorage.setItem("branchId", String(res.branchId));
 
-  // FIX: the backend now resolves and returns tenantId directly in the
-  // login response for TENANT-role accounts (AuthResponse.tenantId ->
+  // The backend resolves and returns tenantId directly in the login
+  // response for TENANT-role accounts (AuthResponse.tenantId ->
   // tenant.user_id). Use it immediately via the existing cache helper
   // instead of clearing it and forcing resolveTenantId() to make a
   // separate /dashboard/tenant round-trip the first time it's needed.
@@ -98,6 +103,26 @@ export const loginUser = async (email: string, password: string): Promise<LoginR
   } else {
     sessionStorage.removeItem("tenantId");
     sessionStorage.removeItem("tenantIdToken");
+  }
+
+  // ── Subscription expiry gating (ADMIN only) ──
+  // Cached immediately so route guards (ProtectedRoute / AppLayout) can
+  // check it synchronously without waiting on a /subscriptions/me call.
+  // Cleared on logout via clearSubscriptionExpiredFlag().
+  if (res.subscriptionExpired != null) {
+    sessionStorage.setItem("subscriptionExpired", String(res.subscriptionExpired));
+  } else {
+    sessionStorage.removeItem("subscriptionExpired");
+  }
+
+  // ── NEW: hostel operational status gating (ADMIN/WARDEN/TENANT) ──
+  // Cached immediately, same pattern as subscriptionExpired, so route
+  // guards can redirect to a "profile only" view for a non-ACTIVE
+  // hostel without an extra round-trip. Null for SUPER_ADMIN.
+  if (res.hostelStatus != null) {
+    sessionStorage.setItem("hostelStatus", res.hostelStatus);
+  } else {
+    sessionStorage.removeItem("hostelStatus");
   }
 
   setUserProfile({
@@ -155,7 +180,14 @@ export const getMyProfile = async (forceRefresh = false): Promise<User> => {
   return profileInFlight;
 };
 
-export const updateMyProfile = async (data: { name: string; phone: string }): Promise<User> => {
+// NOTE: matches backend UpdateUserRequest — email/password are optional.
+// Leave password blank/undefined to keep the current password unchanged.
+export const updateMyProfile = async (data: {
+  name: string;
+  phone: string;
+  email?: string;
+  password?: string;
+}): Promise<User> => {
   const updated = d(await api.put("/users/me", data));
   profileCache = null;
   return updated;
@@ -175,6 +207,115 @@ export const isTokenExpired = (token?: string): boolean => {
   } catch {
     return true;
   }
+};
+
+/* ── Subscription / Billing (ADMIN only) ─────────────────────────────────
+   Backed by SubscriptionController on the server (/api/subscriptions/**).
+   These three endpoints are always reachable even when the ADMIN's
+   subscription has expired — every other endpoint is blocked server-side
+   by SubscriptionAccessFilter, which responds 402 with
+   { code: "SUBSCRIPTION_EXPIRED" }. Wire a response interceptor in api.ts
+   to catch that code and redirect to /subscription. */
+
+export interface Subscription {
+  hostelId: number;
+  hostelName: string;
+  planName: string;
+  amountPaid: number;
+  durationMonths: number;
+  durationLabel: string;
+  startDate: string | null;
+  endDate: string | null;
+  status: "ACTIVE" | "EXPIRED";
+  daysRemaining: number;
+  expiringSoon: boolean;
+  renewalRequired: boolean;
+  renewalStatus: string;
+
+  // ── NEW: Additional Bed Request (mirrors SubscriptionResponse.java) ──
+  currentPlanBedLimit: number;
+  additionalBedsRequested: number;
+  pricePerAdditionalBed: number;
+  additionalBedAmount: number;
+  totalSubscriptionAmount: number;
+}
+
+export interface SubscriptionPayment {
+  id: number;
+  planName: string;
+  amount: number;
+  durationMonths: number;
+  paymentDate: string;
+  cycleStartDate: string;
+  cycleEndDate: string;
+  paymentMode: string;
+  remarks?: string | null;
+
+  // ── NEW: additional-bed charge breakdown, shown separately on receipts ──
+  additionalBedsRequested: number;
+  pricePerAdditionalBed: number;
+  additionalBedAmount: number;
+  totalSubscriptionAmount: number;
+}
+
+export interface SubscriptionRenewRequest {
+  planName: string;
+  amount: number;
+  durationMonths: number;
+  paymentMode?: string;
+  remarks?: string;
+
+  // ── NEW: optional — omit or leave undefined for a plain renewal with no additional beds ──
+  additionalBedsRequested?: number;
+  pricePerAdditionalBed?: number;
+}
+
+/** Current billing cycle for the logged-in ADMIN's hostel. */
+export const getMySubscription = async (): Promise<Subscription> =>
+  d(await api.get("/subscriptions/me"));
+
+/** Full renewal/payment history for the logged-in ADMIN's hostel, most recent first. */
+export const getMySubscriptionHistory = async (): Promise<SubscriptionPayment[]> =>
+  d(await api.get("/subscriptions/me/history"));
+
+/** Record a renewal payment — extends (or reactivates) the subscription and restores access. */
+export const renewMySubscription = async (
+  data: SubscriptionRenewRequest
+): Promise<Subscription> => {
+  const updated = d(await api.post("/subscriptions/me/renew", data));
+  // Access has been restored — clear the cached expiry flag immediately
+  // so route guards stop redirecting to /subscription on this device.
+  sessionStorage.setItem("subscriptionExpired", "false");
+  return updated;
+};
+
+/** Synchronous, session-cached read of the flag set at login — use this
+ *  for instant route-guard decisions. It can go stale during a long
+ *  session (an active subscription can expire mid-session), so pages
+ *  that show subscription details should still call getMySubscription(). */
+export const isSubscriptionExpiredCached = (): boolean =>
+  sessionStorage.getItem("subscriptionExpired") === "true";
+
+export const clearSubscriptionExpiredFlag = (): void => {
+  sessionStorage.removeItem("subscriptionExpired");
+};
+
+/* ── Hostel operational status (ADMIN/WARDEN/TENANT) ───────────────────
+   Synchronous, session-cached read of the flag set at login — same
+   pattern/caveats as isSubscriptionExpiredCached above: usable for
+   instant route-guard decisions, but can go stale mid-session if a
+   SUPER_ADMIN changes the hostel's status while this user is logged in. */
+
+export const getCachedHostelStatus = (): HostelStatus | null =>
+  (sessionStorage.getItem("hostelStatus") as HostelStatus | null) ?? null;
+
+export const isHostelInactiveCached = (): boolean => {
+  const status = getCachedHostelStatus();
+  return status !== null && status !== "ACTIVE";
+};
+
+export const clearHostelStatusFlag = (): void => {
+  sessionStorage.removeItem("hostelStatus");
 };
 
 /* ── Tenant identity (cached + token-bound) ───────────────────────────── */
@@ -244,30 +385,15 @@ export const getBeds   = fetchBeds;
 export const updateBedStatus = async (bedId: number, isOccupied: boolean): Promise<Bed> =>
   { guard(); return d(await api.put(`/beds/${bedId}`, { occupied: isOccupied })); };
 
-/** Creates ONE individual Bed row under a room (backend numbers it
- *  sequentially per room). Call this in a loop — e.g. from RoomsPage's
- *  seedBedsForRoom() — to seed a newly created room's beds to match the
- *  bed count chosen in the Add Room form (1 · Single / 2 · Double /
- *  3 · Triple / 4 · Quad, or a custom number). Without this, a room's
- *  `totalBeds` was just a number on the Room row with no real Bed
- *  records behind it — which is why bed drill-down views could show
- *  "No beds created" for rooms that otherwise looked fully set up. */
 export const createBed = async (roomId: number): Promise<Bed> =>
   { guard(); return d(await api.post(`/beds/room/${roomId}`)); };
 
-/** All bed rows that already exist under a specific room. Used on Room
- *  Edit to reconcile the actual Bed rows to a new desired bed count —
- *  see RoomsPage's reconcileBedsForRoom(). */
 export const getBedsByRoom = async (
   roomId: number,
   pg = 0,
   size = 100
 ): Promise<Bed[]> => d(await api.get(`/beds/room/${roomId}`, { params: { page: pg, size } }));
 
-/** Deletes a single bed by id — used when a room's bed count is reduced
- *  on Edit. Callers should only ever pass a bed that's confirmed vacant
- *  (isOccupied === false); the backend does not itself refuse to delete
- *  an occupied bed, so that check must happen client-side first. */
 export const deleteBed = async (bedId: number): Promise<void> =>
   { guard(); await api.delete(`/beds/${bedId}`); };
 
@@ -435,26 +561,12 @@ export const deleteHostel = async (id: number): Promise<void> =>
   { guard(); await api.delete(`/hostels/${id}`); };
 
 /** Dedicated status-change call for HostelAdminPage's row "More" menu
- *  (Mark Active / Mark Inactive / Suspend Hostel).
- *
- *  FIX: this previously called PATCH /hostels/{id}/status with a JSON
- *  body, which 404'd — the merged Hostel+Admin workflow (and its status
- *  action) lives on SuperAdminController at /api/super-admin/hostels,
- *  NOT the plain /hostels controller, and the backend endpoint is a PUT
- *  that takes `status` as a query param, not a JSON body. That mismatch
- *  is exactly what produced:
- *    NoResourceFoundException: No static resource api/hostels/2/status
- *  because Spring had no mapping at all for that path, and fell through
- *  to the static-resource resolver.
- *
- *  Now correctly hits PUT /super-admin/hostels/{id}/status?status=...
- *  (see SuperAdminController#updateHostelStatus /
- *  SuperAdminServiceImpl#updateHostelStatus), and returns the enriched
- *  HostelAdmin shape (with admin fields) that HostelAdminPage.tsx's
- *  handleStatusChange/loadData actually expect — not a bare Hostel. */
+ *  (Mark Active / Mark Inactive / Suspend Hostel). Hits
+ *  PUT /super-admin/hostels/{id}/status?status=... (see
+ *  SuperAdminController#updateHostelStatus). */
 export const updateHostelStatus = async (
   id: number,
-  status: import("./types").HostelStatus
+  status: HostelStatus
 ): Promise<import("./types").HostelAdmin> => {
   guard();
   return d(await api.put(`/super-admin/hostels/${id}/status`, null, { params: { status } }));
@@ -463,10 +575,7 @@ export const updateHostelStatus = async (
 export const getSuperAdminDashboard = async (): Promise<import("./types").SuperAdminDashboard> =>
   (await api.get("/super-admin/dashboard")).data.data;
 
-/* ── Merged Hostel + Admin (single /super-admin/hostels screen) ────────
-   Replaces the old two-step flow (create Hostel on /hostels, then
-   create/assign an Admin on /super-admin/admins) with one screen and
-   one form that creates/updates both together in a single request. ── */
+/* ── Merged Hostel + Admin (single /super-admin/hostels screen) ──────── */
 
 const hostelAdminsInFlight = new Map<string, Promise<import("./types").HostelAdminPageResponse>>();
 
@@ -659,11 +768,7 @@ export const updateAnnouncement    = async (id: number, data: AnnouncementReques
 export const deleteAnnouncement    = async (id: number): Promise<void> => { guard(); await api.delete(`/announcements/${id}`); };
 export const shareAnnouncementWhatsApp = async (id: number) => d(await api.post(`/announcements/${id}/share-whatsapp`));
 
-/* ── Rules & Regulations ─────────────────────────────────────────────────
-   View is open to ADMIN, WARDEN and TENANT (server filters WARDEN/TENANT
-   down to published rules only). Create/Edit/Delete are ADMIN-only —
-   guarded server-side via @PreAuthorize; guard() below just avoids a
-   pointless round-trip for roles that can never succeed. */
+/* ── Rules & Regulations ─────────────────────────────────────────────── */
 export const fetchRulesRegulations = async (
   pg = 0,
   size = 10
@@ -749,19 +854,13 @@ export const markAbsconded = async (
 
 /* =====================================================
    HIERARCHICAL RBAC — PERMISSIONS API
-   SUPER_ADMIN → assigns permissions to ADMIN
-   ADMIN       → assigns permissions to WARDEN and TENANT
-   WARDEN      → assigns permissions to TENANT
-   A user can only ever grant a subset of what they hold themselves.
 ===================================================== */
 
-/** Every permission that exists in the system (for building a full reference list). */
 export const getPermissionCatalog = async (): Promise<PermissionCatalogItem[]> =>
   d(await api.get("/permissions/catalog"));
 
 let assignablePermissionsInFlight: Promise<PermissionCatalogItem[]> | null = null;
 
-/** Permissions the logged-in user is allowed to hand down to a subordinate. */
 export const getAssignablePermissions = async (): Promise<PermissionCatalogItem[]> => {
   if (assignablePermissionsInFlight) return assignablePermissionsInFlight;
 
@@ -776,11 +875,9 @@ export const getAssignablePermissions = async (): Promise<PermissionCatalogItem[
   return assignablePermissionsInFlight;
 };
 
-/** A specific user's role + current permission catalog (with `granted` flags). */
 export const getUserPermissions = async (userId: number): Promise<UserPermissionsResponse> =>
   d(await api.get(`/permissions/user/${userId}`));
 
-/** Replace a subordinate user's permission set. Send the full desired set (not a diff). */
 export const assignUserPermissions = async (
   userId: number,
   permissions: string[]
@@ -817,15 +914,15 @@ export const getUsers = async (pg = 0, size = 10) => {
 
 export const getUserById  = async (id: number): Promise<User>  => d(await api.get(`/users/${id}`));
 export const deleteUser   = async (id: number): Promise<void>  => { guard(); await api.delete(`/users/${id}`); };
-export const updateUser   = async (id: number, data: RegisterUserRequest): Promise<User> =>
+
+// NOTE: switched from RegisterUserRequest to UpdateUserRequest — role is
+// no longer part of the update payload; the backend stopped reading it
+// on this endpoint. Password is optional (blank/omitted = keep current).
+export const updateUser = async (id: number, data: UpdateUserRequest): Promise<User> =>
   { guard(); return d(await api.put(`/users/${id}`, data)); };
 
 /* ── Payments ─────────────────────────────────────────────────────────── */
 
-/** Tenant's own rents (used for "Pending Dues" on PaymentsPage).
- *  In-flight map collapses duplicate concurrent calls (e.g. React
- *  StrictMode double-invoking the effect in TenantPayments) into a
- *  single network request per tenantId. */
 const tenantRentsInFlight = new Map<number, Promise<Rent[]>>();
 
 export const getTenantRents = async (tenantId: number): Promise<Rent[]> => {
@@ -843,41 +940,16 @@ export const getTenantRents = async (tenantId: number): Promise<Rent[]> => {
   return promise;
 };
 
-/** Tenant submits a payment (rentId/amount/mode/proof) for verification. */
 export const submitPayment = async (data: FormData): Promise<PaymentTransaction> =>
   d(await api.post("/payments/submit", data));
 
-/** Approve a pending payment — applies it to the tenant's rent. */
 export const approvePayment = async (id: number): Promise<PaymentTransaction> =>
   d(await api.put(`/payments/${id}/approve`));
 
-/** Reject a pending payment with a reason shown to the tenant. */
 export const rejectPayment = async (
   id: number,
   remarks: string
 ): Promise<PaymentTransaction> => d(await api.put(`/payments/${id}/reject`, { remarks }));
-
-/* ── Payments (Paginated + de-duplicated) ─────────────────────────────
-   FIX: the backend controller/service only expose the paginated routes
-   /payments/pending/page, /payments/page, /payments/tenant/{id}/page —
-   the older non-paginated /payments/pending, /payments,
-   /payments/tenant/{id} routes were removed entirely from the service
-   interface (only Page<> methods remain in PaymentTransactionServiceImpl,
-   see getHistoryForTenant/getAllForApprover/getPendingForApprover, all
-   of which now require a Pageable argument).
-
-   Calling the old plain routes therefore 404s — Spring has no
-   @GetMapping left to match "/payments/tenant/4", so it falls through
-   to the static resource resolver, surfacing as:
-     NoResourceFoundException: No static resource api/payments/tenant/4
-   which is exactly the "Failed to load payment history" toast seen on
-   TenantPayments.
-
-   Fix: every payments fetcher below — paginated or "flat list" —
-   ultimately calls one of the three /page routes. Nothing calls a
-   non-page payments URL anymore. In-flight maps (same pattern as
-   fetchHostels/getAllAdmins) collapse StrictMode's duplicate mount
-   calls into a single network request per unique page/size/tenantId. */
 
 const pendingPaymentsInFlight = new Map<string, Promise<{ content: PaymentTransaction[]; totalElements: number }>>();
 
@@ -923,7 +995,6 @@ export const fetchAllPayments = async (
   return promise;
 };
 
-/** Paginated tenant payment history (for a specific tenant, one page at a time). */
 const tenantPaymentHistoryInFlight = new Map<string, Promise<{ content: PaymentTransaction[]; totalElements: number }>>();
 
 export const fetchTenantPaymentHistoryPaged = async (
@@ -947,22 +1018,16 @@ export const fetchTenantPaymentHistoryPaged = async (
   return promise;
 };
 
-/** Fetch a tenant's entire payment history across all pages (uses fetchAllPages<T>). */
 export const getAllTenantPaymentHistory = (tenantId: number): Promise<PaymentTransaction[]> =>
   fetchAllPages<PaymentTransaction>((pg, size) =>
     fetchTenantPaymentHistoryPaged(tenantId, pg, size)
   );
 
-/** Used by TenantPayments — expects a plain array. A tenant's own
- *  history is always small, so a single size=100 page through the
- *  route that actually exists on the backend covers it in one call. */
 export const getTenantPaymentHistory = async (
   tenantId: number
 ): Promise<PaymentTransaction[]> =>
   (await fetchTenantPaymentHistoryPaged(tenantId, 0, 10)).content;
 
-/** Back-compat aliases for any code still importing the old plain-list
- *  names — both now route through the /page endpoints under the hood. */
 export const getPendingPayments = async (): Promise<PaymentTransaction[]> =>
   (await fetchPendingPayments(0, 10)).content;
 
@@ -990,18 +1055,11 @@ export const deleteNotification = async (id: number): Promise<void> => {
   await api.delete(`/notifications/${id}`);
 };
 
-/** Admin/Warden: send a custom notification/message to their branch's tenants (or another role). */
 export const createNotification = async (
   data: NotificationRequest
 ): Promise<AppNotification[]> => { guard(); return d(await api.post("/notifications", data)); };
 
-
-
-/* ── Raise Ticket module (Admin ↔ Super Admin) ──────────────────────────
-   ADMIN raises tickets (incl. Bed Size / Bed Limit Increase requests) and
-   sees only their own; SUPER_ADMIN sees every ticket across every hostel,
-   updates status, decides bed-limit requests, and replies. Both roles can
-   reply on a ticket they're allowed to view. ──────────────────────────── */
+/* ── Raise Ticket module ─────────────────────────────────────────────── */
 
 export const createTicket = async (data: TicketRequest): Promise<Ticket> => {
   if (getUserRole() !== "ADMIN") throw new Error("Only Admins can raise tickets");
@@ -1064,7 +1122,7 @@ export const fetchExpenses = async (): Promise<Expense[]> => {
 export const getExpenses = fetchExpenses;
 
 export const createExpense = async (data: Omit<Expense, "id">): Promise<Expense> => {
-  guard(); // Enforces write permissions check
+  guard();
   return d(await api.post("/expense/save", data));
 };
 
@@ -1089,36 +1147,30 @@ export interface Visitor {
   visitorName: string;
   visitorPhone: string;
   relation: string;
-  visitDate: string;        // "YYYY-MM-DD"
-  expectedInTime: string;   // "HH:mm"
+  visitDate: string;
+  expectedInTime: string;
   checkInTime?: string;
   checkOutTime?: string;
   status: VisitorStatus;
   remarks?: string;
 }
 
-/* ── Visitor Management ────────────────────────────────────────────────── */
-
-/** Tenant: Submit a visitor entry request */
 export const requestVisitor = async (
   data: Omit<Visitor, "id" | "status">
 ): Promise<Visitor> => {
   return d(await api.post("/visitors/request", data));
 };
 
-/** Warden/Admin: Fetch all visitor records for a specific branch */
 export const fetchBranchVisitors = async (branchId: number): Promise<Visitor[]> => {
   const res = await api.get(`/visitors/branch/${branchId}`);
   return res.data?.data ?? res.data ?? [];
 };
 
-/** Tenant: Fetch visitor request history for the logged-in tenant */
 export const fetchTenantVisitors = async (tenantId: number): Promise<Visitor[]> => {
   const res = await api.get(`/visitors/tenant/${tenantId}`);
   return res.data?.data ?? res.data ?? [];
 };
 
-/** Warden/Admin: Update visitor status (APPROVE, REJECT, CHECKED_IN, CHECKED_OUT) */
 export const updateVisitorStatus = async (
   id: number,
   status: VisitorStatus,
@@ -1130,9 +1182,6 @@ export const updateVisitorStatus = async (
   });
   return res.data?.data ?? res.data;
 };
-
-
-
 
 // ── Cleaners CRUD ──
 export const getMaintenanceCleaners = async (): Promise<Cleaner[]> =>
@@ -1245,3 +1294,8 @@ export const exportCleanerPerformanceReport = (
     `/maintenance/reports/cleaner-performance/export?format=${format}&period=${period}`,
     `cleaner-performance-report.${format === "pdf" ? "pdf" : "xlsx"}`
   );
+
+
+  export const publicRegisterTenant = async (data: TenantRequest | FormData): Promise<Tenant> => {
+  return d(await api.post("/tenants/public-register", data));
+};

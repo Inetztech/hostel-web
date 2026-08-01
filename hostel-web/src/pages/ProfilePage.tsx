@@ -1,11 +1,15 @@
 // src/pages/ProfilePage.tsx
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { getUserRole, logout } from "@/lib/auth";
-import { getMyProfile, updateMyProfile, changePassword } from "@/lib/store";
+import {
+  getMyProfile, updateMyProfile, changePassword,
+  getMySubscription, Subscription,
+} from "@/lib/store";
 import {
   User, Mail, Phone, Building2, Shield, Key, LogOut,
   Edit3, Save, X, Eye, EyeOff, CheckCircle2, AlertCircle,
-  Calendar, Lock, Clock
+  Calendar, Lock, Clock, CreditCard, RefreshCw, TimerReset,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +29,9 @@ export default function ProfilePage() {
     bg: "bg-gray-50", text: "text-gray-600", ring: "ring-gray-200", dot: "bg-gray-400",
     accent: "from-gray-400 to-gray-600",
   };
+  const navigate = useNavigate();
 
-  /* ── Profile state — populated from GET /users/me ──
-     Response shape is FLAT: { id, email, name, phone, role, branchId, unitName } */
+  /* ── Profile state — populated from GET /users/me ── */
   const [name,  setName]  = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -53,9 +57,15 @@ export default function ProfilePage() {
   const [pwdMsg,     setPwdMsg]     = useState<"" | "success" | "mismatch" | "short" | "empty" | "error">("");
   const [pwdErrorText, setPwdErrorText] = useState("");
 
-  /* Load full profile from backend — single source of truth, works for
-     every role including TENANT (whose branch is resolved server-side
-     through their room/unit assignment, not via users.branch_id). */
+  /* ── Subscription (ADMIN only) ──
+     Sourced from GET /api/subscriptions/me — always reachable even when
+     the subscription itself is expired, since it's whitelisted in
+     SubscriptionAccessFilter. */
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [loadingSubscription, setLoadingSubscription] = useState(false);
+  const [subscriptionError, setSubscriptionError] = useState(false);
+  const isAdmin = roleKey === "ADMIN";
+
   useEffect(() => {
     let cancelled = false;
     setLoadingProfile(true);
@@ -79,6 +89,27 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    setLoadingSubscription(true);
+    setSubscriptionError(false);
+
+    (async () => {
+      try {
+        const sub = await getMySubscription();
+        if (!cancelled) setSubscription(sub);
+      } catch (err) {
+        console.error("Failed to load subscription", err);
+        if (!cancelled) setSubscriptionError(true);
+      } finally {
+        if (!cancelled) setLoadingSubscription(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [isAdmin]);
+
   /* Sync edit fields whenever the loaded profile changes */
   useEffect(() => {
     setEditName(name);
@@ -92,9 +123,6 @@ export default function ProfilePage() {
     .slice(0, 2)
     .toUpperCase();
 
-  /* ── Save profile — persists via PUT /users/me (userRepository.save
-     on the backend), so it survives refresh / a new session, not just
-     sessionStorage. ── */
   async function handleSave() {
     if (!editName.trim() || saving) return;
     setSaving(true);
@@ -117,9 +145,6 @@ export default function ProfilePage() {
     }
   }
 
-  /* ── Change password — verified + persisted server-side via
-     PUT /users/me/change-password (old password checked against the
-     stored hash, new one re-encoded and saved through userRepository). ── */
   async function handleChangePassword() {
     if (pwdSaving) return;
     if (!oldPwd || !newPwd || !confirmPwd) { setPwdMsg("empty");    return; }
@@ -223,7 +248,7 @@ export default function ProfilePage() {
             </div>
           ) : (
             <div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <h3 className="text-2xl font-bold text-gray-900">{displayName}</h3>
                 <span className={cn(
                   "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide",
@@ -232,6 +257,17 @@ export default function ProfilePage() {
                   <Shield className="h-3 w-3" />
                   {meta.label}
                 </span>
+                {isAdmin && subscription && (
+                  subscription.status === "EXPIRED" ? (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide bg-red-50 text-red-600">
+                      <AlertCircle className="h-3 w-3" /> Subscription Expired
+                    </span>
+                  ) : subscription.expiringSoon ? (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide bg-amber-50 text-amber-700">
+                      <Clock className="h-3 w-3" /> Expiring in {subscription.daysRemaining}d
+                    </span>
+                  ) : null
+                )}
               </div>
               <p className="text-gray-500 text-[15px] font-medium mt-1.5">
                 {loadingProfile ? "Loading…" : displayEmail}
@@ -252,6 +288,105 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
+
+      {/* ══════════════════════════════════════════
+          SUBSCRIPTION & BILLING SECTION (ADMIN only)
+      ══════════════════════════════════════════ */}
+      {isAdmin && (
+        <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm">
+          <div className="p-6 border-b border-gray-50 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+                <CreditCard className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-[17px] font-bold text-gray-900">Subscription & Billing</h4>
+                <p className="text-[13px] text-gray-500 mt-0.5">Your hostel's current plan and payment history</p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate("/subscription")}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-indigo-200 text-indigo-600 text-sm font-semibold hover:bg-indigo-50 transition-colors bg-white shadow-sm"
+            >
+              <RefreshCw className="h-4 w-4" /> Manage Subscription
+            </button>
+          </div>
+
+          <div className="p-6">
+            {loadingSubscription ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-xl bg-gray-50 animate-pulse" />
+                ))}
+              </div>
+            ) : subscriptionError || !subscription ? (
+              <div className="flex items-center gap-2 text-gray-400 text-sm bg-gray-50 px-4 py-3 rounded-xl">
+                <AlertCircle className="h-4 w-4 shrink-0" /> Couldn't load subscription details.
+              </div>
+            ) : (
+              <>
+                {subscription.status === "EXPIRED" && (
+                  <div className="mb-5 flex items-center justify-between gap-3 flex-wrap bg-red-50 border border-red-100 px-4 py-3.5 rounded-xl">
+                    <div className="flex items-center gap-2 text-red-700 text-sm font-semibold">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      Your subscription expired on {subscription.endDate}. Renew now to restore full access.
+                    </div>
+                    <button
+                      onClick={() => navigate("/subscription")}
+                      className="px-4 py-2 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors"
+                    >
+                      Renew Subscription
+                    </button>
+                  </div>
+                )}
+                {subscription.status === "ACTIVE" && subscription.expiringSoon && (
+                  <div className="mb-5 flex items-center justify-between gap-3 flex-wrap bg-amber-50 border border-amber-100 px-4 py-3.5 rounded-xl">
+                    <div className="flex items-center gap-2 text-amber-700 text-sm font-semibold">
+                      <Clock className="h-4 w-4 shrink-0" />
+                      Your subscription expires in {subscription.daysRemaining} day{subscription.daysRemaining === 1 ? "" : "s"} ({subscription.endDate}).
+                    </div>
+                    <button
+                      onClick={() => navigate("/subscription")}
+                      className="px-4 py-2 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-colors"
+                    >
+                      Renew Early
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <DetailBox icon={CreditCard} label="Plan Name" value={subscription.planName} iconBg="bg-indigo-50" iconColor="text-indigo-600" />
+                  <DetailBox icon={Building2} label="Amount Paid" value={`₹${Number(subscription.amountPaid).toLocaleString("en-IN")}`} iconBg="bg-emerald-50" iconColor="text-emerald-600" />
+                  <DetailBox icon={Calendar} label="Subscription Start" value={subscription.startDate ?? "—"} iconBg="bg-blue-50" iconColor="text-blue-600" />
+                  <DetailBox icon={Calendar} label="Subscription End" value={subscription.endDate ?? "—"} iconBg="bg-blue-50" iconColor="text-blue-600" />
+                  <DetailBox icon={TimerReset} label="Duration" value={subscription.durationLabel} iconBg="bg-purple-50" iconColor="text-purple-600" />
+                  <DetailBox
+                    icon={subscription.status === "ACTIVE" ? CheckCircle2 : AlertCircle}
+                    label="Status"
+                    value={subscription.status === "ACTIVE" ? "Active" : "Expired"}
+                    valueColor={subscription.status === "ACTIVE" ? "text-emerald-600" : "text-red-600"}
+                    iconBg={subscription.status === "ACTIVE" ? "bg-emerald-50" : "bg-red-50"}
+                    iconColor={subscription.status === "ACTIVE" ? "text-emerald-600" : "text-red-600"}
+                  />
+                  <DetailBox
+                    icon={Clock}
+                    label="Days Remaining"
+                    value={subscription.status === "ACTIVE" ? `${subscription.daysRemaining} days` : "0 days"}
+                    iconBg="bg-amber-50" iconColor="text-amber-600"
+                  />
+                  <DetailBox
+                    icon={RefreshCw}
+                    label="Renewal Status"
+                    value={subscription.renewalStatus}
+                    valueColor={subscription.renewalRequired ? "text-red-600" : "text-emerald-600"}
+                    iconBg="bg-gray-50" iconColor="text-gray-500"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ══════════════════════════════════════════
           ACCOUNT DETAILS SECTION

@@ -110,22 +110,27 @@ const FoodTimetablePage = () => {
   /* Helper map to quickly lookup branch name by branchId */
   const branchMap = useMemo(() => {
     const map = new Map<number, string>();
-    branches.forEach((b) => map.set(b.id, b.unitName));
+    branches.forEach((b: any) => {
+      // Safely check for unitName, name, or branchName properties
+      const name = b.unitName || b.name || b.branchName || `Branch #${b.id}`;
+      map.set(b.id, name);
+    });
     return map;
   }, [branches]);
 
-  /* ── LOAD BRANCHES ── */
+  /* ── LOAD BRANCHES (Always load branches for all roles to resolve names) ── */
   useEffect(() => {
-    if (role !== "ADMIN" && role !== "SUPER_ADMIN") return;
     (async () => {
       try {
-        const { content } = await getBranches(0, 50);
-        setBranches(content);
+        const res = await getBranches(0, 50);
+        // Support array responses or paginated content structures
+        const branchList = Array.isArray(res) ? res : res?.content || [];
+        setBranches(branchList);
       } catch (err) {
         console.error(err);
       }
     })();
-  }, [role]);
+  }, []);
 
   useEffect(() => {
     if (!selectedBranch || selectedBranch === "ALL") return;
@@ -331,7 +336,7 @@ const FoodTimetablePage = () => {
               <div className="ft-panel-title">Weekly Meal Schedule</div>
               <div className="flex gap-2 items-center flex-wrap">
                 {/* BRANCH SWITCHER WITH ALL BRANCHES OPTION */}
-                {(role === "ADMIN" || role === "SUPER_ADMIN") && (
+                {hasAccess && (
                   <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-10 w-[160px]">
                     <Select value={selectedBranch} onValueChange={setSelectedBranch}>
                       <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
@@ -339,8 +344,10 @@ const FoodTimetablePage = () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="ALL">All Branches</SelectItem>
-                        {branches.map((b) => (
-                          <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
+                        {branches.map((b: any) => (
+                          <SelectItem key={b.id} value={String(b.id)}>
+                            {b.unitName || b.name || b.branchName || `Branch #${b.id}`}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -435,7 +442,12 @@ const FoodTimetablePage = () => {
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}>Delete</AlertDialogAction>
+                                  <AlertDialogAction
+                                    className="bg-red-600 hover:bg-red-700 focus:ring-red-600 text-white"
+                                    onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}
+                                  >
+                                    Delete
+                                  </AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>
@@ -466,15 +478,15 @@ const FoodTimetablePage = () => {
               }
             }}
           >
-            <DialogContent className="rounded-3xl max-w-lg">
+            <DialogContent className="rounded-3xl max-w-2xl w-[94vw]">
               <DialogHeader>
                 <DialogTitle className="text-2xl font-bold">Add Food Schedule</DialogTitle>
                 <DialogDescription>
                   Create weekly food timetable.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 pt-2">
-                {(role === "ADMIN" || role === "SUPER_ADMIN") && branches.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                {branches.length > 0 && (
                   <Select
                     value={modalBranch}
                     onValueChange={(val) => {
@@ -486,9 +498,9 @@ const FoodTimetablePage = () => {
                       <SelectValue placeholder="Select Branch" />
                     </SelectTrigger>
                     <SelectContent>
-                      {branches.map((b) => (
+                      {branches.map((b: any) => (
                         <SelectItem key={b.id} value={String(b.id)}>
-                          {b.unitName}
+                          {b.unitName || b.name || b.branchName || `Branch #${b.id}`}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -508,7 +520,7 @@ const FoodTimetablePage = () => {
 
                 <Input placeholder="Breakfast" className="h-11" value={form.breakfast} onChange={(e) => setForm({ ...form, breakfast: e.target.value })} />
                 <Input placeholder="Lunch" className="h-11" value={form.lunch} onChange={(e) => setForm({ ...form, lunch: e.target.value })} />
-                <Input placeholder="Dinner" className="h-11" value={form.dinner} onChange={(e) => setForm({ ...form, dinner: e.target.value })} />
+                <Input placeholder="Dinner" className="h-11 sm:col-span-2" value={form.dinner} onChange={(e) => setForm({ ...form, dinner: e.target.value })} />
               </div>
               <DialogFooter className="mt-4">
                 <DialogClose asChild><Button variant="outline" className="h-10">Cancel</Button></DialogClose>
@@ -521,14 +533,13 @@ const FoodTimetablePage = () => {
         {/* EDIT DIALOG */}
         {hasAccess && (
           <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditSchedule(null); }}>
-            <DialogContent className="rounded-3xl max-w-lg">
+            <DialogContent className="rounded-3xl max-w-2xl w-[94vw]">
               <DialogHeader>
                 <DialogTitle className="text-2xl font-bold">Edit Food Schedule</DialogTitle>
                 <DialogDescription>Update timetable details.</DialogDescription>
               </DialogHeader>
               {editSchedule && (
-                <div className="space-y-4 pt-2">
-                  {/* BRANCH SELECTION IN EDIT MODAL */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                   {branches.length > 0 && (
                     <Select
                       value={String(editSchedule.branchId)}
@@ -540,9 +551,9 @@ const FoodTimetablePage = () => {
                         <SelectValue placeholder="Select Branch" />
                       </SelectTrigger>
                       <SelectContent>
-                        {branches.map((b) => (
+                        {branches.map((b: any) => (
                           <SelectItem key={b.id} value={String(b.id)}>
-                            {b.unitName}
+                            {b.unitName || b.name || b.branchName || `Branch #${b.id}`}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -557,7 +568,7 @@ const FoodTimetablePage = () => {
                   />
                   <Input className="h-11" placeholder="Breakfast" value={editSchedule.breakfast} onChange={(e) => setEditSchedule({ ...editSchedule, breakfast: e.target.value })} />
                   <Input className="h-11" placeholder="Lunch" value={editSchedule.lunch} onChange={(e) => setEditSchedule({ ...editSchedule, lunch: e.target.value })} />
-                  <Input className="h-11" placeholder="Dinner" value={editSchedule.dinner} onChange={(e) => setEditSchedule({ ...editSchedule, dinner: e.target.value })} />
+                  <Input className="h-11 sm:col-span-2" placeholder="Dinner" value={editSchedule.dinner} onChange={(e) => setEditSchedule({ ...editSchedule, dinner: e.target.value })} />
                 </div>
               )}
               <DialogFooter className="mt-4">

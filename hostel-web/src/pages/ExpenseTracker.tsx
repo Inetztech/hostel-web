@@ -22,6 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 import {
   getUserRole,
@@ -62,6 +70,30 @@ const ExpensePage = () => {
   const [month, setMonth] = useState<number>(new Date().getMonth() + 1);
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const loadingRef = useRef(false);
+
+  /* ── In-app confirm dialog state, replacing the native confirm()
+     popup so destructive actions (like deleting an expense) render
+     inline using the same Dialog component as the rest of the app,
+     instead of the browser's native confirm() dialog. `danger` swaps
+     the confirm button to the destructive/red Button variant. Mirrors
+     the same pattern used on the Tenants, Rooms & Beds, Branch, and
+     EB Readings pages, so every delete confirmation across the app
+     looks and behaves identically. ── */
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const askConfirm = (
+    title: string,
+    onConfirm: () => void,
+    options?: { description?: string; confirmLabel?: string; danger?: boolean },
+  ) => {
+    setConfirmState({ title, onConfirm, ...options });
+  };
 
   const yearOptions = useMemo(
     () =>
@@ -137,9 +169,8 @@ const ExpensePage = () => {
     [selectedBranch, userId, role, editingExpense, loadData],
   );
 
-  const handleDelete = useCallback(
+  const performDelete = useCallback(
     async (id: number) => {
-      if (!confirm("Permanently delete this record?")) return;
       try {
         await deleteExpense(id);
         toast.success("Expense deleted.");
@@ -149,6 +180,25 @@ const ExpensePage = () => {
       }
     },
     [loadData],
+  );
+
+  /* ── DELETE CONFIRM (styled, replaces native confirm()) ──
+     Previously this called the browser's native confirm("Permanently
+     delete this record?") directly, which produces the OS-styled
+     "says..." popup — visually inconsistent with the rest of the app.
+     Now it routes through askConfirm(), matching the Tenants / Rooms &
+     Beds / Branch / EB Readings delete-confirmation style: bold title,
+     "This action cannot be undone." subtext, no close-X, and a red
+     (destructive) "Delete" button. ── */
+  const handleDelete = useCallback(
+    (id: number) => {
+      askConfirm(
+        "Permanently delete this record?",
+        () => performDelete(id),
+        { description: "This action cannot be undone.", confirmLabel: "Delete", danger: true },
+      );
+    },
+    [performDelete],
   );
 
   const filteredRows = useMemo(() => {
@@ -258,7 +308,7 @@ const ExpensePage = () => {
             <Button
               size="sm"
               variant="destructive"
-              className="h-7 px-2 text-xs"
+              className="h-7 px-2 text-xs bg-red-600 hover:bg-red-700 text-white"
               onClick={() => handleDelete(p.data.id)}
             >
               <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
@@ -426,6 +476,39 @@ const ExpensePage = () => {
         year={year}
         branchOptions={branchList}
       />
+
+      {/* ── CONFIRM DIALOG — replaces the native confirm() popup for
+          destructive actions (currently: delete expense). Uses the same
+          Dialog component as the rest of the app for visual consistency:
+          bold title, "This action cannot be undone." subtext, no close-X
+          (`[&>button]:hidden` hides shadcn's default top-right X), and a
+          red (destructive) confirm button when `danger` is set. Matches
+          the Tenants / Rooms & Beds / Branch / EB Readings delete-
+          confirmation style exactly. ── */}
+      <Dialog open={!!confirmState} onOpenChange={(open) => { if (!open) setConfirmState(null); }}>
+        <DialogContent className="max-w-sm [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle>{confirmState?.title}</DialogTitle>
+            {confirmState?.description && (
+              <DialogDescription>{confirmState.description}</DialogDescription>
+            )}
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmState(null)}>Cancel</Button>
+            <Button
+              variant={confirmState?.danger ? "destructive" : "default"}
+              className={confirmState?.danger ? "bg-red-600 hover:bg-red-700 text-white" : ""}
+              onClick={() => {
+                const action = confirmState?.onConfirm;
+                setConfirmState(null);
+                action?.();
+              }}
+            >
+              {confirmState?.confirmLabel ?? "OK"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

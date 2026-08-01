@@ -1,13 +1,7 @@
-// src/pages/TicketsPage.tsx
-// ADMIN-facing "Raise Ticket" module: create support tickets (technical
-// issues, subscription issues, bed limit increase requests, account
-// issues, feature requests, billing issues, or anything else) and track
-// their own tickets through to resolution.
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
-  createTicket, getMyTickets, getHostelById,
+  createTicket, getMyTickets,
 } from "@/lib/store";
-import { getUserHostelId } from "@/lib/auth";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
   DialogClose, DialogDescription, DialogTrigger,
@@ -23,12 +17,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Ticket as TicketIcon, BedDouble, Inbox } from "lucide-react";
+import { Plus, Ticket as TicketIcon, Inbox } from "lucide-react";
 
 import TicketDetailDialog from "@/components/TicketDetailDialog";
 import {
-  TicketSummary, TicketCategory, TicketPriority,
-  TICKET_CATEGORY_OPTIONS, TICKET_PRIORITY_OPTIONS,
+  TicketSummary, TicketCategory,
+  TICKET_CATEGORY_OPTIONS,
 } from "@/lib/types";
 
 /* ================= HELPERS ================= */
@@ -56,12 +50,19 @@ const priorityColor = (priority: string) => {
 const fmtDate = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
+/* ================= AUTO PRIORITY =================
+   The user no longer picks a priority manually — every new ticket now
+   defaults to HIGH. (Previously Bed Limit Increase requests were bumped
+   to URGENT; that category has been removed from the "raise ticket" flow
+   since bed top-ups now go through the instant "Add Beds Mid-Cycle"
+   subscription feature instead of a reviewed ticket.) */
+const DEFAULT_PRIORITY = "HIGH" as const;
+
 const TicketsPage = () => {
   const [tickets, setTickets]     = useState<TicketSummary[]>([]);
   const [loading, setLoading]     = useState(true);
   const [addOpen, setAddOpen]     = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [currentBedLimit, setCurrentBedLimit] = useState<number | null>(null);
 
   const [detailId, setDetailId]   = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -70,8 +71,6 @@ const TicketsPage = () => {
   const [subject, setSubject]         = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory]       = useState<TicketCategory | "">("");
-  const [priority, setPriority]       = useState<TicketPriority>("MEDIUM");
-  const [requestedBedLimit, setRequestedBedLimit] = useState("");
 
   const didFetch = useRef(false);
 
@@ -79,8 +78,6 @@ const TicketsPage = () => {
     setSubject("");
     setDescription("");
     setCategory("");
-    setPriority("MEDIUM");
-    setRequestedBedLimit("");
   };
 
   const closeDialog = () => {
@@ -105,24 +102,11 @@ const TicketsPage = () => {
     if (didFetch.current) return;
     didFetch.current = true;
     loadTickets();
-
-    // Best-effort: show the hostel's current bed capacity as context when
-    // raising a Bed Limit Increase request. Non-fatal if it fails.
-    const hostelId = getUserHostelId();
-    if (hostelId) {
-      getHostelById(hostelId)
-        .then((h: any) => setCurrentBedLimit(h.capacityBeds ?? null))
-        .catch(() => setCurrentBedLimit(null));
-    }
   }, [loadTickets]);
 
   const handleCreate = async () => {
     if (!subject.trim() || !description.trim() || !category) {
       toast.error("Subject, description and category are required");
-      return;
-    }
-    if (category === "BED_LIMIT_INCREASE" && !requestedBedLimit.trim()) {
-      toast.error("Please specify the requested bed limit");
       return;
     }
 
@@ -132,8 +116,7 @@ const TicketsPage = () => {
         subject: subject.trim(),
         description: description.trim(),
         category: category as TicketCategory,
-        priority,
-        requestedBedLimit: category === "BED_LIMIT_INCREASE" ? Number(requestedBedLimit) : undefined,
+        priority: DEFAULT_PRIORITY,
       });
       toast.success("Ticket raised successfully");
       closeDialog();
@@ -169,13 +152,17 @@ const TicketsPage = () => {
           onOpenChange={(open) => { setAddOpen(open); if (!open) resetForm(); }}
         >
           <DialogTrigger asChild>
-            <Button size="sm">
+            <Button size="sm" className="rounded-xl">
               <Plus className="h-4 w-4 mr-2" />
               Raise Ticket
             </Button>
           </DialogTrigger>
 
-          <DialogContent className="max-w-lg">
+          {/* rounded-2xl + overflow-hidden gives the dialog card fully
+              rounded corners (matches the Expense modal treatment).
+              Landscape: wider card, fields laid out in a 2-column grid
+              instead of one long stacked column. */}
+          <DialogContent className="max-w-2xl w-[94vw] rounded-2xl overflow-hidden">
             <DialogHeader>
               <DialogTitle>Raise a Support Ticket</DialogTitle>
               <DialogDescription>
@@ -183,27 +170,16 @@ const TicketsPage = () => {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Select
                 value={category}
                 onValueChange={(v) => setCategory(v as TicketCategory)}
               >
-                <SelectTrigger>
+                <SelectTrigger className="rounded-xl">
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-xl">
                   {TICKET_CATEGORY_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={priority} onValueChange={(v) => setPriority(v as TicketPriority)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TICKET_PRIORITY_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -213,6 +189,7 @@ const TicketsPage = () => {
                 placeholder="Subject"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
+                className="rounded-xl"
               />
 
               <Textarea
@@ -220,34 +197,15 @@ const TicketsPage = () => {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={4}
+                className="rounded-xl sm:col-span-2"
               />
-
-              {category === "BED_LIMIT_INCREASE" && (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-emerald-800">
-                    <BedDouble className="h-4 w-4" /> Bed Limit Increase Request
-                  </div>
-                  {currentBedLimit != null && (
-                    <p className="text-xs text-muted-foreground">
-                      Current bed limit: <span className="font-semibold text-foreground">{currentBedLimit}</span>
-                    </p>
-                  )}
-                  <Input
-                    type="number"
-                    min={1}
-                    placeholder="Requested bed limit"
-                    value={requestedBedLimit}
-                    onChange={(e) => setRequestedBedLimit(e.target.value)}
-                  />
-                </div>
-              )}
             </div>
 
             <DialogFooter>
               <DialogClose asChild>
-                <Button variant="outline" onClick={closeDialog}>Cancel</Button>
+                <Button variant="outline" className="rounded-xl" onClick={closeDialog}>Cancel</Button>
               </DialogClose>
-              <Button onClick={handleCreate} disabled={submitting}>
+              <Button className="rounded-xl" onClick={handleCreate} disabled={submitting}>
                 {submitting ? "Submitting…" : "Submit Ticket"}
               </Button>
             </DialogFooter>
@@ -256,7 +214,7 @@ const TicketsPage = () => {
       </div>
 
       {/* TABLE */}
-      <div className="rounded-md border">
+      <div className="rounded-xl border overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
@@ -294,7 +252,7 @@ const TicketsPage = () => {
                 <TableCell>{t.replyCount}</TableCell>
                 <TableCell className="text-xs">{fmtDate(t.createdAt)}</TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openDetail(t.id); }}>
+                  <Button size="sm" variant="outline" className="rounded-xl" onClick={(e) => { e.stopPropagation(); openDetail(t.id); }}>
                     View
                   </Button>
                 </TableCell>

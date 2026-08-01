@@ -1,406 +1,9 @@
-// import { useMemo, useState, useRef, useCallback } from "react";
-// import { AgGridReact } from "ag-grid-react";
-// import type { ColDef, IGetRowsParams } from "ag-grid-community";
-// import api from "@/lib/api";
-// import { createBranch, updateBranch, deleteBranch } from "@/lib/store";
-// import { getUserHostelId, getUserHostelName } from "@/lib/auth";
-// import { Branch, BranchRequest } from "@/lib/types";
-// import { Button } from "@/components/ui/button";
-// import { Input } from "@/components/ui/input";
-// import { Label } from "@/components/ui/label";
-// import {
-//   Dialog, DialogContent, DialogHeader, DialogTitle,
-//   DialogDescription, DialogFooter, DialogClose, DialogTrigger,
-// } from "@/components/ui/dialog";
-// import {
-//   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-//   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-//   AlertDialogDescription, AlertDialogTrigger,
-// } from "@/components/ui/alert-dialog";
-// import { toast } from "sonner";
-// import { Plus, Pencil, Trash2, Building2 } from "lucide-react";
-
-// /* ── Types ── */
-// interface BranchForm {
-//   unitName: string;
-//   location: string;
-//   phone: string;
-//   /** Optional bed-capacity split for this branch, out of the hostel's total.
-//    *  Kept as a string in form state (same pattern as other numeric inputs
-//    *  in this codebase, e.g. RoomsPage's totalBeds) — parsed to number/null
-//    *  only when the request is actually sent. */
-//   capacityBeds: string;
-// }
-// const EMPTY_FORM: BranchForm = { unitName: "", location: "", phone: "", capacityBeds: "" };
-
-// const BranchPage = () => {
-//   const [totalCount, setTotalCount] = useState(0);
-//   const [addOpen,    setAddOpen]    = useState(false);
-//   const [editOpen,   setEditOpen]   = useState(false);
-//   const [form,       setForm]       = useState<BranchForm>(EMPTY_FORM);
-//   const [editBranch, setEditBranch] = useState<Branch | null>(null);
-//   const gridRef = useRef<AgGridReact>(null);
-
-//   // Read the admin's own assigned hostel from session scoping
-//   const myHostelId   = getUserHostelId();
-//   const myHostelName = getUserHostelName();
-
-//   const refreshGrid = useCallback(() => gridRef.current?.api?.refreshInfiniteCache(), []);
-
-//   const err = (e: any, fallback: string) => toast.error(e?.response?.data?.message || fallback);
-
-//   /* ── Datasource ── */
-//   const datasource = useMemo(() => ({
-//     getRows: async (params: IGetRowsParams) => {
-//       try {
-//         const res = await api.get("/units", {
-//           params: { page: Math.floor(params.startRow / 10), size: 10 },
-//         });
-//         const content       = res.data?.data?.content ?? res.data?.content ?? [];
-//         const totalElements = res.data?.data?.totalElements ?? res.data?.totalElements ?? 0;
-//         setTotalCount(totalElements);
-//         params.successCallback(content, totalElements);
-//       } catch {
-//         params.failCallback();
-//         toast.error("Failed to load branches");
-//       }
-//     },
-//   }), []);
-
-//   /* ── CRUD ── */
-//   const handleAdd = async () => {
-//     if (!form.unitName.trim()) { toast.error("Branch name required"); return; }
-//     if (!myHostelId) {
-//       toast.error("No hostel is assigned to your account yet. Ask your Super Admin to assign one.");
-//       return;
-//     }
-//     try {
-//       await createBranch({
-//         unitName: form.unitName,
-//         location: form.location,
-//         phone:    form.phone,
-//         hostelId: myHostelId,
-//         // ✅ optional split of the hostel's total bed capacity —
-//         // "" (untouched) is sent as null so this branch has no individual cap.
-//         capacityBeds: form.capacityBeds === "" ? null : Number(form.capacityBeds),
-//       } as BranchRequest);
-//       toast.success("Branch created");
-//       setForm(EMPTY_FORM);
-//       setAddOpen(false);
-//       refreshGrid();
-//     } catch (e: any) { err(e, "Create failed"); }
-//   };
-
-//   const handleEdit = async () => {
-//     if (!editBranch) return;
-//     try {
-//       await updateBranch(editBranch.id, {
-//         unitName: editBranch.unitName,
-//         location: editBranch.location,
-//         phone:    editBranch.phone ?? "",
-//         hostelId: editBranch.hostelId ?? myHostelId,
-//         // ✅ same optional split, carried through edit
-//         capacityBeds: editBranch.capacityBeds ?? null,
-//       } as BranchRequest);
-//       toast.success("Branch updated");
-//       setEditOpen(false);
-//       setEditBranch(null);
-//       refreshGrid();
-//     } catch (e: any) { err(e, "Update failed"); }
-//   };
-
-//   const handleDelete = async (id: number) => {
-//     try {
-//       await deleteBranch(id);
-//       toast.success("Branch deleted");
-//       refreshGrid();
-//     } catch (e: any) { err(e, "Delete failed"); }
-//   };
-
-//   /* ── Columns ── */
-//   const columnDefs: ColDef<Branch>[] = useMemo(() => [
-//     { headerName: "Branch Name", field: "unitName",   filter: true },
-//     { headerName: "Hostel",    field: "hostelName", filter: true },
-//     { headerName: "Location",  field: "location",   filter: true },
-//     { headerName: "Phone",     field: "phone",      filter: true },
-//     {
-//       // Total Beds = this branch's declared capacity/cap (Branch.capacityBeds),
-//       // i.e. the ceiling enforced server-side on room/bed creation.
-//       // "-" when no cap was set for this branch (uncapped, only bound by
-//       // the hostel-wide cap).
-//       headerName: "Total Beds",
-//       field: "capacityBeds",
-//       width: 120,
-//       sortable: false,
-//       filter: false,
-//       valueGetter: (p) => p.data?.capacityBeds ?? "-",
-//     },
-//     {
-//       // Bed Creation = actual beds created so far via Rooms & Beds
-//       // (live bedCount from the backend projection), regardless of the
-//       // capacityBeds cap above.
-//       headerName: "Bed Creation",
-//       field: "bedCount",
-//       width: 130,
-//       sortable: false,
-//       filter: false,
-//       valueGetter: (p) => p.data?.bedCount ?? 0,
-//     },
-//     // ✅ "Occupied" column (occupiedBedCount) remains removed per earlier request.
-//     {
-//       headerName: "Actions", sortable: false, filter: false,
-//       cellRenderer: ({ data }: { data: Branch }) => {
-//         if (!data) return null;
-//         return (
-//           <div className="flex gap-2">
-//             <Button size="icon" variant="ghost"
-//               onClick={() => { setEditBranch({ ...data }); setEditOpen(true); }}>
-//               <Pencil className="h-4 w-4" />
-//             </Button>
-
-//             <AlertDialog>
-//               <AlertDialogTrigger asChild>
-//                 <Button size="icon" variant="ghost">
-//                   <Trash2 className="h-4 w-4 text-destructive" />
-//                 </Button>
-//               </AlertDialogTrigger>
-//               <AlertDialogContent>
-//                 <AlertDialogHeader>
-//                   <AlertDialogTitle>Delete {data.unitName}?</AlertDialogTitle>
-//                   <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
-//                 </AlertDialogHeader>
-//                 <AlertDialogFooter>
-//                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-//                   <AlertDialogAction onClick={() => handleDelete(data.id)}>Delete</AlertDialogAction>
-//                 </AlertDialogFooter>
-//               </AlertDialogContent>
-//             </AlertDialog>
-//           </div>
-//         );
-//       },
-//     },
-//   ], []);
-
-//   const defaultColDef = useMemo(() => ({ sortable: true, resizable: true, flex: 1 }), []);
-
-//   /* ── Render ── */
-//   return (
-//     <div className="space-y-6">
-
-//       {/* Header */}
-//       <div className="flex justify-between items-center">
-//         <div>
-//           <h1 className="text-2xl font-bold">Branches</h1>
-//           <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-//             {totalCount} units
-//             {myHostelName && (
-//               <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full ml-2">
-//                 <Building2 className="h-3 w-3" /> {myHostelName}
-//               </span>
-//             )}
-//           </p>
-//         </div>
-
-//         {/* Add Dialog */}
-//         <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setForm(EMPTY_FORM); }}>
-//           <DialogTrigger asChild>
-//             <Button size="sm" disabled={!myHostelId} title={!myHostelId ? "No hostel assigned to your account yet" : undefined}>
-//               <Plus className="h-4 w-4 mr-2" />Add Branch
-//             </Button>
-//           </DialogTrigger>
-//           <DialogContent>
-//             <DialogHeader>
-//               <DialogTitle>Add Branch</DialogTitle>
-//               <DialogDescription>
-//                 Create a new branch under <span className="font-medium">{myHostelName ?? "your hostel"}</span>
-//               </DialogDescription>
-//             </DialogHeader>
-//             <BranchFormFields form={form} hostelName={myHostelName ?? "Assigned Hostel"} onChange={setForm} />
-//             <DialogFooter>
-//               <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-//               <Button onClick={handleAdd}>Create</Button>
-//             </DialogFooter>
-//           </DialogContent>
-//         </Dialog>
-//       </div>
-
-//       {!myHostelId && (
-//         <div className="rounded-md border border-amber-200 bg-amber-50 text-amber-800 text-sm px-4 py-3">
-//           No hostel is assigned to your account yet. Ask your Super Admin to assign one before creating branches.
-//         </div>
-//       )}
-
-//       {/* Edit Dialog */}
-//       <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditBranch(null); }}>
-//         <DialogContent>
-//           <DialogHeader>
-//             <DialogTitle>Edit Branch</DialogTitle>
-//             <DialogDescription>Update branch details</DialogDescription>
-//           </DialogHeader>
-//           {editBranch && (
-//             <BranchFormFields
-//               form={{
-//                 unitName: editBranch.unitName,
-//                 location: editBranch.location ?? "",
-//                 phone:    editBranch.phone    ?? "",
-//                 capacityBeds: editBranch.capacityBeds != null ? String(editBranch.capacityBeds) : "",
-//               }}
-//               hostelName={editBranch.hostelName ?? myHostelName ?? "Assigned Hostel"}
-//               onChange={(f) => setEditBranch({
-//                 ...editBranch,
-//                 ...f,
-//                 capacityBeds: f.capacityBeds === "" ? null : Number(f.capacityBeds),
-//               })}
-//             />
-//           )}
-//           <DialogFooter>
-//             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-//             <Button onClick={handleEdit}>Save</Button>
-//           </DialogFooter>
-//         </DialogContent>
-//       </Dialog>
-
-//       {/* Grid */}
-//       <div className="ag-theme-alpine" style={{ height: 513 }}>
-//         <AgGridReact
-//           ref={gridRef}
-//           rowModelType="infinite"
-//           datasource={datasource}
-//           cacheBlockSize={10}
-//           maxBlocksInCache={5}
-//           columnDefs={columnDefs}
-//           defaultColDef={defaultColDef}
-//           pagination
-//           paginationPageSize={10}
-//           paginationPageSizeSelector={[10, 20, 50, 100]}
-//         />
-//       </div>
-//     </div>
-//   );
-// };
-
-// /* ── Shared form fields ── */
-// const BranchFormFields = ({
-//   form, hostelName, onChange,
-// }: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void }) => (
-//   <div className="space-y-4">
-//     <div className="space-y-1.5">
-//       <Label className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
-//       <Input value={hostelName} disabled className="bg-slate-50 cursor-not-allowed" />
-//     </div>
-
-//     <div className="space-y-1.5">
-//       <Label>Branch Name</Label>
-//       <Input
-//         placeholder="e.g. North Wing, Block A"
-//         value={form.unitName}
-//         onChange={(e) => onChange({ ...form, unitName: e.target.value })}
-//       />
-//     </div>
-
-//     <div className="space-y-1.5">
-//       <Label>Location</Label>
-//       <Input
-//         placeholder="e.g. 1st Floor, Main Campus"
-//         value={form.location}
-//         onChange={(e) => onChange({ ...form, location: e.target.value })}
-//       />
-//     </div>
-
-//     <div className="space-y-1.5">
-//       <Label>Contact Phone</Label>
-//       <Input
-//         placeholder="Contact Phone (10 digits)"
-//         value={form.phone}
-//         maxLength={10}
-//         onChange={(e) => {
-//           const val = e.target.value.replace(/\D/g, "");
-//           onChange({ ...form, phone: val });
-//         }}
-//       />
-//     </div>
-
-//     {/* ✅ Optional bed-capacity split — this branch's share of the
-//         hostel's total capacityBeds (e.g. a 50-bed hostel split 30/20
-//         across two branches). Left blank = no individual cap for this
-//         branch; it's still bound by the hostel-wide cap. Backend
-//         (BranchServiceImpl#validateBranchCapacitySplit) rejects a value
-//         that would push the sum of all branches past the hostel's total.
-//         NOTE: this cap is enforced on create/edit only — it is no longer
-//         what the "Total Beds" grid column displays (that now shows the
-//         actual bed count created via Rooms & Beds). */}
-//     <div className="space-y-1.5">
-//       <Label>Bed Capacity (optional)</Label>
-//       <Input
-//         type="number"
-//         min={0}
-//         placeholder="e.g. 20 — this branch's share of the hostel's total beds"
-//         value={form.capacityBeds}
-//         onChange={(e) => onChange({ ...form, capacityBeds: e.target.value.replace(/\D/g, "") })}
-//       />
-//       <p className="text-xs text-muted-foreground">
-//         Leave blank if this branch doesn't need its own cap — it will still be limited by the hostel's overall bed capacity.
-//       </p>
-//     </div>
-//   </div>
-// );
-
-// export default BranchPage;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { createBranch, updateBranch, deleteBranch } from "@/lib/store";
 import { getUserHostelId, getUserHostelName } from "@/lib/auth";
+import { showBedLimitToast } from "@/lib/limitError";
 import { Branch, BranchRequest } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -442,7 +45,22 @@ const COLORS = [
   { color: '#64748b', bg: '#f1f5f9' },
 ];
 
+/* ── Entity unwrap helper ──
+   createBranch's return shape isn't guaranteed to be the raw entity —
+   it may come back as { data: {...} } or { data: { data: {...} } }
+   depending on how the backend wraps the response. This normalizes
+   any of those shapes so we can reliably read the new branch's id
+   right after creation (needed for the Rooms-page redirect). */
+const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
+  if (res && res.id != null) return res as T;
+  if (res?.data && res.data.id != null) return res.data as T;
+  if (res?.data?.data && res.data.data.id != null) return res.data.data as T;
+  return undefined;
+};
+
 const BranchPage = () => {
+  const navigate = useNavigate();
+
   const [branches, setBranches] = useState<Branch[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -488,18 +106,36 @@ const BranchPage = () => {
       return;
     }
     try {
-      await createBranch({
+      const res = await createBranch({
         unitName: form.unitName,
         location: form.location,
         phone:    form.phone,
         hostelId: myHostelId,
         capacityBeds: form.capacityBeds === "" ? null : Number(form.capacityBeds),
       } as BranchRequest);
+
       toast.success("Branch created");
       setForm(EMPTY_FORM);
       setAddOpen(false);
+
+      // Pull the new branch's id out of whatever shape the API returned,
+      // then hand off to the Rooms page — pre-selecting this branch and
+      // popping the Add Room dialog open so the admin can go straight
+      // from "created a branch" to "added its first room" in one flow.
+      const newBranch = unwrapEntity<Branch>(res);
+      navigate("/rooms", {
+        state: newBranch?.id != null
+          ? { unitId: newBranch.id, openAddRoom: true }
+          : undefined,
+      });
+
       loadBranches();
-    } catch (e: any) { err(e, "Create failed"); }
+    } catch (e: any) {
+      // Creating a branch with a capacityBeds share that would push past
+      // the hostel's overall bed cap gets the same "limit reached" toast
+      // + Add Beds navigation as room/bed creation does.
+      showBedLimitToast(e, navigate, "Create failed");
+    }
   };
 
   const handleEdit = async () => {
@@ -516,7 +152,9 @@ const BranchPage = () => {
       setEditOpen(false);
       setEditBranch(null);
       loadBranches();
-    } catch (e: any) { err(e, "Update failed"); }
+    } catch (e: any) {
+      showBedLimitToast(e, navigate, "Update failed");
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -588,7 +226,7 @@ const BranchPage = () => {
           <div className="branch-main-title">All Branches</div>
 
           <div className="branch-controls">
-            <button className="branch-btn-outline"><Download size={16} /> Export</button>
+            {/* <button className="branch-btn-outline"><Download size={16} /> Export</button> */}
 
             <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setForm(EMPTY_FORM); }}>
               <DialogTrigger asChild>
@@ -596,7 +234,9 @@ const BranchPage = () => {
                   <Plus size={16} /> Add Branch
                 </button>
               </DialogTrigger>
-              <DialogContent>
+              {/* Widened to a landscape-style modal so fields can sit side-by-side,
+                  and rounded on all four corners for a softer card look */}
+              <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden">
                 <DialogHeader>
                   <DialogTitle>Add Branch</DialogTitle>
                   <DialogDescription>
@@ -605,8 +245,8 @@ const BranchPage = () => {
                 </DialogHeader>
                 <BranchFormFields form={form} hostelName={myHostelName ?? "Assigned Hostel"} onChange={setForm} />
                 <DialogFooter>
-                  <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-                  <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc]">Create</Button>
+                  <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
+                  <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Create</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -705,14 +345,14 @@ const BranchPage = () => {
                                   <Trash2 className="h-3.5 w-3.5 text-red-500" />
                                 </Button>
                               </AlertDialogTrigger>
-                              <AlertDialogContent>
+                              <AlertDialogContent className="rounded-2xl">
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Delete {branch.unitName}?</AlertDialogTitle>
                                   <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDelete(branch.id)} className="bg-red-600 hover:bg-red-700">Delete</AlertDialogAction>
+                                  <AlertDialogCancel className="rounded-lg">Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDelete(branch.id)} className="bg-red-600 hover:bg-red-700 rounded-lg">Delete</AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>
@@ -767,7 +407,9 @@ const BranchPage = () => {
 
         {/* Edit Dialog */}
         <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditBranch(null); }}>
-          <DialogContent>
+          {/* Widened to a landscape-style modal so fields can sit side-by-side,
+              and rounded on all four corners for a softer card look */}
+          <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden">
             <DialogHeader>
               <DialogTitle>Edit Branch</DialogTitle>
               <DialogDescription>Update branch details</DialogDescription>
@@ -789,8 +431,8 @@ const BranchPage = () => {
               />
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-              <Button onClick={handleEdit} className="bg-[#5200FF] hover:bg-[#4200cc]">Save</Button>
+              <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
+              <Button onClick={handleEdit} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -799,60 +441,73 @@ const BranchPage = () => {
   );
 };
 
-/* ── Shared form fields (includes the real capacityBeds field) ── */
+/* ── Shared form fields (includes the real capacityBeds field) ──
+   Landscape layout: Parent Hostel stays full-width (disabled reference
+   field), then Branch Name/Location and Phone/Bed Capacity are paired
+   into two-column rows so the modal reads wide and short instead of
+   tall and narrow. */
 const BranchFormFields = ({
   form, hostelName, onChange,
 }: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void }) => (
   <div className="space-y-4">
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
-      <Input value={hostelName} disabled className="bg-slate-50 cursor-not-allowed" />
+      <Input value={hostelName} disabled className="bg-slate-50 cursor-not-allowed rounded-lg" />
     </div>
 
-    <div className="space-y-1.5">
-      <Label>Branch Name</Label>
-      <Input
-        placeholder="e.g. North Wing, Block A"
-        value={form.unitName}
-        onChange={(e) => onChange({ ...form, unitName: e.target.value })}
-      />
+    <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-1.5">
+        <Label>Branch Name</Label>
+        <Input
+          placeholder="e.g. North Wing, Block A"
+          value={form.unitName}
+          className="rounded-lg"
+          onChange={(e) => onChange({ ...form, unitName: e.target.value })}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Location</Label>
+        <Input
+          placeholder="e.g. 1st Floor, Main Campus"
+          value={form.location}
+          className="rounded-lg"
+          onChange={(e) => onChange({ ...form, location: e.target.value })}
+        />
+      </div>
     </div>
 
-    <div className="space-y-1.5">
-      <Label>Location</Label>
-      <Input
-        placeholder="e.g. 1st Floor, Main Campus"
-        value={form.location}
-        onChange={(e) => onChange({ ...form, location: e.target.value })}
-      />
+    <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-1.5">
+        <Label>Contact Phone</Label>
+        <Input
+          placeholder="Contact Phone (10 digits)"
+          value={form.phone}
+          maxLength={10}
+          className="rounded-lg"
+          onChange={(e) => {
+            const val = e.target.value.replace(/\D/g, "");
+            onChange({ ...form, phone: val });
+          }}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Bed Capacity (optional)</Label>
+        <Input
+          type="number"
+          min={0}
+          placeholder="e.g. 20"
+          value={form.capacityBeds}
+          className="rounded-lg"
+          onChange={(e) => onChange({ ...form, capacityBeds: e.target.value.replace(/\D/g, "") })}
+        />
+      </div>
     </div>
 
-    <div className="space-y-1.5">
-      <Label>Contact Phone</Label>
-      <Input
-        placeholder="Contact Phone (10 digits)"
-        value={form.phone}
-        maxLength={10}
-        onChange={(e) => {
-          const val = e.target.value.replace(/\D/g, "");
-          onChange({ ...form, phone: val });
-        }}
-      />
-    </div>
-
-    <div className="space-y-1.5">
-      <Label>Bed Capacity (optional)</Label>
-      <Input
-        type="number"
-        min={0}
-        placeholder="e.g. 20 — this branch's share of the hostel's total beds"
-        value={form.capacityBeds}
-        onChange={(e) => onChange({ ...form, capacityBeds: e.target.value.replace(/\D/g, "") })}
-      />
-      <p className="text-xs text-muted-foreground">
-        Leave blank if this branch doesn't need its own cap — it will still be limited by the hostel's overall bed capacity.
-      </p>
-    </div>
+    <p className="text-xs text-muted-foreground -mt-2">
+      Leave Bed Capacity blank if this branch doesn't need its own cap — it will still be limited by the hostel's overall bed capacity.
+    </p>
   </div>
 );
 

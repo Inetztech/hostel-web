@@ -297,9 +297,9 @@ const AnnouncementPage = () => {
           <div className="ap-panel-header">
             <div className="ap-panel-title">All Announcements</div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="h-8">
+              {/* <Button variant="outline" size="sm" className="h-8">
                 <Download size={14} className="mr-2" /> Export
-              </Button>
+              </Button> */}
 
               {hasAccess && (
                 <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) resetCreateForm(); }}>

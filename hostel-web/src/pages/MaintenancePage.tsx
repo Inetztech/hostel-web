@@ -37,6 +37,10 @@ const STATUS_LABEL: Record<CleaningStatus, string> = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+// Mirrors the backend's @Pattern(regexp = "^[6-9]\\d{9}$") check on
+// CleanerRequest.phone, so invalid numbers are caught client-side too.
+const PHONE_PATTERN = /^[6-9]\d{9}$/;
+
 const StatusBadge = ({ status }: { status: CleaningStatus }) => {
   if (status === "CLEANED")
     return <span className="inline-flex px-2 py-0.5 text-[11px] font-medium bg-emerald-50 text-emerald-600 rounded">Completed</span>;
@@ -91,6 +95,10 @@ export default function MaintenancePage() {
   // only logging them — this is what was silently hiding the 0-rooms bug.
   const [modalError, setModalError] = useState<string | null>(null);
 
+  // Inline validation error for the phone field specifically, separate
+  // from modalError so it clears/sets independently as the user types.
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
   // Rooms available for the branch currently selected in the Add Cleaner
   // modal — fetched fresh whenever the branch changes, so the room list
   // is always scoped to that branch.
@@ -100,6 +108,41 @@ export default function MaintenancePage() {
 
   // Row-level "updating status" indicator
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
+
+  // Bulk-selection state for the main tasks table, used to mark many rooms
+  // as completed in one action instead of clicking the cycle button per row.
+  const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+
+  // Lightweight in-app toast, used instead of window.alert/confirm so
+  // feedback renders inside the app UI rather than a native browser dialog.
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    window.clearTimeout((showToast as any)._t);
+    (showToast as any)._t = window.setTimeout(() => setToast(null), 3500);
+  };
+
+  // Confirmation modal state, replacing window.confirm() so it renders
+  // inline instead of a native browser dialog. `onConfirm` runs if the
+  // user clicks the modal's confirm button. `danger` switches the confirm
+  // button to red for destructive actions (delete), matching the style
+  // used elsewhere in the app (e.g. Rooms & Beds' "Delete Room?" dialog).
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const askConfirm = (
+    title: string,
+    onConfirm: () => void,
+    options?: { description?: string; confirmLabel?: string; danger?: boolean }
+  ) => {
+    setConfirmState({ title, onConfirm, ...options });
+  };
 
   const loadData = async (showLoader = true) => {
     if (showLoader) setLoading(true);
@@ -195,6 +238,20 @@ export default function MaintenancePage() {
     );
   };
 
+  // Selects every room currently listed for the branch, or clears the
+  // selection entirely if everything is already selected. Individual rooms
+  // can still be unchecked afterwards via toggleRoomSelection as normal.
+  const allBranchRoomsSelected =
+    branchRooms.length > 0 && branchRooms.every((room) => selectedRoomIds.includes(room.id));
+
+  const toggleSelectAllRooms = () => {
+    if (allBranchRoomsSelected) {
+      setSelectedRoomIds([]);
+    } else {
+      setSelectedRoomIds(branchRooms.map((room) => room.id));
+    }
+  };
+
   const closeAddCleanerModal = () => {
     setIsAddCleanerOpen(false);
     setNewCleanerName("");
@@ -204,11 +261,22 @@ export default function MaintenancePage() {
     setSelectedRoomIds([]);
     setBranchRooms([]);
     setModalError(null);
+    setPhoneError(null);
   };
 
   const handleAddCleaner = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
+    setPhoneError(null);
+
+    // Client-side mirror of the backend's phone validation. Catches
+    // anything that slipped past the onChange sanitizer (e.g. exactly
+    // 10 digits but starting with 0-5) before we ever hit the network.
+    if (!PHONE_PATTERN.test(newCleanerPhone)) {
+      setPhoneError("Phone must be a 10-digit number starting with 6-9");
+      return;
+    }
+
     try {
       setSubmitting(true);
       const branchId = Number(newCleanerBranch);
@@ -281,14 +349,21 @@ export default function MaintenancePage() {
     }
   };
 
-  const handleDeleteCleaner = async (id: number) => {
-    if (!confirm("Remove this cleaner?")) return;
-    try {
-      await deleteMaintenanceCleaner(id);
-      setCleaners((prev) => prev.filter((c) => c.id !== id));
-    } catch (err) {
-      console.error("Failed to delete cleaner", err);
-    }
+  const handleDeleteCleaner = (id: number, name?: string) => {
+    askConfirm(
+      `Remove ${name ? `"${name}"` : "this cleaner"}?`,
+      async () => {
+        try {
+          await deleteMaintenanceCleaner(id);
+          setCleaners((prev) => prev.filter((c) => c.id !== id));
+          showToast("Cleaner removed", "success");
+        } catch (err) {
+          console.error("Failed to delete cleaner", err);
+          showToast("Failed to remove cleaner", "error");
+        }
+      },
+      { description: "This action cannot be undone.", confirmLabel: "Delete", danger: true }
+    );
   };
 
   const cycleStatus = (status: CleaningStatus): CleaningStatus =>
@@ -313,14 +388,76 @@ export default function MaintenancePage() {
     }
   };
 
-  const handleDeleteTask = async (id: number) => {
-    if (!confirm("Delete this cleaning task?")) return;
-    try {
-      await deleteMaintenanceTask(id);
-      setTasks((prev) => prev.filter((t) => t.id !== id));
-    } catch (err) {
-      console.error("Failed to delete task", err);
-    }
+  const handleDeleteTask = (id: number, roomLabel?: string | number) => {
+    askConfirm(
+      `Delete cleaning task for ${roomLabel ?? "this room"}?`,
+      async () => {
+        try {
+          await deleteMaintenanceTask(id);
+          setTasks((prev) => prev.filter((t) => t.id !== id));
+          setSelectedTaskIds((prev) => prev.filter((tid) => tid !== id));
+          showToast("Cleaning task deleted", "success");
+        } catch (err) {
+          console.error("Failed to delete task", err);
+          showToast("Failed to delete task", "error");
+        }
+      },
+      { description: "This action cannot be undone.", confirmLabel: "Delete", danger: true }
+    );
+  };
+
+  const toggleTaskSelection = (taskId: number) => {
+    setSelectedTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+  };
+
+  // Marks every currently-selected task as CLEANED (Completed) in one go.
+  // Uses Promise.allSettled so one failing update doesn't block the rest,
+  // and reports how many succeeded/failed instead of failing silently.
+  const handleBulkMarkCompleted = () => {
+    if (selectedTaskIds.length === 0) return;
+    const count = selectedTaskIds.length;
+
+    askConfirm(`Mark ${count} room(s) as Completed?`, async () => {
+      // (non-destructive action — keeps the default blue confirm button)
+      setBulkUpdating(true);
+      try {
+        const idsToUpdate = selectedTaskIds;
+        const results = await Promise.allSettled(
+          idsToUpdate.map((id) => updateMaintenanceTaskStatus(id, "CLEANED"))
+        );
+
+        const updatedById = new Map<number, MaintenanceTask>();
+        let failedCount = 0;
+        results.forEach((r, i) => {
+          if (r.status === "fulfilled") {
+            updatedById.set(idsToUpdate[i], r.value);
+          } else {
+            failedCount += 1;
+            console.error("Failed to mark task completed:", idsToUpdate[i], r.reason);
+          }
+        });
+
+        setTasks((prev) => prev.map((t) => updatedById.get(t.id) ?? t));
+        setTodaySchedule((prev) => prev.map((t) => updatedById.get(t.id) ?? t));
+
+        // Keep only the failed ones selected so a retry is one click away;
+        // clear the selection entirely if everything succeeded.
+        setSelectedTaskIds((prev) => prev.filter((id) => !updatedById.has(id)));
+
+        if (failedCount > 0) {
+          showToast(
+            `${failedCount} of ${count} room(s) could not be updated. They remain selected — you can retry.`,
+            "error"
+          );
+        } else {
+          showToast(`${count} room(s) marked as Completed`, "success");
+        }
+      } finally {
+        setBulkUpdating(false);
+      }
+    });
   };
 
   const clearFilters = () => {
@@ -350,8 +487,27 @@ export default function MaintenancePage() {
   const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
   const pagedTasks = filteredTasks.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
+  // Selects every row on the CURRENT page of the main table, or clears the
+  // selection if the whole page is already selected. Mirrors the room
+  // picker's Select All behavior in the Add Cleaner modal. Declared here,
+  // right after pagedTasks, since both depend on it.
+  const allPageTasksSelected =
+    pagedTasks.length > 0 && pagedTasks.every((t) => selectedTaskIds.includes(t.id));
+
+  const toggleSelectAllTasks = () => {
+    if (allPageTasksSelected) {
+      setSelectedTaskIds((prev) => prev.filter((id) => !pagedTasks.some((t) => t.id === id)));
+    } else {
+      setSelectedTaskIds((prev) => [
+        ...prev,
+        ...pagedTasks.filter((t) => !prev.includes(t.id)).map((t) => t.id),
+      ]);
+    }
+  };
+
   useEffect(() => {
     setCurrentPage(1);
+    setSelectedTaskIds([]);
   }, [search, statusFilter, branchFilter, cleanerFilter]);
 
   // "View All" just lifts the 5-row cap on the Cleaners card; the counts
@@ -466,7 +622,7 @@ export default function MaintenancePage() {
                     </td>
                     <td className="px-5 py-3 text-right">
                       <button
-                        onClick={() => handleDeleteCleaner(c.id)}
+                        onClick={() => handleDeleteCleaner(c.id, c.name)}
                         className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors p-1.5 border border-rose-200 rounded-md bg-white shadow-sm"
                         title="Remove cleaner"
                       >
@@ -620,11 +776,49 @@ export default function MaintenancePage() {
           </button>
         </div>
 
+        {/* Bulk action bar — appears once at least one row is selected */}
+        {selectedTaskIds.length > 0 && (
+          <div className="px-5 py-2.5 border-b border-blue-100 bg-blue-50/60 flex items-center justify-between">
+            <span className="text-[12px] font-medium text-blue-700">
+              {selectedTaskIds.length} room{selectedTaskIds.length > 1 ? "s" : ""} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedTaskIds([])}
+                className="text-[12px] font-medium text-gray-600 hover:text-gray-800 px-2 py-1"
+              >
+                Clear selection
+              </button>
+              <button
+                onClick={handleBulkMarkCompleted}
+                disabled={bulkUpdating}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-60"
+              >
+                {bulkUpdating ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                )}
+                {bulkUpdating ? "Updating..." : "Mark as Completed"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Table */}
         <div className="overflow-x-hidden w-full">
           <table className="w-full text-left text-sm whitespace-normal break-words table-fixed">
             <thead className="bg-gray-50/50 text-[10px] uppercase font-semibold text-gray-400 border-b border-gray-100">
               <tr>
+                <th className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allPageTasksSelected}
+                    onChange={toggleSelectAllTasks}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30"
+                    aria-label="Select all rooms on this page"
+                  />
+                </th>
                 <th className="px-5 py-3">Room No.</th>
                 <th className="px-4 py-3">Branch</th>
                 <th className="px-4 py-3">Cleaner</th>
@@ -636,10 +830,19 @@ export default function MaintenancePage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {pagedTasks.length === 0 && (
-                <tr><td colSpan={7} className="px-5 py-8 text-center text-gray-400 text-[12px]">No cleaning tasks found</td></tr>
+                <tr><td colSpan={8} className="px-5 py-8 text-center text-gray-400 text-[12px]">No cleaning tasks found</td></tr>
               )}
               {pagedTasks.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
+                <tr key={r.id} className={`hover:bg-gray-50/50 transition-colors ${selectedTaskIds.includes(r.id) ? "bg-blue-50/40" : ""}`}>
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedTaskIds.includes(r.id)}
+                      onChange={() => toggleTaskSelection(r.id)}
+                      className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30"
+                      aria-label={`Select room ${r.roomNumber || r.roomId}`}
+                    />
+                  </td>
                   <td className="px-5 py-3 font-semibold text-gray-900 text-[13px]">{r.roomNumber || r.roomId}</td>
                   <td className="px-4 py-3 text-gray-500 text-[12px]">{r.branchName || "—"}</td>
                   <td className="px-4 py-3 font-medium text-gray-700 text-[12px]">{r.cleanerName || "Unassigned"}</td>
@@ -661,7 +864,7 @@ export default function MaintenancePage() {
                         )}
                       </button>
                       <button
-                        onClick={() => handleDeleteTask(r.id)}
+                        onClick={() => handleDeleteTask(r.id, r.roomNumber || r.roomId)}
                         className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors p-1.5 border border-rose-200 rounded-md bg-white shadow-sm"
                         title="Delete task"
                       >
@@ -713,11 +916,11 @@ export default function MaintenancePage() {
         <span>Cleaning status is updated by the assigned cleaner. Please ensure rooms are inspected after cleaning.</span>
       </div>
 
-      {/* ADD CLEANER MODAL */}
+      {/* ADD CLEANER MODAL — landscape layout: wider modal, 2-column fields */}
       {isAddCleanerOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
               <h3 className="text-lg font-semibold text-gray-900">Add New Cleaner</h3>
               <button
                 onClick={closeAddCleanerModal}
@@ -727,110 +930,142 @@ export default function MaintenancePage() {
               </button>
             </div>
 
-            <form onSubmit={handleAddCleaner} className="p-6 space-y-4">
+            <form onSubmit={handleAddCleaner} className="p-6 overflow-y-auto">
               {modalError && (
-                <div className="flex items-start gap-2 px-3 py-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-[12px]">
+                <div className="flex items-start gap-2 px-3 py-2.5 mb-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-[12px]">
                   <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
                   <span>{modalError}</span>
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
-                <input
-                  type="text"
-                  required
-                  value={newCleanerName}
-                  onChange={e => setNewCleanerName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                  placeholder="e.g. Ramesh Kumar"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone Number</label>
-                <input
-                  type="tel"
-                  required
-                  value={newCleanerPhone}
-                  onChange={e => setNewCleanerPhone(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                  placeholder="e.g. 9876543210"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Branch</label>
-                <select
-                  required
-                  value={newCleanerBranch}
-                  onChange={e => setNewCleanerBranch(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors bg-white"
-                >
-                  <option value="" disabled>Select a branch</option>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>{b.unitName}</option>
-                  ))}
-                </select>
-              </div>
-
-              {newCleanerBranch && (
+              {/* Landscape field grid: Name / Phone / Branch / Active side-by-side on md+ screens */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Assign Rooms <span className="text-gray-400 font-normal">(optional)</span>
-                  </label>
-                  <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto divide-y divide-gray-100">
-                    {loadingBranchRooms && (
-                      <div className="flex items-center justify-center gap-2 py-4 text-gray-400 text-xs">
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading rooms...
-                      </div>
-                    )}
-                    {!loadingBranchRooms && branchRooms.length === 0 && (
-                      <div className="py-4 text-center text-gray-400 text-xs px-3">
-                        No rooms found for{" "}
-                        <span className="font-medium text-gray-500">
-                          {branches.find((b) => String(b.id) === newCleanerBranch)?.unitName || "this branch"}
-                        </span>
-                        . Add rooms to this branch first, or double-check the branch has rooms under it.
-                      </div>
-                    )}
-                    {!loadingBranchRooms && branchRooms.map((room) => (
-                      <label
-                        key={room.id}
-                        className="flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedRoomIds.includes(room.id)}
-                          onChange={() => toggleRoomSelection(room.id)}
-                          className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30"
-                        />
-                        <span className="font-medium text-gray-800">{room.roomNumber}</span>
-                        <span className="text-gray-400 text-xs">
-                          {room.hostelType} · {room.totalBeds} beds
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                  {selectedRoomIds.length > 0 && (
-                    <p className="text-[11px] text-blue-600 mt-1.5 font-medium">
-                      {selectedRoomIds.length} room{selectedRoomIds.length > 1 ? "s" : ""} selected
-                    </p>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newCleanerName}
+                    onChange={e => setNewCleanerName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                    placeholder="e.g. Ramesh Kumar"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone Number</label>
+                  <input
+                    type="tel"
+                    required
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={newCleanerPhone}
+                    onChange={(e) => {
+                      // Strip anything non-numeric and hard-cap at 10 digits
+                      // as the user types, so it's impossible to paste/type
+                      // long or non-numeric input into the field at all.
+                      const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 10);
+                      setNewCleanerPhone(digitsOnly);
+                      setPhoneError(null);
+                    }}
+                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 transition-colors ${
+                      phoneError
+                        ? "border-rose-300 focus:ring-rose-500/20 focus:border-rose-500"
+                        : "border-gray-200 focus:ring-blue-500/20 focus:border-blue-500"
+                    }`}
+                    placeholder="e.g. 9876543210"
+                  />
+                  {phoneError && (
+                    <p className="text-[11px] text-rose-600 mt-1 font-medium">{phoneError}</p>
                   )}
                 </div>
-              )}
 
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={newCleanerActive}
-                  onClick={() => setNewCleanerActive(!newCleanerActive)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${newCleanerActive ? 'bg-blue-600' : 'bg-gray-200'}`}
-                >
-                  <span aria-hidden="true" className={`pointer-events-none absolute left-0.5 inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${newCleanerActive ? 'translate-x-4' : 'translate-x-0'}`} />
-                </button>
-                <span className="text-sm font-medium text-gray-700">Active (Available for cleaning)</span>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Branch</label>
+                  <select
+                    required
+                    value={newCleanerBranch}
+                    onChange={e => setNewCleanerBranch(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors bg-white"
+                  >
+                    <option value="" disabled>Select a branch</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.unitName}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-end pb-1.5">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={newCleanerActive}
+                      onClick={() => setNewCleanerActive(!newCleanerActive)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${newCleanerActive ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    >
+                      <span aria-hidden="true" className={`pointer-events-none absolute left-0.5 inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${newCleanerActive ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </button>
+                    <span className="text-sm font-medium text-gray-700">Active (Available for cleaning)</span>
+                  </div>
+                </div>
+
+                {newCleanerBranch && (
+                  <div className="md:col-span-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Assign Rooms <span className="text-gray-400 font-normal">(optional)</span>
+                      </label>
+                      {!loadingBranchRooms && branchRooms.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={toggleSelectAllRooms}
+                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                        >
+                          {allBranchRoomsSelected ? "Unselect All" : "Select All"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 divide-y divide-gray-100 sm:divide-y-0">
+                      {loadingBranchRooms && (
+                        <div className="col-span-full flex items-center justify-center gap-2 py-4 text-gray-400 text-xs">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading rooms...
+                        </div>
+                      )}
+                      {!loadingBranchRooms && branchRooms.length === 0 && (
+                        <div className="col-span-full py-4 text-center text-gray-400 text-xs px-3">
+                          No rooms found for{" "}
+                          <span className="font-medium text-gray-500">
+                            {branches.find((b) => String(b.id) === newCleanerBranch)?.unitName || "this branch"}
+                          </span>
+                          . Add rooms to this branch first, or double-check the branch has rooms under it.
+                        </div>
+                      )}
+                      {!loadingBranchRooms && branchRooms.map((room) => (
+                        <label
+                          key={room.id}
+                          className="flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer border-b border-gray-100 sm:border-b-0 sm:even:border-l sm:border-gray-100"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedRoomIds.includes(room.id)}
+                            onChange={() => toggleRoomSelection(room.id)}
+                            className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30"
+                          />
+                          <span className="font-medium text-gray-800">{room.roomNumber}</span>
+                          <span className="text-gray-400 text-xs">
+                            {room.hostelType} · {room.totalBeds} beds
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    {selectedRoomIds.length > 0 && (
+                      <p className="text-[11px] text-blue-600 mt-1.5 font-medium">
+                        {selectedRoomIds.length} room{selectedRoomIds.length > 1 ? "s" : ""} selected
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="pt-6 flex gap-3">
@@ -855,6 +1090,71 @@ export default function MaintenancePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST — replaces window.alert() so feedback renders inline */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[200] animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div
+            className={`flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${
+              toast.type === "success"
+                ? "bg-emerald-600 text-white"
+                : "bg-rose-600 text-white"
+            }`}
+          >
+            {toast.type === "success" ? (
+              <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            )}
+            <span>{toast.message}</span>
+            <button
+              onClick={() => setToast(null)}
+              className="ml-1 text-white/80 hover:text-white"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM MODAL — replaces window.confirm() so it renders inline */}
+      {confirmState && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-6">
+              <p className="text-lg font-bold text-gray-900">{confirmState.title}</p>
+              {confirmState.description && (
+                <p className="text-sm text-gray-500 mt-1.5">{confirmState.description}</p>
+              )}
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmState(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const action = confirmState.onConfirm;
+                  setConfirmState(null);
+                  action();
+                }}
+                className={`px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors ${
+                  confirmState.danger
+                    ? "bg-rose-600 hover:bg-rose-700"
+                    : "bg-blue-600 hover:bg-blue-700"
+                }`}
+              >
+                {confirmState.confirmLabel ?? "OK"}
+              </button>
+            </div>
           </div>
         </div>
       )}

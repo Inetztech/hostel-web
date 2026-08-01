@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, useCallback, useReducer } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   addTenant, updateTenant, deleteTenant,
   importTenantsExcel, getUserRole, getBranchId,
@@ -17,15 +18,21 @@ import {
 import { toast } from "sonner";
 import {
   UserPlus, Eye, Search, Pencil, Trash2, FileText,
-  AlertTriangle, ShieldX, Phone, Camera, User as UserIcon, KeyRound,
+  AlertTriangle, ShieldX, Phone, Camera, User as UserIcon,
   Users, ShieldCheck, UserX, FileCheck2,
-  Download, RefreshCw, ChevronLeft, ChevronRight,
+  Download, RefreshCw, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 import api from "@/lib/api";
 
 /* ── Constants ──────────────────────────────────────────────────── */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const PAGE_SIZE     = 10;
+
+/* Phone numbers everywhere in this file are stored/validated as
+   exactly 10 digits, digits-only (no spaces, +91, dashes, etc). */
+const PHONE_LENGTH = 10;
+const sanitizePhoneInput = (raw: string) => raw.replace(/\D/g, "").slice(0, PHONE_LENGTH);
+const isValidPhone = (phone: string) => /^\d{10}$/.test(phone);
 
 const getApiOrigin = (): string => {
   const base = api.defaults.baseURL ?? "";
@@ -138,7 +145,6 @@ const getRoomUnitName = (r: any): string =>
 /* ── Form state ─────────────────────────────────────────────────── */
 type FormState = {
   name: string; phone: string; email: string;
-  password: string;
   idProofType: IdProofType | ""; idProofNumber: string;
   branchId: number | ""; roomId: number | ""; bedId: number | "";
   advance: string; monthlyRent: string;
@@ -148,7 +154,7 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
-  name: "", phone: "", email: "", password: "", idProofType: "", idProofNumber: "",
+  name: "", phone: "", email: "", idProofType: "", idProofNumber: "",
   branchId: "", roomId: "", bedId: "", advance: "", monthlyRent: "",
   currentReading: "", acJoinReading: "", checkInDate: "", idProofDoc: null,
   tenantPhoto: null,
@@ -190,7 +196,7 @@ const IdProofUploadField = ({
           }
           onChange(file);
         }}
-        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       />
       {idProofDoc && (
         <p className="text-xs text-green-600 flex items-center gap-1">
@@ -254,7 +260,7 @@ const TenantPhotoUploadField = ({
               }
               onChange(file);
             }}
-            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           />
           {tenantPhoto && (
             <p className="text-xs text-green-600 flex items-center gap-1">
@@ -293,7 +299,7 @@ const FraudCard = ({
 }: { fraud: FraudCheckResponse; tenantName?: string; tenantPhone?: string }) => {
   if (!fraud.fraud || fraud.records.length === 0) return null;
   return (
-    <div className="rounded-md border border-red-300 bg-red-50 p-3 space-y-2">
+    <div className="rounded-lg border border-red-300 bg-red-50 p-3 space-y-2">
       <div className="flex items-center gap-2 text-red-700 font-semibold text-sm">
         <AlertTriangle className="h-4 w-4 shrink-0" /> Fraud Alert — Defaulter history found
       </div>
@@ -370,8 +376,16 @@ const TenantForm = ({
     !isBedOccupied(b) || Number(b.id) === Number(editTenant?.bedId)
   );
 
+  const phoneHasError = form.phone.length > 0 && form.phone.length !== PHONE_LENGTH;
+
+  /* ── Landscape layout ──
+     Widened into a two-column grid (paired via `grid-cols-2 gap-4`
+     rows) so the dialog reads wide and short instead of tall and
+     narrow — matching the Branch page's Add/Edit modals. Photo
+     upload and file uploads stay full-width (col-span-2) since they
+     need the extra horizontal room; everything else is paired up. */
   return (
-    <div className="grid gap-3">
+    <div className="space-y-4">
       {fraudResult && <FraudCard fraud={fraudResult} tenantName={form.name} tenantPhone={form.phone} />}
 
       <TenantPhotoUploadField
@@ -380,114 +394,168 @@ const TenantForm = ({
         onChange={set("tenantPhoto")}
       />
 
-      <Input placeholder="Name"  value={form.name}  onChange={(e) => set("name")(e.target.value)} />
-      <Input placeholder="Phone" value={form.phone} onChange={(e) => set("phone")(e.target.value)} />
-      <Input placeholder="Email" value={form.email} onChange={(e) => set("email")(e.target.value)} />
-
-      {!alreadyHasLogin && (
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-            <KeyRound className="h-3 w-3 shrink-0" /> Login Password (optional — creates a tenant login)
-          </label>
-          <Input
-            type="password"
-            placeholder="Leave blank for no login"
-            value={form.password}
-            onChange={(e) => set("password")(e.target.value)}
-          />
-          {form.email && form.password && (
-            <p className="text-xs text-muted-foreground">
-              A login will be created for <span className="font-medium">{form.email}</span> using this password.
-            </p>
-          )}
+          <label className="text-xs font-medium text-muted-foreground">Name</label>
+          <Input className="rounded-lg" placeholder="Name"  value={form.name}  onChange={(e) => set("name")(e.target.value)} />
         </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Phone</label>
+          <Input
+            className="rounded-lg"
+            placeholder="Phone (10 digits)"
+            value={form.phone}
+            inputMode="numeric"
+            type="tel"
+            maxLength={PHONE_LENGTH}
+            onChange={(e) => set("phone")(sanitizePhoneInput(e.target.value))}
+            onPaste={(e) => {
+              e.preventDefault();
+              const pasted = e.clipboardData.getData("text");
+              set("phone")(sanitizePhoneInput(form.phone + pasted));
+            }}
+          />
+          {/* {phoneHasError && (
+            <p className="text-xs text-red-600">
+              Phone number must be exactly {PHONE_LENGTH} digits ({form.phone.length}/{PHONE_LENGTH} entered).
+            </p>
+          )} */}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Email</label>
+          <Input className="rounded-lg" placeholder="Email" value={form.email} onChange={(e) => set("email")(e.target.value)} />
+        </div>
+        <div />
+      </div>
+      {!alreadyHasLogin && form.email && (
+        <p className="text-xs text-muted-foreground -mt-2">
+          A login will be created for <span className="font-medium">{form.email}</span> and the password will be emailed to them automatically.
+        </p>
       )}
       {alreadyHasLogin && (
-        <p className="text-xs text-muted-foreground">
-          This tenant already has a login account. Password changes are handled from the tenant's own profile, not here.
+        <p className="text-xs text-muted-foreground -mt-2">
+          This tenant already has a login account. Password resets are handled from the tenant's own profile, not here.
         </p>
       )}
 
-      <Select value={form.idProofType} onValueChange={set("idProofType")}>
-        <SelectTrigger><SelectValue placeholder="ID Proof Type" /></SelectTrigger>
-        <SelectContent>
-          {ID_PROOF_TYPE_LIST.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-        </SelectContent>
-      </Select>
-
-      <Input placeholder="ID Proof Number" value={form.idProofNumber}
-        onChange={(e) => set("idProofNumber")(e.target.value)} />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">ID Proof Type</label>
+          <Select value={form.idProofType} onValueChange={set("idProofType")}>
+            <SelectTrigger className="rounded-lg"><SelectValue placeholder="ID Proof Type" /></SelectTrigger>
+            <SelectContent>
+              {ID_PROOF_TYPE_LIST.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">ID Proof Number</label>
+          <Input className="rounded-lg" placeholder="ID Proof Number" value={form.idProofNumber}
+            onChange={(e) => set("idProofNumber")(e.target.value)} />
+        </div>
+      </div>
 
       <IdProofUploadField idProofDoc={form.idProofDoc} existing={existingDoc} onChange={set("idProofDoc")} />
 
-      <Select
-        value={form.branchId ? String(form.branchId) : ""}
-        disabled={branchLocked}
-        onValueChange={(v) => {
-          set("branchId")(Number(v));
-          set("roomId")("");
-          set("bedId")("");
-          setRoomSearch("");
-        }}
-      >
-        <SelectTrigger><SelectValue placeholder="Branch" /></SelectTrigger>
-        <SelectContent>
-          {branches.map((b) => (
-            <SelectItem key={getBranchRawId(b)} value={String(getBranchRawId(b))}>
-              {getBranchDisplayName(b)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select value={form.roomId ? String(form.roomId) : ""}
-        disabled={!form.branchId}
-        onValueChange={(v) => {
-          set("roomId")(Number(v));
-          set("bedId")("");
-          setRoomSearch("");
-        }}>
-        <SelectTrigger><SelectValue placeholder={form.branchId ? "Room" : "Select a branch first"} /></SelectTrigger>
-        <SelectContent>
-          <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
-            <Input placeholder="Search room..." value={roomSearch}
-              onChange={(e) => setRoomSearch(e.target.value)}
-              onKeyDown={(e) => e.stopPropagation()} className="h-8 text-sm" autoFocus />
-          </div>
-          {availableRooms
-            .filter((r) => r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase()))
-            .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
-          {availableRooms.filter((r) =>
-            r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase())).length === 0 && (
-            <div className="px-3 py-2 text-sm text-muted-foreground">No room found</div>
-          )}
-        </SelectContent>
-      </Select>
-
-      <Select value={form.bedId ? String(form.bedId) : ""}
-        disabled={!form.roomId}
-        onValueChange={(v) => set("bedId")(Number(v))}>
-        <SelectTrigger><SelectValue placeholder={form.roomId ? "Bed" : "Select a room first"} /></SelectTrigger>
-        <SelectContent>
-          {availableBeds.map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
-          {form.roomId && availableBeds.length === 0 && (
-            <div className="px-3 py-2 text-sm text-muted-foreground">No available beds in this room</div>
-          )}
-        </SelectContent>
-      </Select>
-
-      <Input type="number" placeholder="Advance"            value={form.advance}        onChange={(e) => set("advance")(e.target.value)} />
-      <Input type="number" placeholder="Rent"               value={form.monthlyRent}    onChange={(e) => set("monthlyRent")(e.target.value)} />
-      <Input type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
-
-      {isAC && (
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">AC Current Reading (optional)</label>
-          <Input type="number" placeholder="AC Current Reading"
-            value={form.acJoinReading} onChange={(e) => set("acJoinReading")(e.target.value)} />
+          <label className="text-xs font-medium text-muted-foreground">Branch</label>
+          <Select
+            value={form.branchId ? String(form.branchId) : ""}
+            disabled={branchLocked}
+            onValueChange={(v) => {
+              set("branchId")(Number(v));
+              set("roomId")("");
+              set("bedId")("");
+              setRoomSearch("");
+            }}
+          >
+            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Branch" /></SelectTrigger>
+            <SelectContent>
+              {branches.map((b) => (
+                <SelectItem key={getBranchRawId(b)} value={String(getBranchRawId(b))}>
+                  {getBranchDisplayName(b)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      )}
-      <Input type="date" value={form.checkInDate} onChange={(e) => set("checkInDate")(e.target.value)} />
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Room</label>
+          <Select value={form.roomId ? String(form.roomId) : ""}
+            disabled={!form.branchId}
+            onValueChange={(v) => {
+              set("roomId")(Number(v));
+              set("bedId")("");
+              setRoomSearch("");
+            }}>
+            <SelectTrigger className="rounded-lg"><SelectValue placeholder={form.branchId ? "Room" : "Select a branch first"} /></SelectTrigger>
+            <SelectContent>
+              <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
+                <Input placeholder="Search room..." value={roomSearch}
+                  onChange={(e) => setRoomSearch(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()} className="h-8 text-sm rounded-lg" autoFocus />
+              </div>
+              {availableRooms
+                .filter((r) => r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase()))
+                .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
+              {availableRooms.filter((r) =>
+                r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase())).length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">No room found</div>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Bed</label>
+          <Select value={form.bedId ? String(form.bedId) : ""}
+            disabled={!form.roomId}
+            onValueChange={(v) => set("bedId")(Number(v))}>
+            <SelectTrigger className="rounded-lg"><SelectValue placeholder={form.roomId ? "Bed" : "Select a room first"} /></SelectTrigger>
+            <SelectContent>
+              {availableBeds.map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
+              {form.roomId && availableBeds.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">No available beds in this room</div>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Advance</label>
+          <Input className="rounded-lg" type="number" placeholder="Advance" value={form.advance} onChange={(e) => set("advance")(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Rent</label>
+          <Input className="rounded-lg" type="number" placeholder="Rent" value={form.monthlyRent} onChange={(e) => set("monthlyRent")(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
+          <Input className="rounded-lg" type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        {isAC ? (
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">AC Current Reading (optional)</label>
+            <Input className="rounded-lg" type="number" placeholder="AC Current Reading"
+              value={form.acJoinReading} onChange={(e) => set("acJoinReading")(e.target.value)} />
+          </div>
+        ) : <div />}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Check-in Date</label>
+          <Input className="rounded-lg" type="date" value={form.checkInDate} onChange={(e) => set("checkInDate")(e.target.value)} />
+        </div>
+      </div>
     </div>
   );
 };
@@ -496,6 +564,9 @@ const TenantForm = ({
    PAGE COMPONENT
    ══════════════════════════════════════════════════════════════════ */
 const TenantsPage = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const role     = getUserRole()?.toUpperCase();
   const branchId = getBranchId();
   const isWarden = role === "WARDEN";
@@ -543,6 +614,33 @@ const TenantsPage = () => {
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   const [form, dispatch] = useReducer(formReducer, EMPTY_FORM);
+
+  /* ── In-app confirm dialog state, replacing window.confirm() so
+     destructive actions (like deleting a tenant) render inline using
+     the same Dialog component as the rest of this page, instead of
+     the browser's native confirm() popup. `danger` swaps the confirm
+     button to the destructive/red Button variant.
+
+     NOTE: the DialogContent for this dialog (below, near the bottom
+     of this component) has the `[&>button]:hidden` class applied so
+     it hides shadcn's default top-right "X" close icon — matching
+     the Rooms & Beds delete-confirmation style, which only shows
+     Cancel / Delete and no separate close icon. ── */
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const askConfirm = (
+    title: string,
+    onConfirm: () => void,
+    options?: { description?: string; confirmLabel?: string; danger?: boolean }
+  ) => {
+    setConfirmState({ title, onConfirm, ...options });
+  };
 
   /* ── Live fraud check ── */
   const fraudDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -658,6 +756,38 @@ const TenantsPage = () => {
     loadTenants(selectedBranch);
   }, [selectedBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ── INCOMING NAVIGATION STATE —————————————————————————————
+     RoomsPage redirects here right after a room is created (direct
+     mode), passing { unitId, roomId, openAddTenant } via router state.
+     Pre-fill the branch (and room, if we got its id back) in the Add
+     Tenant form and pop the dialog open, so the flow goes straight
+     from "created a room" to "check in its first tenant" in one step.
+
+     Wardens are excluded from the branch/room prefill: their branchId
+     is already force-set by the effect above (isWarden && branchId),
+     and overriding it here would just fight that. We still need to
+     clear the nav state for them so it doesn't linger. ── */
+  useEffect(() => {
+    const navState = location.state as
+      { unitId?: number | string; roomId?: number | string; openAddTenant?: boolean } | null;
+    if (!navState?.openAddTenant) return;
+
+    if (!isWarden) {
+      if (navState.unitId != null) {
+        dispatch({ type: "set", field: "branchId", value: Number(navState.unitId) });
+      }
+      if (navState.roomId != null) {
+        dispatch({ type: "set", field: "roomId", value: Number(navState.roomId) });
+      }
+    }
+    setAddOpen(true);
+
+    // Clear the navigation state after consuming it so a refresh or
+    // back/forward navigation doesn't keep re-opening the dialog.
+    window.history.replaceState({}, document.title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, isWarden]);
+
   /* ── DISPLAY HELPERS — always read from the unfiltered *Ref lists so
      a tenant whose room belongs to a different branch still resolves
      correctly instead of falling back to "-". ── */
@@ -691,13 +821,14 @@ const TenantsPage = () => {
     e?.response?.data?.message || e?.response?.data?.error || e?.message || fallback;
 
   /* ── FormData builder — branchId is UI-only (filters Room/Bed
-     selects); the server derives branch from roomId, never sent. ── */
+     selects); the server derives branch from roomId, never sent.
+     Password is no longer collected here: the backend auto-generates
+     one and emails it to the tenant once an email is provided. ── */
   const buildFormData = () => {
     const fd = new FormData();
     if (form.name)          fd.append("name", form.name);
     if (form.phone)         fd.append("phone", form.phone);
     if (form.email)         fd.append("email", form.email);
-    if (form.email && form.password) fd.append("password", form.password);
     if (form.idProofType)   fd.append("idProofType", form.idProofType);
     if (form.idProofNumber) fd.append("idProofNumber", form.idProofNumber);
     if (form.roomId !== "") fd.append("roomId", String(form.roomId));
@@ -712,13 +843,25 @@ const TenantsPage = () => {
     return fd;
   };
 
-  /* ── ADD TENANT ── */
+  /* ── ADD TENANT ──
+     MODIFIED: previously, when no inline login was created, the
+     function navigated straight to /users and `return`ed BEFORE the
+     `loadTenantsRef.current()` / `reloadBeds()` refresh below ever
+     ran. That meant if the user hit browser "back" from the User
+     Register page, TenantsPage still showed pre-add stale data until
+     a manual refresh. Now we fire (not await) the refresh right
+     before navigating, so the page's state catches up in the
+     background regardless of whether the user comes back or not.
+
+     Password is no longer a precondition for creating a login: a
+     login is auto-created (with an auto-generated password emailed
+     to the tenant) whenever an email is provided at check-in. ── */
   const handleAdd = async () => {
     if (!form.name || !form.phone || !form.branchId || !form.roomId || !form.bedId) {
       toast.error("Fill required fields"); return;
     }
-    if (form.password && !form.email) {
-      toast.error("Enter an email to go with the login password"); return;
+    if (!isValidPhone(form.phone)) {
+      toast.error(`Phone number must be exactly ${PHONE_LENGTH} digits`); return;
     }
     try {
       const newTenant: Tenant = await addTenant(buildFormData());
@@ -727,14 +870,41 @@ const TenantsPage = () => {
         setAddResultFraud(fraudCheck);
         toast.warning("Tenant added — but fraud history was detected. Review the alert.");
       } else {
+        const hadInlineLogin = !!form.email;
+        const pendingLoginPrefill = {
+          name: form.name,
+          phone: form.phone,
+          email: form.email,
+          branchId: form.branchId,
+        };
+
         setAddOpen(false);
         dispatch({ type: "reset" });
         setLiveFraud(null);
         toast.success(
-          form.email && form.password
-            ? "Tenant added and login created"
+          hadInlineLogin
+            ? "Tenant added and login created — credentials emailed"
             : "Tenant added"
         );
+
+        // No email was given at check-in — hand off to User Register
+        // so a login can be created for this tenant right away,
+        // pre-filled with what we already collected. Mirrors the
+        // RoomsPage → TenantsPage openAddTenant handoff above.
+        if (!hadInlineLogin) {
+          // Fire-and-forget refresh so this page's data isn't stale
+          // if the user navigates back here from /users.
+          loadTenantsRef.current();
+          reloadBeds();
+          navigate("/users", {
+            state: {
+              openAddUser: true,
+              prefill: pendingLoginPrefill,
+              role: "TENANT",
+            },
+          });
+          return;
+        }
       }
       await Promise.all([loadTenantsRef.current(), reloadBeds()]);
       setPage(0);
@@ -746,14 +916,14 @@ const TenantsPage = () => {
   /* ── EDIT TENANT ── */
   const handleEdit = async () => {
     if (!editTenant) return;
-    if (form.password && !form.email) {
-      toast.error("Enter an email to go with the login password"); return;
+    if (form.phone && !isValidPhone(form.phone)) {
+      toast.error(`Phone number must be exactly ${PHONE_LENGTH} digits`); return;
     }
     try {
       await updateTenant(editTenant.id, buildFormData());
       toast.success(
-        form.email && form.password
-          ? "Tenant updated and login created"
+        form.email
+          ? "Tenant updated and login created — credentials emailed"
           : "Tenant updated"
       );
       setEditOpen(false);
@@ -764,16 +934,26 @@ const TenantsPage = () => {
     }
   };
 
-  /* ── DELETE TENANT ── */
-  const handleDeleteTenant = async (tenant: Tenant) => {
-    if (!confirm(`Delete tenant "${tenant.name}" ?`)) return;
-    try {
-      await deleteTenant(tenant.id);
-      toast.success("Tenant deleted");
-      await Promise.all([loadTenantsRef.current(), reloadBeds()]);
-    } catch (e: any) {
-      toast.error(extractError(e, "Delete failed"));
-    }
+  /* ── DELETE TENANT ──
+     Uses the in-app confirm dialog (askConfirm) instead of
+     window.confirm(), so the prompt renders inline with the app's
+     styling — bold title, "This action cannot be undone." subtext,
+     and a red Delete button — matching the Rooms & Beds delete
+     dialog elsewhere in the app. ── */
+  const handleDeleteTenant = (tenant: Tenant) => {
+    askConfirm(
+      `Delete tenant "${tenant.name}"?`,
+      async () => {
+        try {
+          await deleteTenant(tenant.id);
+          toast.success("Tenant deleted");
+          await Promise.all([loadTenantsRef.current(), reloadBeds()]);
+        } catch (e: any) {
+          toast.error(extractError(e, "Delete failed"));
+        }
+      },
+      { description: "This action cannot be undone.", confirmLabel: "Delete", danger: true }
+    );
   };
 
   /* ── MARK ABSCONDED ── */
@@ -907,6 +1087,23 @@ const TenantsPage = () => {
         .tn-page-controls { display: flex; align-items: center; gap: 8px; }
         .tn-page-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
         .tn-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
+
+        /* ── Delete confirm button — white-to-red gradient ──────────
+           Starts white/light, eases into red left-to-right. On hover
+           it fills fully to a deeper red with white text, so it still
+           reads clearly as the destructive action. */
+        .tn-delete-confirm-btn {
+          background: linear-gradient(to right, #ffffff, #ef4444);
+          color: #b91c1c;
+          border: 1px solid #fca5a5;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+          transition: all 0.25s ease;
+        }
+        .tn-delete-confirm-btn:hover {
+          background: linear-gradient(to right, #ef4444, #dc2626);
+          color: #ffffff;
+          border-color: #dc2626;
+        }
       `}</style>
 
       <div className="tn-wrap">
@@ -916,7 +1113,7 @@ const TenantsPage = () => {
           <div className="tn-main-title">All Tenants</div>
 
           <div className="tn-controls">
-            <Input ref={excelInputRef} type="file" accept=".xlsx,.xls" className="w-44"
+            <Input ref={excelInputRef} type="file" accept=".xlsx,.xls" className="w-44 rounded-lg"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
@@ -936,30 +1133,58 @@ const TenantsPage = () => {
                   <UserPlus size={16} className="shrink-0" /> Check-In
                 </button>
               </DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Add Tenant</DialogTitle>
-                  <DialogDescription>
-                    Enter tenant details and assign an available room and bed. Fill in Email + Password to also create their login.
-                  </DialogDescription>
-                </DialogHeader>
-                {addResultFraud && (
-                  <FraudCard fraud={addResultFraud} tenantName={form.name} tenantPhone={form.phone} />
-                )}
-                {!addResultFraud && (
-                  <TenantForm
-                    form={form} dispatch={dispatch} rooms={rooms} beds={beds}
-                    branches={formBranches} branchLocked={isWarden} fraudResult={liveFraud}
-                  />
-                )}
-                <DialogFooter>
+              {/* Rounded on all four corners for a softer card look,
+                  matching the Branch/Rooms page dialogs. Widened to a
+                  landscape-style modal (matches Branch page) so the
+                  paired fields inside TenantForm can sit side-by-side.
+                  `[&>button]:hidden` hides shadcn's default top-right
+                  "X" close icon — it was rendering as an unstyled/
+                  overflowing square in some builds. This dialog already
+                  has a proper Cancel button in the footer below. */}
+              <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+                {/* Scrolling lives on this inner wrapper, not on DialogContent
+                    itself. DialogContent clips to its rounded-2xl corners
+                    (overflow-hidden), so the native scrollbar stays contained
+                    inside the rounded shape instead of running flush past the
+                    top/bottom corners. `relative` here lets the custom close
+                    button below anchor to this padded box (not the raw
+                    DialogContent edge), so it sits inset from the corner
+                    instead of overflowing it. */}
+                <div className="relative max-h-[90vh] overflow-y-auto p-6">
                   <DialogClose asChild>
-                    <Button variant="outline" onClick={() => { setAddResultFraud(null); setLiveFraud(null); }}>
-                      {addResultFraud ? "Close" : "Cancel"}
-                    </Button>
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                      onClick={() => { setAddResultFraud(null); setLiveFraud(null); }}
+                    >
+                      <X className="h-4 w-4 shrink-0" />
+                    </button>
                   </DialogClose>
-                  {!addResultFraud && <Button onClick={handleAdd}>Check-In</Button>}
-                </DialogFooter>
+                  <DialogHeader>
+                    <DialogTitle>Add Tenant</DialogTitle>
+                    <DialogDescription>
+                      Enter tenant details and assign an available room and bed. Fill in Email to also create a login — the password will be generated automatically and emailed to the tenant.
+                    </DialogDescription>
+                  </DialogHeader>
+                  {addResultFraud && (
+                    <FraudCard fraud={addResultFraud} tenantName={form.name} tenantPhone={form.phone} />
+                  )}
+                  {!addResultFraud && (
+                    <TenantForm
+                      form={form} dispatch={dispatch} rooms={rooms} beds={beds}
+                      branches={formBranches} branchLocked={isWarden} fraudResult={liveFraud}
+                    />
+                  )}
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button variant="outline" className="rounded-lg" onClick={() => { setAddResultFraud(null); setLiveFraud(null); }}>
+                        {addResultFraud ? "Close" : "Cancel"}
+                      </Button>
+                    </DialogClose>
+                    {!addResultFraud && <Button className="rounded-lg" onClick={handleAdd}>Check-In</Button>}
+                  </DialogFooter>
+                </div>
               </DialogContent>
             </Dialog>
           </div>
@@ -978,7 +1203,7 @@ const TenantsPage = () => {
           </div>
 
           <Select value={selectedBranch} onValueChange={setSelectedBranch} disabled={isWarden}>
-            <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Branches" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Branches</SelectItem>
               {branches.map(b => (
@@ -1082,7 +1307,7 @@ const TenantsPage = () => {
                               const derivedBranchId = room ? getRoomUnitId(room) : NaN;
                               setEditTenant(t);
                               dispatch({ type: "load", payload: {
-                                name: t.name, phone: t.phone, email: t.email || "", password: "",
+                                name: t.name, phone: t.phone, email: t.email || "",
                                 idProofType: t.idProofType, idProofNumber: t.idProofNumber || "",
                                 branchId: isNaN(derivedBranchId) ? "" : derivedBranchId,
                                 roomId: t.roomId, bedId: t.bedId,
@@ -1133,92 +1358,136 @@ const TenantsPage = () => {
 
       </div>
 
-      {/* Edit Dialog */}
+      {/* Edit Dialog — `[&>button]:hidden` hides shadcn's default
+          top-right "X" close icon (it was rendering as an unstyled/
+          overflowing square). A proper Cancel button already lives
+          in the footer below. */}
       <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) dispatch({ type: "reset" }); }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Edit Tenant</DialogTitle>
-            <DialogDescription>Update tenant information and save your changes.</DialogDescription>
-          </DialogHeader>
-          <TenantForm
-            form={form} dispatch={dispatch} rooms={rooms} beds={beds}
-            branches={formBranches} branchLocked={isWarden}
-            editTenant={editTenant}
-            existingDoc={editTenant?.idProofDocument}
-            existingPhoto={editTenant?.tenantPhoto}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button onClick={handleEdit}>Update Tenant</Button>
-          </DialogFooter>
+        {/* Widened to match the Add Tenant dialog's landscape layout.
+            Scrolling lives on the inner wrapper (not DialogContent) so the
+            native scrollbar is clipped by the rounded-2xl corners instead
+            of overlapping them at the top/bottom. `relative` here anchors
+            the custom close button to this padded box so it sits inset
+            from the corner instead of overflowing it. */}
+        <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+          <div className="relative max-h-[90vh] overflow-y-auto p-6">
+            <DialogClose asChild>
+              <button
+                type="button"
+                aria-label="Close"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4 shrink-0" />
+              </button>
+            </DialogClose>
+            <DialogHeader>
+              <DialogTitle>Edit Tenant</DialogTitle>
+              <DialogDescription>Update tenant information and save your changes.</DialogDescription>
+            </DialogHeader>
+            <TenantForm
+              form={form} dispatch={dispatch} rooms={rooms} beds={beds}
+              branches={formBranches} branchLocked={isWarden}
+              editTenant={editTenant}
+              existingDoc={editTenant?.idProofDocument}
+              existingPhoto={editTenant?.tenantPhoto}
+            />
+            <DialogFooter>
+              <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
+              <Button className="rounded-lg" onClick={handleEdit}>Update Tenant</Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* View Dialog */}
+      {/* View Dialog — `[&>button]:hidden` hides shadcn's default
+          top-right "X" close icon. This dialog had no footer button
+          before, so a proper "Close" button has been added below to
+          replace it. */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Tenant Details</DialogTitle>
-            <DialogDescription>View complete information about this tenant.</DialogDescription>
-          </DialogHeader>
-          {viewTenant && (
-            <div className="grid gap-2 text-sm">
-              <div className="flex justify-center mb-1">
-                <div className="h-20 w-20 rounded-full overflow-hidden border bg-muted flex items-center justify-center">
-                  {viewTenant.tenantPhoto ? (
-                    <img src={`${getApiOrigin()}${viewTenant.tenantPhoto}`} alt={viewTenant.name}
-                      className="h-full w-full object-cover" />
-                  ) : (
-                    <UserIcon className="h-8 w-8 text-muted-foreground shrink-0" />
-                  )}
+        {/* Scrolling lives on the inner wrapper (not DialogContent) so the
+            native scrollbar is clipped by the rounded-2xl corners instead
+            of overlapping them at the top/bottom. `relative` anchors the
+            custom close button to this padded box so it sits inset from
+            the corner instead of overflowing it. */}
+        <DialogContent className="max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+          <div className="relative max-h-[90vh] overflow-y-auto p-6">
+            <DialogClose asChild>
+              <button
+                type="button"
+                aria-label="Close"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4 shrink-0" />
+              </button>
+            </DialogClose>
+            <DialogHeader>
+              <DialogTitle>Tenant Details</DialogTitle>
+              <DialogDescription>View complete information about this tenant.</DialogDescription>
+            </DialogHeader>
+            {viewTenant && (
+              <div className="grid gap-2 text-sm">
+                <div className="flex justify-center mb-1">
+                  <div className="h-20 w-20 rounded-full overflow-hidden border bg-muted flex items-center justify-center">
+                    {viewTenant.tenantPhoto ? (
+                      <img src={`${getApiOrigin()}${viewTenant.tenantPhoto}`} alt={viewTenant.name}
+                        className="h-full w-full object-cover" />
+                    ) : (
+                      <UserIcon className="h-8 w-8 text-muted-foreground shrink-0" />
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {([
-                ["Name",           viewTenant.name],
-                ["Phone",          viewTenant.phone],
-                ["Email",          viewTenant.email || "-"],
-                ["Identity Proof", viewTenant.idProofType],
-                ["ID Number",      viewTenant.idProofNumber],
-                ["Branch",         branchName(viewTenant.roomId)],
-                ["Room",           roomNo(viewTenant.roomId)],
-                ["Bed",            bedNo(viewTenant.bedId)],
-                ["Status",         viewTenant.status],
-                ["Check-in",       viewTenant.checkInDate],
-                ["Check-out",      viewTenant.checkOutDate ?? "-"],
-              ] as [string, string][]).map(([label, val]) => (
-                <p key={label}><span className="font-medium">{label}:</span> {val}</p>
-              ))}
-              {viewTenant.idProofDocument ? (
-                <p className="flex items-center gap-1">
-                  <span className="font-medium">ID Document:</span>{" "}
-                  <a href={`${getApiOrigin()}${viewTenant.idProofDocument}`}
-                    target="_blank" rel="noopener noreferrer"
-                    className="text-blue-600 underline flex items-center gap-1">
-                    <FileText className="h-3 w-3 shrink-0" /> View / Download
-                  </a>
-                </p>
-              ) : (
-                <p className="text-muted-foreground text-xs">No ID document uploaded</p>
-              )}
-              {viewTenant.status === "Absconded" && (
-                <div className="mt-1 rounded-md border border-orange-300 bg-orange-50 p-3 text-xs text-orange-800 space-y-1">
-                  <p className="font-semibold flex items-center gap-1">
-                    <ShieldX className="h-3 w-3 shrink-0" /> This tenant is marked Absconded
+                {([
+                  ["Name",           viewTenant.name],
+                  ["Phone",          viewTenant.phone],
+                  ["Email",          viewTenant.email || "-"],
+                  ["Identity Proof", viewTenant.idProofType],
+                  ["ID Number",      viewTenant.idProofNumber],
+                  ["Branch",         branchName(viewTenant.roomId)],
+                  ["Room",           roomNo(viewTenant.roomId)],
+                  ["Bed",            bedNo(viewTenant.bedId)],
+                  ["Status",         viewTenant.status],
+                  ["Check-in",       viewTenant.checkInDate],
+                  ["Check-out",      viewTenant.checkOutDate ?? "-"],
+                ] as [string, string][]).map(([label, val]) => (
+                  <p key={label}><span className="font-medium">{label}:</span> {val}</p>
+                ))}
+                {viewTenant.idProofDocument ? (
+                  <p className="flex items-center gap-1">
+                    <span className="font-medium">ID Document:</span>{" "}
+                    <a href={`${getApiOrigin()}${viewTenant.idProofDocument}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="text-blue-600 underline flex items-center gap-1">
+                      <FileText className="h-3 w-3 shrink-0" /> View / Download
+                    </a>
                   </p>
-                </div>
-              )}
-            </div>
-          )}
+                ) : (
+                  <p className="text-muted-foreground text-xs">No ID document uploaded</p>
+                )}
+                {viewTenant.status === "Absconded" && (
+                  <div className="mt-1 rounded-lg border border-orange-300 bg-orange-50 p-3 text-xs text-orange-800 space-y-1">
+                    <p className="font-semibold flex items-center gap-1">
+                      <ShieldX className="h-3 w-3 shrink-0" /> This tenant is marked Absconded
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" className="rounded-lg" onClick={() => setViewOpen(false)}>Close</Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* Mark Absconded Dialog */}
+      {/* Mark Absconded Dialog — `[&>button]:hidden` hides shadcn's
+          default top-right "X" close icon. A proper Cancel button
+          already lives in the footer below. */}
       <Dialog open={abscondOpen} onOpenChange={(open) => {
         setAbscondOpen(open);
         if (!open) { setAbscondTarget(null); setAbscondReason(""); }
       }}>
-        <DialogContent>
+        <DialogContent className="rounded-2xl [&>button]:hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-orange-600">
               <ShieldX className="h-5 w-5 shrink-0" /> Mark as Absconded
@@ -1241,6 +1510,7 @@ const TenantsPage = () => {
                   Reason (optional — defaults to "left without notice")
                 </label>
                 <Input
+                  className="rounded-lg"
                   placeholder="e.g. Bed found empty on 15 Jun, tenant unreachable"
                   value={abscondReason}
                   onChange={(e) => setAbscondReason(e.target.value)}
@@ -1249,9 +1519,51 @@ const TenantsPage = () => {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAbscondOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleMarkAbsconded}>
+            <Button variant="outline" className="rounded-lg" onClick={() => setAbscondOpen(false)}>Cancel</Button>
+            <Button variant="destructive" className="rounded-lg" onClick={handleMarkAbsconded}>
               Confirm — Mark Absconded
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CONFIRM DIALOG — replaces window.confirm() for destructive actions
+          (currently: delete tenant). Uses the same Dialog component as the
+          rest of the page for visual consistency, with a bold title, an
+          optional "This action cannot be undone." subtext.
+
+          UPDATED: the confirm button for `danger` actions (Delete) now uses
+          the `.tn-delete-confirm-btn` class defined in the <style> block
+          above — a white-to-red left-to-right gradient that deepens to a
+          solid red with white text on hover — instead of shadcn's flat
+          `destructive` variant. `variant` is intentionally left unset
+          (undefined) in the danger case so the custom className fully
+          controls the look without shadcn's default red fighting it.
+
+          Still has `[&>button]:hidden` on DialogContent to hide shadcn's
+          default top-right "X" close icon, matching the Rooms & Beds
+          delete-confirmation style (just Cancel / Delete, no separate
+          close icon). */}
+      <Dialog open={!!confirmState} onOpenChange={(open) => { if (!open) setConfirmState(null); }}>
+        <DialogContent className="max-w-sm rounded-2xl [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle>{confirmState?.title}</DialogTitle>
+            {confirmState?.description && (
+              <DialogDescription>{confirmState.description}</DialogDescription>
+            )}
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" className="rounded-lg" onClick={() => setConfirmState(null)}>Cancel</Button>
+            <Button
+              variant={confirmState?.danger ? undefined : "default"}
+              className={confirmState?.danger ? "tn-delete-confirm-btn rounded-lg" : "rounded-lg"}
+              onClick={() => {
+                const action = confirmState?.onConfirm;
+                setConfirmState(null);
+                action?.();
+              }}
+            >
+              {confirmState?.confirmLabel ?? "OK"}
             </Button>
           </DialogFooter>
         </DialogContent>

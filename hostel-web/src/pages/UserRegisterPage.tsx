@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import {
   registerUser,
   getBranches,
@@ -36,7 +37,7 @@ import {
 import { toast } from "sonner";
 import {
   Users,
-  Search, Download, Plus, Eye, Pencil, Trash2, ChevronDown, RefreshCw, ChevronLeft, ChevronRight,
+  Search, Download, Plus, Pencil, Trash2, ChevronDown, RefreshCw, ChevronLeft, ChevronRight,
   Loader2, Building2, IndianRupee, Zap, FileText, Settings,
 } from "lucide-react";
 
@@ -46,7 +47,6 @@ interface UserForm {
   name: string;
   phone: string;
   email: string;
-  password: string;
   role: string;
   branchId: string;
 }
@@ -55,10 +55,15 @@ const EMPTY_FORM: UserForm = {
   name: "",
   phone: "",
   email: "",
-  password: "",
   role: "",
   branchId: "",
 };
+
+/* Phone numbers everywhere in this file are stored/validated as
+   exactly 10 digits, digits-only (no spaces, +91, dashes, etc). */
+const PHONE_LENGTH = 10;
+const sanitizePhoneInput = (raw: string) => raw.replace(/\D/g, "").slice(0, PHONE_LENGTH);
+const isValidPhone = (phone: string) => /^\d{10}$/.test(phone);
 
 const COLORS = [
   { color: '#8b5cf6', bg: '#f3e8ff' },
@@ -94,6 +99,7 @@ const groupByModule = (list: PermissionCatalogItem[]) => {
 /* ================= COMPONENT ================= */
 
 const UserRegisterPage = () => {
+  const location = useLocation();
 
   /* ================= STATE ================= */
 
@@ -154,6 +160,40 @@ const UserRegisterPage = () => {
     loadBranches();
     loadUsers();
   }, [loadBranches, loadUsers]);
+
+  /* ── INCOMING NAVIGATION STATE ————————————————————————————
+     TenantsPage redirects here right after a tenant is checked in
+     without an inline login (no email was given at check-in), passing
+     { openAddUser, prefill: { name, phone, email, branchId }, role }
+     via router state. Pre-fill the Create User form with what was
+     already collected and pop the Add dialog open, so the flow goes
+     straight from "checked in a tenant" to "give them a login" in one
+     step — mirrors the RoomsPage → TenantsPage openAddTenant handoff.
+     ── */
+  useEffect(() => {
+    const navState = location.state as
+      {
+        openAddUser?: boolean;
+        prefill?: { name?: string; phone?: string; email?: string; branchId?: number | string };
+        role?: string;
+      } | null;
+    if (!navState?.openAddUser) return;
+
+    const p = navState.prefill ?? {};
+    setForm({
+      name:     p.name ?? "",
+      phone:    sanitizePhoneInput(p.phone ?? ""),
+      email:    p.email ?? "",
+      role:     navState.role ?? "TENANT",
+      branchId: p.branchId != null ? String(p.branchId) : "",
+    });
+    setAddOpen(true);
+
+    // Clear the navigation state after consuming it so a refresh or
+    // back/forward navigation doesn't keep re-opening the dialog.
+    window.history.replaceState({}, document.title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   /* ================= PERMISSIONS — CREATE DIALOG ================= */
 
@@ -224,6 +264,10 @@ const UserRegisterPage = () => {
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    if (name === "phone") {
+      setForm(prev => ({ ...prev, phone: sanitizePhoneInput(value) }));
+      return;
+    }
     setForm(prev => ({ ...prev, [name]: value }));
   }, []);
 
@@ -231,6 +275,7 @@ const UserRegisterPage = () => {
     const { name, value } = e.target;
     setEditUser(prev => {
       if (!prev) return prev;
+      if (name === "phone") return { ...prev, phone: sanitizePhoneInput(value) };
       return { ...prev, [name]: value };
     });
   }, []);
@@ -238,8 +283,12 @@ const UserRegisterPage = () => {
   /* ================= CRUD ================= */
 
   const handleAddSubmit = async () => {
-    if (!form.email || !form.password) {
-      toast.error("Email & Password required");
+    if (!form.email) {
+      toast.error("Email required");
+      return;
+    }
+    if (form.phone && !isValidPhone(form.phone)) {
+      toast.error(`Phone number must be exactly ${PHONE_LENGTH} digits`);
       return;
     }
     if (!form.role) {
@@ -256,7 +305,6 @@ const UserRegisterPage = () => {
         name:     form.name,
         phone:    form.phone,
         email:    form.email,
-        password: form.password,
         role:     form.role as "WARDEN" | "TENANT",
         branchId: Number(form.branchId),
       };
@@ -305,7 +353,7 @@ const UserRegisterPage = () => {
         }
       }
 
-      toast.success("User created");
+      toast.success("User created — login credentials emailed");
       setForm(EMPTY_FORM);
       setSelectedPerms(new Set());
       setAddOpen(false);
@@ -321,6 +369,10 @@ const UserRegisterPage = () => {
     if (!editUser) return;
     if (!editUser.role) {
       toast.error("Role required");
+      return;
+    }
+    if (editUser.phone && !isValidPhone(editUser.phone)) {
+      toast.error(`Phone number must be exactly ${PHONE_LENGTH} digits`);
       return;
     }
     try {
@@ -363,7 +415,7 @@ const UserRegisterPage = () => {
   }, [loadUsers]);
 
   const openEditDialog = useCallback((user: User) => {
-    setEditUser({ ...user });
+    setEditUser({ ...user, phone: sanitizePhoneInput(user.phone ?? "") });
     setEditOpen(true);
   }, []);
 
@@ -377,7 +429,7 @@ const UserRegisterPage = () => {
     onSelectAll: () => void,
     onClearAll: () => void,
   ) => (
-    <div className="border rounded-lg p-3 space-y-3 max-h-56 overflow-y-auto">
+    <div className="border rounded-xl p-3 space-y-3 max-h-56 overflow-y-auto">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-slate-700">Permissions</span>
         <div className="flex gap-3">
@@ -451,17 +503,17 @@ const UserRegisterPage = () => {
         .usr-main-title { font-size: 18px; font-weight: 700; color: #0f172a; }
 
         .usr-controls { display: flex; align-items: center; gap: 12px; }
-        .usr-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
+        .usr-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
         .usr-btn-outline:hover { background: #f8fafc; }
-        .usr-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
+        .usr-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 10px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
         .usr-btn-primary:hover { background: #4200cc; }
 
         /* Search & Filters */
         .usr-filters-row { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
-        .usr-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 260px; }
+        .usr-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 12px; height: 38px; background: #fff; width: 260px; }
         .usr-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
 
-        .usr-filter-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 14px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; min-width: 140px; }
+        .usr-filter-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 14px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; min-width: 140px; }
         .usr-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #64748b; cursor: pointer; background: transparent; border: none; padding: 6px 12px; }
 
         /* Table */
@@ -490,7 +542,7 @@ const UserRegisterPage = () => {
         .usr-date { font-size: 12px; font-weight: 600; color: #0f172a; }
         .usr-time { font-size: 11px; color: #64748b; margin-top: 2px; }
 
-        .usr-action-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; }
+        .usr-action-btn { width: 32px; height: 32px; border-radius: 10px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; }
         .usr-action-btn:hover { background: #f8fafc; color: #0f172a; }
         .usr-action-btn svg { flex-shrink: 0; }
 
@@ -498,7 +550,7 @@ const UserRegisterPage = () => {
         .usr-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #f1f5f9; background: #fff; }
         .usr-page-info { font-size: 13px; color: #64748b; }
         .usr-page-controls { display: flex; align-items: center; gap: 8px; }
-        .usr-page-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
+        .usr-page-btn { width: 32px; height: 32px; border-radius: 10px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
         .usr-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .usr-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .usr-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -513,7 +565,7 @@ const UserRegisterPage = () => {
           <div className="usr-main-title">All Registered Users</div>
 
           <div className="usr-controls">
-            <button className="usr-btn-outline"><Download size={16} className="shrink-0" /> Export</button>
+            {/* <button className="usr-btn-outline"><Download size={16} className="shrink-0" /> Export</button> */}
 
             <Dialog
               open={addOpen}
@@ -527,43 +579,83 @@ const UserRegisterPage = () => {
                   <Plus size={16} className="shrink-0" /> Add New User
                 </button>
               </DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Create User</DialogTitle>
-                  <DialogDescription>Add a new user and assign branch access.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3">
-                  <Input name="name" placeholder="Full Name" value={form.name} onChange={handleChange} />
-                  <Input name="phone" placeholder="Phone Number" value={form.phone} onChange={handleChange} />
-                  <Input name="email" placeholder="Email" value={form.email} onChange={handleChange} />
-                  <Input name="password" type="password" placeholder="Password" value={form.password} onChange={handleChange} />
-                  <select name="role" value={form.role} onChange={handleChange} className="border p-2 rounded w-full text-sm">
-                    <option value="">Select Role</option>
-                    <option value="WARDEN">WARDEN</option>
-                    <option value="TENANT">TENANT</option>
-                  </select>
-                  {form.role && (
-                    <select name="branchId" value={form.branchId} onChange={handleChange} className="border p-2 rounded w-full text-sm">
-                      <option value="">Select Branch</option>
-                      {branches.map(b => <option key={b.id} value={b.id}>{b.unitName}</option>)}
+              {/* FIX: rounded-2xl was on the same element as overflow-y-auto,
+                  so the scrollbar track ran flush against the right edge
+                  top-to-bottom and visually squared off the top-right /
+                  bottom-right corners (see screenshot). The rounding +
+                  clipping now lives on this OUTER wrapper (overflow-hidden,
+                  no scroll here), while a separate INNER div handles the
+                  scrolling. That keeps every corner rounded regardless of
+                  scrollbar. Widened to sm:max-w-2xl and the fields switched
+                  to a 2-column grid (landscape layout) so the form is much
+                  shorter and needs far less scrolling in the first place. */}
+              <DialogContent className="sm:max-w-2xl rounded-2xl overflow-hidden p-0 max-h-[85vh] flex flex-col">
+                <div className="px-6 pt-6">
+                  <DialogHeader>
+                    <DialogTitle>Create User</DialogTitle>
+                    <DialogDescription>Add a new user and assign branch access. A password is generated automatically and emailed to them.</DialogDescription>
+                  </DialogHeader>
+                </div>
+
+                <div className="overflow-y-auto px-6 pb-2 flex-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <Input name="name" placeholder="Full Name" value={form.name} onChange={handleChange} className="rounded-xl" />
+                    <Input
+                      name="phone"
+                      placeholder="Phone Number (10 digits)"
+                      value={form.phone}
+                      onChange={handleChange}
+                      inputMode="numeric"
+                      type="tel"
+                      maxLength={PHONE_LENGTH}
+                      className="rounded-xl"
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        const pasted = e.clipboardData.getData("text");
+                        setForm(prev => ({ ...prev, phone: sanitizePhoneInput(prev.phone + pasted) }));
+                      }}
+                    />
+                    <Input name="email" placeholder="Email" value={form.email} onChange={handleChange} className="rounded-xl" />
+                    <select name="role" value={form.role} onChange={handleChange} className="border p-2 rounded-xl w-full text-sm">
+                      <option value="">Select Role</option>
+                      <option value="WARDEN">WARDEN</option>
+                      <option value="TENANT">TENANT</option>
                     </select>
+                    {form.role && (
+                      <select name="branchId" value={form.branchId} onChange={handleChange} className="border p-2 rounded-xl w-full text-sm">
+                        <option value="">Select Branch</option>
+                        {branches.map(b => <option key={b.id} value={b.id}>{b.unitName}</option>)}
+                      </select>
+                    )}
+                  </div>
+                  {form.email && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      A password will be generated automatically and emailed to <span className="font-medium">{form.email}</span>.
+                    </p>
                   )}
 
-                  {form.role && renderPermChecklist(
-                    groupedCreateCatalog,
-                    permLoading,
-                    selectedPerms,
-                    toggleCreatePerm,
-                    () => setSelectedPerms(new Set(permCatalog.map(c => c.name))),
-                    () => setSelectedPerms(new Set()),
+                  {form.role && (
+                    <div className="mt-3">
+                      {renderPermChecklist(
+                        groupedCreateCatalog,
+                        permLoading,
+                        selectedPerms,
+                        toggleCreatePerm,
+                        () => setSelectedPerms(new Set(permCatalog.map(c => c.name))),
+                        () => setSelectedPerms(new Set()),
+                      )}
+                    </div>
                   )}
                 </div>
-                <DialogFooter>
-                  <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-                  <Button disabled={loading} onClick={handleAddSubmit} className="bg-[#5200FF] hover:bg-[#4200cc]">
-                    {loading ? "Saving..." : "Create"}
-                  </Button>
-                </DialogFooter>
+
+                <div className="px-6 pb-6 pt-2 border-t">
+                  <DialogFooter>
+                    <DialogClose asChild><Button variant="outline" className="rounded-xl">Cancel</Button></DialogClose>
+                    <Button disabled={loading} onClick={handleAddSubmit} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-xl">
+                      {loading ? "Saving..." : "Create"}
+                    </Button>
+                  </DialogFooter>
+                </div>
               </DialogContent>
             </Dialog>
           </div>
@@ -645,9 +737,6 @@ const UserRegisterPage = () => {
                         </td>
                         <td>
                           <div className="flex gap-2">
-                            <button className="usr-action-btn" title="View">
-                              <Eye size={16} className="shrink-0" />
-                            </button>
                             <button
                               className="usr-action-btn"
                               onClick={() => openEditDialog(user)}
@@ -661,14 +750,16 @@ const UserRegisterPage = () => {
                                   <Trash2 size={16} color="#ef4444" className="shrink-0" />
                                 </button>
                               </AlertDialogTrigger>
-                              <AlertDialogContent>
+                              {/* rounded-2xl matches the rest of the app's
+                                  destructive-confirm dialogs */}
+                              <AlertDialogContent className="rounded-2xl">
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Delete {user.email}?</AlertDialogTitle>
                                   <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDelete(user.id)} className="bg-red-600 hover:bg-red-700">Delete</AlertDialogAction>
+                                  <AlertDialogCancel className="rounded-xl">Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDelete(user.id)} className="bg-red-600 hover:bg-red-700 rounded-xl">Delete</AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>
@@ -725,45 +816,71 @@ const UserRegisterPage = () => {
             if (!v) { setEditUser(null); setEditSelectedPerms(new Set()); }
           }}
         >
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit User</DialogTitle>
-              <DialogDescription>Update user details.</DialogDescription>
-            </DialogHeader>
-            {editUser && (
-              <div className="space-y-3">
-                <Input name="name" placeholder="Full Name" value={editUser.name || ""} onChange={handleEditChange} />
-                <Input name="phone" placeholder="Phone Number" value={editUser.phone || ""} onChange={handleEditChange} />
-                <Input name="email" placeholder="Email" value={editUser.email} onChange={handleEditChange} />
-                <Input name="password" type="password" placeholder="New password (leave blank to keep)" onChange={handleEditChange} />
-                <select name="role" value={editUser.role} onChange={handleEditChange} className="border p-2 rounded w-full text-sm">
-                  <option value="">Select Role</option>
-                  <option value="WARDEN">WARDEN</option>
-                  <option value="TENANT">TENANT</option>
-                </select>
-                {editUser.role && (
-                  <select name="branchId" value={editUser.branchId ?? (editUser as any).branch?.id ?? ""} onChange={handleEditChange} className="border p-2 rounded w-full text-sm">
-                    <option value="">Select Branch</option>
-                    {branches.map(b => <option key={b.id} value={b.id}>{b.unitName}</option>)}
-                  </select>
-                )}
+          <DialogContent className="sm:max-w-2xl rounded-2xl overflow-hidden p-0 max-h-[85vh] flex flex-col">
+            <div className="px-6 pt-6">
+              <DialogHeader>
+                <DialogTitle>Edit User</DialogTitle>
+                <DialogDescription>Update user details.</DialogDescription>
+              </DialogHeader>
+            </div>
 
-                {editUser.role && renderPermChecklist(
-                  groupedEditCatalog,
-                  editPermLoading,
-                  editSelectedPerms,
-                  toggleEditPerm,
-                  () => setEditSelectedPerms(new Set(editPermCatalog.map(c => c.name))),
-                  () => setEditSelectedPerms(new Set()),
+            {editUser && (
+              <div className="overflow-y-auto px-6 pb-2 flex-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  <Input name="name" placeholder="Full Name" value={editUser.name || ""} onChange={handleEditChange} className="rounded-xl" />
+                  <Input
+                    name="phone"
+                    placeholder="Phone Number (10 digits)"
+                    value={editUser.phone || ""}
+                    onChange={handleEditChange}
+                    inputMode="numeric"
+                    type="tel"
+                    maxLength={PHONE_LENGTH}
+                    className="rounded-xl"
+                    onPaste={(e) => {
+                      e.preventDefault();
+                      const pasted = e.clipboardData.getData("text");
+                      setEditUser(prev => prev ? { ...prev, phone: sanitizePhoneInput((prev.phone || "") + pasted) } : prev);
+                    }}
+                  />
+                  <Input name="email" placeholder="Email" value={editUser.email} onChange={handleEditChange} className="rounded-xl" />
+                  <Input name="password" type="password" placeholder="New password (leave blank to keep)" onChange={handleEditChange} className="rounded-xl" />
+                  <select name="role" value={editUser.role} onChange={handleEditChange} className="border p-2 rounded-xl w-full text-sm">
+                    <option value="">Select Role</option>
+                    <option value="WARDEN">WARDEN</option>
+                    <option value="TENANT">TENANT</option>
+                  </select>
+                  {editUser.role && (
+                    <select name="branchId" value={editUser.branchId ?? (editUser as any).branch?.id ?? ""} onChange={handleEditChange} className="border p-2 rounded-xl w-full text-sm">
+                      <option value="">Select Branch</option>
+                      {branches.map(b => <option key={b.id} value={b.id}>{b.unitName}</option>)}
+                    </select>
+                  )}
+                </div>
+
+                {editUser.role && (
+                  <div className="mt-3">
+                    {renderPermChecklist(
+                      groupedEditCatalog,
+                      editPermLoading,
+                      editSelectedPerms,
+                      toggleEditPerm,
+                      () => setEditSelectedPerms(new Set(editPermCatalog.map(c => c.name))),
+                      () => setEditSelectedPerms(new Set()),
+                    )}
+                  </div>
                 )}
               </div>
             )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-              <Button disabled={loading} onClick={handleEditSubmit} className="bg-[#5200FF] hover:bg-[#4200cc]">
-                {loading ? "Saving..." : "Save"}
-              </Button>
-            </DialogFooter>
+
+            <div className="px-6 pb-6 pt-2 border-t">
+              <DialogFooter>
+                <Button variant="outline" className="rounded-xl" onClick={() => setEditOpen(false)}>Cancel</Button>
+                <Button disabled={loading} onClick={handleEditSubmit} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-xl">
+                  {loading ? "Saving..." : "Save"}
+                </Button>
+              </DialogFooter>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

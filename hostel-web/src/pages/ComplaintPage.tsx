@@ -326,59 +326,62 @@ const ComplaintPage = () => {
                 >
                   {role === "TENANT" && (
                     <DialogTrigger asChild>
-                      <Button size="sm" className="h-8 bg-[#5200FF] hover:bg-[#4200cc] text-white">
+                      <Button size="sm" className="h-8 rounded-xl bg-[#5200FF] hover:bg-[#4200cc] text-white">
                         <Plus className="h-4 w-4 mr-2" /> Add Complaint
                       </Button>
                     </DialogTrigger>
                   )}
 
-                  <DialogContent>
+                  <DialogContent className="max-w-lg w-[94vw] rounded-2xl overflow-hidden">
                     <DialogHeader>
                       <DialogTitle>Add Complaint</DialogTitle>
                       <DialogDescription>Submit a new complaint</DialogDescription>
                     </DialogHeader>
 
-                    <Select
-                      value={subject}
-                      onValueChange={(value) => {
-                        setSubject(value);
-                        if (value !== "OTHER") setCustomSubject("");
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select Subject" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="WIFI">Wifi</SelectItem>
-                        <SelectItem value="FOOD">Food</SelectItem>
-                        <SelectItem value="WATER">Water</SelectItem>
-                        <SelectItem value="OTHER">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-3">
+                      <Select
+                        value={subject}
+                        onValueChange={(value) => {
+                          setSubject(value);
+                          if (value !== "OTHER") setCustomSubject("");
+                        }}
+                      >
+                        <SelectTrigger className="rounded-xl">
+                          <SelectValue placeholder="Select Subject" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          <SelectItem value="WIFI">Wifi</SelectItem>
+                          <SelectItem value="FOOD">Food</SelectItem>
+                          <SelectItem value="WATER">Water</SelectItem>
+                          <SelectItem value="OTHER">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
 
-                    {subject === "OTHER" && (
-                      <Input
-                        placeholder="Enter subject"
-                        value={customSubject}
-                        onChange={(e) => setCustomSubject(e.target.value)}
+                      {subject === "OTHER" && (
+                        <Input
+                          placeholder="Enter subject"
+                          value={customSubject}
+                          onChange={(e) => setCustomSubject(e.target.value)}
+                          className="rounded-xl"
+                        />
+                      )}
+
+                      <textarea
+                        placeholder="Describe your issue..."
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        className="border p-2 rounded-xl w-full h-32 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
                       />
-                    )}
-
-                    <textarea
-                      placeholder="Describe your issue..."
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      className="border p-2 rounded w-full h-32 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
+                    </div>
 
                     <DialogFooter>
                       <DialogClose asChild>
-                        <Button variant="outline" onClick={closeComplaintDialog}>
+                        <Button variant="outline" className="rounded-xl" onClick={closeComplaintDialog}>
                           Cancel
                         </Button>
                       </DialogClose>
                       <Button
-                        className="bg-[#5200FF] hover:bg-[#4200cc] text-white"
+                        className="rounded-xl bg-[#5200FF] hover:bg-[#4200cc] text-white"
                         onClick={handleCreate}
                         disabled={
                           loading ||
@@ -397,7 +400,7 @@ const ComplaintPage = () => {
 
           {/* Filters */}
           <div className="flex items-center gap-3 p-4 border-b border-[#f1f5f9] bg-white flex-wrap">
-            <div className="flex bg-white border border-[#e2e8f0] rounded-md h-9 px-3 w-[220px] items-center">
+            <div className="flex bg-white border border-[#e2e8f0] rounded-xl h-9 px-3 w-[220px] items-center">
               <input
                 type="text"
                 placeholder="Search complaints..."
@@ -408,12 +411,12 @@ const ComplaintPage = () => {
               <Search size={14} className="text-slate-400" />
             </div>
 
-            <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[160px]">
+            <div className="flex bg-white border border-[#e2e8f0] rounded-xl overflow-hidden h-9 w-[160px]">
               <Select value={selectedBranch} onValueChange={setSelectedBranch} disabled={!isAdmin}>
                 <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                   <SelectValue placeholder="All Branches" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-xl">
                   <SelectItem value="all">All Branches</SelectItem>
                   {branches.map((b) => (
                     <SelectItem key={b.id} value={String(b.id)}>
@@ -424,12 +427,12 @@ const ComplaintPage = () => {
               </Select>
             </div>
 
-            <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[160px]">
+            <div className="flex bg-[#ffffff] border border-[#e2e8f0] rounded-xl overflow-hidden h-9 w-[160px]">
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                   <SelectValue placeholder="All Categories" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-xl">
                   <SelectItem value="all">All Categories</SelectItem>
                   {categoryOptions.map((name) => (
                     <SelectItem key={name} value={name}>
@@ -440,12 +443,12 @@ const ComplaintPage = () => {
               </Select>
             </div>
 
-            <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[150px]">
+            <div className="flex bg-white border border-[#e2e8f0] rounded-xl overflow-hidden h-9 w-[150px]">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                   <SelectValue placeholder="All Status" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-xl">
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="OPEN">Open</SelectItem>
                   <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
@@ -531,8 +534,9 @@ const ComplaintPage = () => {
 
                     return (
                       <tr key={row.id}>
+                        {/* ID replaced with sequential order number (1, 2, 3...) */}
                         <td>
-                          <div className="cp-cid">{row.id}</div>
+                          <div className="cp-cid">{currentPage * pageSize + i + 1}</div>
                         </td>
 
                         {(isAdmin || role === "WARDEN") && (
@@ -590,32 +594,32 @@ const ComplaintPage = () => {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  className="h-8 w-8 p-0 border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 rounded-md shadow-sm"
+                                  className="h-8 w-8 p-0 border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 rounded-xl shadow-sm"
                                   disabled={updatingId === row.id}
                                   title="Change status"
                                 >
                                   <PenSquare size={14} />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-36 bg-white border border-slate-200 shadow-md rounded-md p-1">
+                              <DropdownMenuContent align="end" className="w-36 bg-white border border-slate-200 shadow-md rounded-xl p-1">
                                 <DropdownMenuLabel className="text-[10px] font-bold text-slate-400 px-2 py-1 uppercase">
                                   Set Status
                                 </DropdownMenuLabel>
                                 <DropdownMenuItem
                                   onClick={() => handleStatusChange(row.id!, "OPEN")}
-                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded"
+                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded-lg"
                                 >
                                   Open
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() => handleStatusChange(row.id!, "IN_PROGRESS")}
-                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded"
+                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded-lg"
                                 >
                                   In Progress
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() => handleStatusChange(row.id!, "RESOLVED")}
-                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded"
+                                  className="text-xs cursor-pointer hover:bg-slate-100 px-2 py-1.5 rounded-lg"
                                 >
                                   Resolved
                                 </DropdownMenuItem>
@@ -638,17 +642,17 @@ const ComplaintPage = () => {
             </div>
             <div className="flex gap-2">
               <button
-                className="w-8 h-8 rounded border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
+                className="w-8 h-8 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
                 disabled={currentPage === 0}
                 onClick={() => setCurrentPage((p) => p - 1)}
               >
                 &lt;
               </button>
-              <button className="w-8 h-8 rounded bg-[#5200FF] text-white flex items-center justify-center font-medium text-sm">
+              <button className="w-8 h-8 rounded-xl bg-[#5200FF] text-white flex items-center justify-center font-medium text-sm">
                 {currentPage + 1}
               </button>
               <button
-                className="w-8 h-8 rounded border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
+                className="w-8 h-8 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
                 disabled={(currentPage + 1) * pageSize >= rowData.length}
                 onClick={() => setCurrentPage((p) => p + 1)}
               >
