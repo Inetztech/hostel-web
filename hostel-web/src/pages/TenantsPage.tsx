@@ -4,6 +4,7 @@
 //   addTenant, updateTenant, deleteTenant,
 //   importTenantsExcel, getUserRole, getBranchId,
 //   checkFraud, markAbsconded,
+//   getPendingTenants, approveAndAllocateTenant,
 // } from "@/lib/store";
 // import { Room, Bed, Tenant, IdProofType, Branch, FraudCheckResponse } from "@/lib/types";
 // import { Button } from "@/components/ui/button";
@@ -20,13 +21,20 @@
 //   UserPlus, Eye, Search, Pencil, Trash2, FileText,
 //   AlertTriangle, ShieldX, Phone, Camera, User as UserIcon,
 //   Users, ShieldCheck, UserX, FileCheck2,
-//   Download, RefreshCw, ChevronLeft, ChevronRight, X,
+//   Download, RefreshCw, ChevronLeft, ChevronRight, X, ClipboardCheck,
 // } from "lucide-react";
 // import api from "@/lib/api";
 
 // /* ── Constants ──────────────────────────────────────────────────── */
 // const MAX_FILE_SIZE = 10 * 1024 * 1024;
 // const PAGE_SIZE     = 10;
+
+// /* Reference-data (rooms/beds) fan-out page size. */
+// const REF_DATA_PAGE_SIZE = 10;
+
+// /* How long refreshed rooms/beds/branches data is considered "fresh"
+//    before a dialog-open will trigger another full refetch. */
+// const REF_DATA_CACHE_MS = 20_000;
 
 // /* Phone numbers everywhere in this file are stored/validated as
 //    exactly 10 digits, digits-only (no spaces, +91, dashes, etc). */
@@ -39,10 +47,12 @@
 //   try { return new URL(base).origin; } catch { return ""; }
 // };
 
-// /* ── Generic paginated fetcher ──────────────────────────────────── */
+// /* ── Generic paginated fetcher (still used for rooms/beds, which are
+//    genuinely small reference sets we want fully in memory for lookups
+//    like roomNo()/bedNo()/branchName() below) ──────────────────────── */
 // async function fetchAllPages<T>(
 //   fetchFn: (page: number, size: number) => Promise<any>,
-//   pageSize = 10
+//   pageSize = REF_DATA_PAGE_SIZE
 // ): Promise<T[]> {
 //   const first = await fetchFn(0, pageSize);
 //   const content: T[] = first?.content ?? (Array.isArray(first) ? first : []);
@@ -56,11 +66,18 @@
 //   return [...content, ...rest.flat()];
 // }
 
+// /* ── CHANGED: fetchTenantsPage now also accepts an optional `search`
+//    term, forwarded as a query param so the backend can filter server-
+//    side. If your /tenants endpoint doesn't yet support `search`, this
+//    param is simply ignored server-side and has no effect — safe to
+//    ship either way. Ask me for the matching Spring controller/repo
+//    change if you want real server-side search. ── */
 // const fetchTenantsPage = async (
-//   page: number, size: number, unitId?: string
+//   page: number, size: number, unitId?: string, search?: string
 // ): Promise<{ content: Tenant[]; totalElements: number }> => {
 //   const params: Record<string, any> = { page, size };
 //   if (unitId && unitId !== "all") params.unitId = unitId;
+//   if (search && search.trim()) params.search = search.trim();
 //   const res = await api.get("/tenants", { params });
 //   return {
 //     content:       res.data?.data?.content ?? [],
@@ -68,22 +85,21 @@
 //   };
 // };
 
-// /* ── Cache-busted rooms/beds fetchers ──
-//    A room created after page load could be returned by /rooms but NOT
-//    by /beds no matter how many refetches — the signature of a stale
-//    server-side (or intermediate HTTP) cache. Appending a unique `_`
-//    query param defeats any GET-based caching layer keyed on the full
-//    request URL. */
-// const fetchRoomsFresh = async (pg = 0, size = 10) => {
-//   const res = await api.get("/rooms", { params: { page: pg, size, _: Date.now() } });
+// /* ── Rooms/beds fetchers ── */
+// const fetchRoomsFresh = async (pg = 0, size = REF_DATA_PAGE_SIZE, forceFresh = false) => {
+//   const params: Record<string, any> = { page: pg, size };
+//   if (forceFresh) params._ = Date.now();
+//   const res = await api.get("/rooms", { params });
 //   return {
 //     content:       res.data?.data?.content ?? res.data?.content ?? [],
 //     totalElements: res.data?.data?.totalElements ?? res.data?.totalElements ?? 0,
 //   };
 // };
 
-// const fetchBedsFresh = async (pg = 0, size = 10) => {
-//   const res = await api.get("/beds", { params: { page: pg, size, _: Date.now() } });
+// const fetchBedsFresh = async (pg = 0, size = REF_DATA_PAGE_SIZE, forceFresh = false) => {
+//   const params: Record<string, any> = { page: pg, size };
+//   if (forceFresh) params._ = Date.now();
+//   const res = await api.get("/beds", { params });
 //   return {
 //     content:       res.data?.data?.content ?? res.data?.content ?? [],
 //     totalElements: res.data?.data?.totalElements ?? res.data?.totalElements ?? 0,
@@ -91,13 +107,11 @@
 // };
 
 // /* ══════════════════════════════════════════════════════════════════
-//    BRANCH RESOLUTION HELPERS — /units may return unit_name (snake) or
-//    unitName (camel) depending on Jackson config. Normalize + try every
-//    field variant so display never silently falls back to "Branch N".
+//    BRANCH RESOLUTION HELPERS
 //    ══════════════════════════════════════════════════════════════════ */
 // const fetchAndNormalizeBranches = async (): Promise<Branch[]> => {
 //   try {
-//     const res = await api.get("/units", { params: { page: 0, size: 200 } });
+//     const res = await api.get("/units", { params: { page: 0, size: 10 } });
 //     const raw = res.data?.data;
 
 //     let rawList: any[] = [];
@@ -169,6 +183,21 @@
 //   if (action.type === "reset") return { ...EMPTY_FORM };
 //   if (action.type === "load")  return { ...EMPTY_FORM, ...action.payload };
 //   return { ...state, [action.field]: action.value };
+// };
+
+// type ApproveFormState = {
+//   branchId: number | "";
+//   roomId: number | "";
+//   bedId: number | "";
+//   advance: string;
+//   monthlyRent: string;
+//   joinReading: string;
+//   acJoinReading: string;
+// };
+
+// const EMPTY_APPROVE_FORM: ApproveFormState = {
+//   branchId: "", roomId: "", bedId: "",
+//   advance: "", monthlyRent: "", joinReading: "", acJoinReading: "",
 // };
 
 // /* ── IdProofUploadField ─────────────────────────────────────────── */
@@ -363,9 +392,32 @@
 //     ? rooms.filter((r) => Number(getRoomUnitId(r)) === Number(form.branchId))
 //     : [];
 
-//   const availableRooms = (roomsById.length > 0 || !selectedBranchName)
+//   const branchScopedRooms = (roomsById.length > 0 || !selectedBranchName)
 //     ? roomsById
 //     : rooms.filter((r) => getRoomUnitName(r).trim().toLowerCase() === selectedBranchName);
+
+//   /* ── NEW: a room only belongs in the picklist if it still has at
+//      least one free bed. Without this, a fully-occupied room (like
+//      "101" — 2/2 beds taken) stayed selectable in the Room dropdown
+//      and only failed afterwards with "No available beds in this
+//      room" once you tried to pick a bed. This filters those rooms out
+//      up front.
+
+//      Exception: if we're editing a tenant who is already assigned to
+//      that room, we keep it visible — otherwise you'd be unable to see/
+//      edit a tenant's own room just because their own bed makes the
+//      room look "full". (Their own bed is separately excluded from the
+//      "occupied" check in availableBeds below.) If no bed data has
+//      loaded yet for a room (roomBeds.length === 0), we don't hide it —
+//      that's a "we don't know yet" state, not "full". ── */
+//   const roomHasAvailableBed = (room: Room) => {
+//     if (editTenant && Number(room.id) === Number(editTenant.roomId)) return true;
+//     const roomBeds = beds.filter((b) => Number(b.roomId) === Number(room.id));
+//     if (roomBeds.length === 0) return true;
+//     return roomBeds.some((b) => !isBedOccupied(b));
+//   };
+
+//   const availableRooms = branchScopedRooms.filter(roomHasAvailableBed);
 
 //   const bedsInRoomMap = new Map<number, Bed>();
 //   for (const b of beds) {
@@ -378,12 +430,6 @@
 
 //   const phoneHasError = form.phone.length > 0 && form.phone.length !== PHONE_LENGTH;
 
-//   /* ── Landscape layout ──
-//      Widened into a two-column grid (paired via `grid-cols-2 gap-4`
-//      rows) so the dialog reads wide and short instead of tall and
-//      narrow — matching the Branch page's Add/Edit modals. Photo
-//      upload and file uploads stay full-width (col-span-2) since they
-//      need the extra horizontal room; everything else is paired up. */
 //   return (
 //     <div className="space-y-4">
 //       {fraudResult && <FraudCard fraud={fraudResult} tenantName={form.name} tenantPhone={form.phone} />}
@@ -415,11 +461,6 @@
 //               set("phone")(sanitizePhoneInput(form.phone + pasted));
 //             }}
 //           />
-//           {/* {phoneHasError && (
-//             <p className="text-xs text-red-600">
-//               Phone number must be exactly {PHONE_LENGTH} digits ({form.phone.length}/{PHONE_LENGTH} entered).
-//             </p>
-//           )} */}
 //         </div>
 //       </div>
 
@@ -504,7 +545,7 @@
 //                 .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
 //               {availableRooms.filter((r) =>
 //                 r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase())).length === 0 && (
-//                 <div className="px-3 py-2 text-sm text-muted-foreground">No room found</div>
+//                 <div className="px-3 py-2 text-sm text-muted-foreground">No rooms with available beds</div>
 //               )}
 //             </SelectContent>
 //           </Select>
@@ -580,13 +621,20 @@
 //   const [branches, setBranches] = useState<Branch[]>([]);
 //   const [wardenBranchName, setWardenBranchName] = useState("");
 
+//   const refDataFetchedAt = useRef<number>(0);
+
 //   const formBranches = useMemo(() => {
 //     if (!isWarden) return branches;
 //     const own = branches.find((b) => Number(getBranchRawId(b)) === Number(branchId));
 //     return own ? [own] : [];
 //   }, [branches, isWarden, branchId]);
 
-//   const [tenants, setTenants] = useState<Tenant[]>([]);
+//   /* ── CHANGED: `tenants` now holds ONE PAGE only, not the full
+//      matching set. `totalElements` tracks the server-reported total
+//      so the pagination footer and page-count math no longer depend
+//      on having fetched every row. ── */
+//   const [tenants,       setTenants]       = useState<Tenant[]>([]);
+//   const [totalElements, setTotalElements] = useState(0);
 //   const [loading, setLoading] = useState(false);
 //   const [page,    setPage]    = useState(0);
 
@@ -615,17 +663,20 @@
 
 //   const [form, dispatch] = useReducer(formReducer, EMPTY_FORM);
 
-//   /* ── In-app confirm dialog state, replacing window.confirm() so
-//      destructive actions (like deleting a tenant) render inline using
-//      the same Dialog component as the rest of this page, instead of
-//      the browser's native confirm() popup. `danger` swaps the confirm
-//      button to the destructive/red Button variant.
+//   const [pendingTenants, setPendingTenants] = useState<Tenant[]>([]);
+//   const [approveOpen,    setApproveOpen]    = useState(false);
+//   const [approveTarget,  setApproveTarget]  = useState<Tenant | null>(null);
+//   const [approveForm,    setApproveForm]    = useState<ApproveFormState>(EMPTY_APPROVE_FORM);
 
-//      NOTE: the DialogContent for this dialog (below, near the bottom
-//      of this component) has the `[&>button]:hidden` class applied so
-//      it hides shadcn's default top-right "X" close icon — matching
-//      the Rooms & Beds delete-confirmation style, which only shows
-//      Cancel / Delete and no separate close icon. ── */
+//   const loadPendingTenants = useCallback(async () => {
+//     try {
+//       const list = await getPendingTenants();
+//       setPendingTenants(Array.isArray(list) ? list : []);
+//     } catch {
+//       // non-critical — the pending list simply won't refresh this cycle
+//     }
+//   }, []);
+
 //   const [confirmState, setConfirmState] = useState<{
 //     title: string;
 //     description?: string;
@@ -665,14 +716,15 @@
 //     }
 //   }, [addOpen, isWarden, branchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-//   /* ── Refresh reference data (rooms + beds + branches) — must run on
-//      mount, whenever Add/Edit opens, and after every CRUD action, or a
-//      branch/room created elsewhere stays invisible to this page. ── */
-//   const refreshReferenceData = useCallback(async () => {
+//   /* ── Refresh reference data (rooms + beds + branches) ── */
+//   const refreshReferenceData = useCallback(async (force = false) => {
+//     if (!force && Date.now() - refDataFetchedAt.current < REF_DATA_CACHE_MS) {
+//       return;
+//     }
 //     try {
 //       const [allRooms, allBeds, allBranches] = await Promise.all([
-//         fetchAllPages<Room>(fetchRoomsFresh),
-//         fetchAllPages<Bed>(fetchBedsFresh),
+//         fetchAllPages<Room>((pg, size) => fetchRoomsFresh(pg, size, force)),
+//         fetchAllPages<Bed>((pg, size) => fetchBedsFresh(pg, size, force)),
 //         fetchAndNormalizeBranches(),
 //       ]);
 
@@ -698,33 +750,44 @@
 //         }
 //         setWardenBranchName(resolvedName || `Branch ${branchId}`);
 //       }
+
+//       refDataFetchedAt.current = Date.now();
 //     } catch { /* non-critical */ }
 //   }, [isWarden, branchId]);
 
-//   const reloadBeds = refreshReferenceData;
+//   const reloadBeds = useCallback(() => refreshReferenceData(true), [refreshReferenceData]);
 
-//   /* ── Load tenants (fetches every page — `tenants` always holds the
-//      full matching set, not just one page, so stats/counts below are
-//      real global figures, not "this page only") ── */
-//   const loadTenants = useCallback(async (branch?: string) => {
+//   /* ── CHANGED: loadTenants now fetches exactly ONE page from the
+//      server per call instead of looping until every page is fetched.
+//      This is the fix for the "tenants?page=0" immediately followed by
+//      "tenants?page=1" (etc) sequential waterfall seen in DevTools —
+//      that pattern is gone entirely now; each call is a single request.
+
+//      Accepts an explicit `pg` so callers (pagination buttons, branch
+//      filter changes, search) can request a specific page without
+//      relying on stale closure state. Defaults to the current `page`
+//      state when not provided. ── */
+//   const loadTenants = useCallback(async (
+//     branch?: string,
+//     pg?: number,
+//     searchTerm?: string
+//   ) => {
 //     setLoading(true);
 //     try {
 //       const activeBranch = branch ?? selectedBranchRef.current;
-//       const all: Tenant[] = [];
-//       let pg = 0;
-//       while (true) {
-//         const { content, totalElements } = await fetchTenantsPage(pg, 100, activeBranch);
-//         all.push(...content);
-//         if (all.length >= totalElements || content.length === 0) break;
-//         pg++;
-//       }
-//       setTenants(all);
+//       const activePage   = pg ?? page;
+//       const activeSearch = searchTerm ?? search;
+//       const { content, totalElements: total } =
+//         await fetchTenantsPage(activePage, PAGE_SIZE, activeBranch, activeSearch);
+//       setTenants(content);
+//       setTotalElements(total);
 //     } catch {
 //       toast.error("Failed to load tenants");
 //     } finally {
 //       setLoading(false);
 //     }
-//   }, []);
+//     // eslint-disable-next-line react-hooks/exhaustive-deps
+//   }, [page, search]);
 
 //   const loadTenantsRef = useRef(loadTenants);
 //   useEffect(() => { loadTenantsRef.current = loadTenants; }, [loadTenants]);
@@ -736,8 +799,9 @@
 //     refLoaded.current = true;
 //     (async () => {
 //       try {
-//         await refreshReferenceData();
-//         await loadTenants(isWarden ? String(branchId) : "all");
+//         await refreshReferenceData(true);
+//         await loadTenants(isWarden ? String(branchId) : "all", 0);
+//         await loadPendingTenants();
 //       } catch (err) {
 //         console.error("[TenantsPage] initial load error:", err);
 //         toast.error("Failed to load reference data");
@@ -746,27 +810,37 @@
 //   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 //   useEffect(() => {
-//     if (addOpen || editOpen) refreshReferenceData();
-//   }, [addOpen, editOpen, refreshReferenceData]);
+//     if (addOpen || editOpen || approveOpen) refreshReferenceData();
+//   }, [addOpen, editOpen, approveOpen, refreshReferenceData]);
 
+//   /* ── CHANGED: branch-filter change resets to page 0 and fetches
+//      that single page directly (was previously delegating to the
+//      old fetch-everything loadTenants). ── */
 //   const branchFilterMounted = useRef(false);
 //   useEffect(() => {
 //     if (!branchFilterMounted.current) { branchFilterMounted.current = true; return; }
 //     setPage(0);
-//     loadTenants(selectedBranch);
+//     loadTenants(selectedBranch, 0);
 //   }, [selectedBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-//   /* ── INCOMING NAVIGATION STATE —————————————————————————————
-//      RoomsPage redirects here right after a room is created (direct
-//      mode), passing { unitId, roomId, openAddTenant } via router state.
-//      Pre-fill the branch (and room, if we got its id back) in the Add
-//      Tenant form and pop the dialog open, so the flow goes straight
-//      from "created a room" to "check in its first tenant" in one step.
+//   /* ── NEW: debounced server-side search. Typing in the search box
+//      resets to page 0 and re-fetches from the server after a short
+//      pause, instead of filtering an in-memory full list (which no
+//      longer exists now that tenants only holds one page). ── */
+//   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+//   const searchMounted = useRef(false);
+//   useEffect(() => {
+//     if (!searchMounted.current) { searchMounted.current = true; return; }
+//     if (searchDebounce.current) clearTimeout(searchDebounce.current);
+//     searchDebounce.current = setTimeout(() => {
+//       setPage(0);
+//       loadTenants(selectedBranchRef.current, 0, search);
+//     }, 400);
+//     return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
+//     // eslint-disable-next-line react-hooks/exhaustive-deps
+//   }, [search]);
 
-//      Wardens are excluded from the branch/room prefill: their branchId
-//      is already force-set by the effect above (isWarden && branchId),
-//      and overriding it here would just fight that. We still need to
-//      clear the nav state for them so it doesn't linger. ── */
+//   /* ── INCOMING NAVIGATION STATE ── */
 //   useEffect(() => {
 //     const navState = location.state as
 //       { unitId?: number | string; roomId?: number | string; openAddTenant?: boolean } | null;
@@ -782,15 +856,10 @@
 //     }
 //     setAddOpen(true);
 
-//     // Clear the navigation state after consuming it so a refresh or
-//     // back/forward navigation doesn't keep re-opening the dialog.
 //     window.history.replaceState({}, document.title);
 //     // eslint-disable-next-line react-hooks/exhaustive-deps
 //   }, [location.state, isWarden]);
 
-//   /* ── DISPLAY HELPERS — always read from the unfiltered *Ref lists so
-//      a tenant whose room belongs to a different branch still resolves
-//      correctly instead of falling back to "-". ── */
 //   const roomNo = useCallback((id?: number | null) =>
 //     allRoomsRef.current.find((r) => Number(r.id) === Number(id))?.roomNumber ?? "-",
 //   []);
@@ -820,10 +889,6 @@
 //   const extractError = (e: any, fallback: string) =>
 //     e?.response?.data?.message || e?.response?.data?.error || e?.message || fallback;
 
-//   /* ── FormData builder — branchId is UI-only (filters Room/Bed
-//      selects); the server derives branch from roomId, never sent.
-//      Password is no longer collected here: the backend auto-generates
-//      one and emails it to the tenant once an email is provided. ── */
 //   const buildFormData = () => {
 //     const fd = new FormData();
 //     if (form.name)          fd.append("name", form.name);
@@ -843,19 +908,6 @@
 //     return fd;
 //   };
 
-//   /* ── ADD TENANT ──
-//      MODIFIED: previously, when no inline login was created, the
-//      function navigated straight to /users and `return`ed BEFORE the
-//      `loadTenantsRef.current()` / `reloadBeds()` refresh below ever
-//      ran. That meant if the user hit browser "back" from the User
-//      Register page, TenantsPage still showed pre-add stale data until
-//      a manual refresh. Now we fire (not await) the refresh right
-//      before navigating, so the page's state catches up in the
-//      background regardless of whether the user comes back or not.
-
-//      Password is no longer a precondition for creating a login: a
-//      login is auto-created (with an auto-generated password emailed
-//      to the tenant) whenever an email is provided at check-in. ── */
 //   const handleAdd = async () => {
 //     if (!form.name || !form.phone || !form.branchId || !form.roomId || !form.bedId) {
 //       toast.error("Fill required fields"); return;
@@ -887,14 +939,9 @@
 //             : "Tenant added"
 //         );
 
-//         // No email was given at check-in — hand off to User Register
-//         // so a login can be created for this tenant right away,
-//         // pre-filled with what we already collected. Mirrors the
-//         // RoomsPage → TenantsPage openAddTenant handoff above.
 //         if (!hadInlineLogin) {
-//           // Fire-and-forget refresh so this page's data isn't stale
-//           // if the user navigates back here from /users.
-//           loadTenantsRef.current();
+//           setPage(0);
+//           loadTenantsRef.current(undefined, 0);
 //           reloadBeds();
 //           navigate("/users", {
 //             state: {
@@ -906,14 +953,13 @@
 //           return;
 //         }
 //       }
-//       await Promise.all([loadTenantsRef.current(), reloadBeds()]);
 //       setPage(0);
+//       await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds()]);
 //     } catch (e: any) {
 //       toast.error(extractError(e, "Failed to add tenant"));
 //     }
 //   };
 
-//   /* ── EDIT TENANT ── */
 //   const handleEdit = async () => {
 //     if (!editTenant) return;
 //     if (form.phone && !isValidPhone(form.phone)) {
@@ -934,12 +980,6 @@
 //     }
 //   };
 
-//   /* ── DELETE TENANT ──
-//      Uses the in-app confirm dialog (askConfirm) instead of
-//      window.confirm(), so the prompt renders inline with the app's
-//      styling — bold title, "This action cannot be undone." subtext,
-//      and a red Delete button — matching the Rooms & Beds delete
-//      dialog elsewhere in the app. ── */
 //   const handleDeleteTenant = (tenant: Tenant) => {
 //     askConfirm(
 //       `Delete tenant "${tenant.name}"?`,
@@ -947,7 +987,7 @@
 //         try {
 //           await deleteTenant(tenant.id);
 //           toast.success("Tenant deleted");
-//           await Promise.all([loadTenantsRef.current(), reloadBeds()]);
+//           await Promise.all([loadTenantsRef.current(), reloadBeds(), loadPendingTenants()]);
 //         } catch (e: any) {
 //           toast.error(extractError(e, "Delete failed"));
 //         }
@@ -956,7 +996,6 @@
 //     );
 //   };
 
-//   /* ── MARK ABSCONDED ── */
 //   const handleMarkAbsconded = async () => {
 //     if (!abscondTarget) return;
 //     try {
@@ -969,7 +1008,42 @@
 //     }
 //   };
 
-//   /* ── EXCEL IMPORT ── */
+//   const handleApprove = async () => {
+//     if (!approveTarget) return;
+//     if (!approveForm.roomId || !approveForm.bedId) {
+//       toast.error("Select a room and bed"); return;
+//     }
+//     try {
+//       await approveAndAllocateTenant(approveTarget.id, {
+//         roomId: Number(approveForm.roomId),
+//         bedId: Number(approveForm.bedId),
+//         advance: approveForm.advance ? Number(approveForm.advance) : 0,
+//         monthlyRent: approveForm.monthlyRent ? Number(approveForm.monthlyRent) : 0,
+//         joinReading: approveForm.joinReading ? Number(approveForm.joinReading) : 0,
+//         acJoinReading: approveForm.acJoinReading ? Number(approveForm.acJoinReading) : undefined,
+//       });
+//       toast.success(`${approveTarget.name} approved and checked in`);
+//       setApproveOpen(false);
+//       setApproveTarget(null);
+//       setApproveForm(EMPTY_APPROVE_FORM);
+//       setPage(0);
+//       await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds(), loadPendingTenants()]);
+//     } catch (e: any) {
+//       toast.error(extractError(e, "Failed to approve tenant"));
+//     }
+//   };
+
+//   const openApproveDialog = (t: Tenant) => {
+//     setApproveTarget(t);
+//     setApproveForm({
+//       ...EMPTY_APPROVE_FORM,
+//       branchId: isWarden && branchId != null ? Number(branchId) : "",
+//     });
+//     setApproveOpen(true);
+//   };
+
+//   const approveRoomHostelType = rooms.find((r) => r.id === Number(approveForm.roomId))?.hostelType;
+
 //   const handleExcelImport = async () => {
 //     if (!excelFile) { toast.error("Please select an Excel file first"); return; }
 //     try {
@@ -977,29 +1051,36 @@
 //       toast.success("Excel imported successfully");
 //       setExcelFile(null);
 //       if (excelInputRef.current) excelInputRef.current.value = "";
-//       await Promise.all([loadTenantsRef.current(), reloadBeds()]);
 //       setPage(0);
+//       await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds()]);
 //       window.dispatchEvent(new Event("beds-updated"));
 //     } catch (e: any) {
 //       toast.error(extractError(e, "Excel import failed"), { duration: 8000 });
 //     }
 //   };
 
-//   /* ── Filtered / paginated rows ── */
-//   const filteredTenants = useMemo(
-//     () => search ? tenants.filter((t) => t.name.toLowerCase().includes(search.toLowerCase())) : tenants,
-//     [tenants, search]
-//   );
-//   const paginatedTenants = filteredTenants.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+//   /* ── CHANGED: `tenants` is now already exactly the current page
+//      from the server — no further client-side slicing needed. Search
+//      is handled server-side via the debounced effect above, so there's
+//      no more filteredTenants/paginatedTenants derivation here. ── */
+//   const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE));
 
-//   /* ── Stats — real, computed over the FULL loaded (branch-filtered)
-//      tenant list, not a mocked or page-scoped figure. ── */
-//   const stats = useMemo(() => {
-//     const active     = tenants.filter(t => t.status === "Active").length;
-//     const absconded  = tenants.filter(t => t.status === "Absconded").length;
-//     const withDoc    = tenants.filter(t => !!t.idProofDocument).length;
-//     return { active, absconded, withDoc };
-//   }, [tenants]);
+//   const goToPage = (newPage: number) => {
+//     setPage(newPage);
+//     loadTenants(selectedBranch, newPage);
+//   };
+
+//   /* ── NOTE ON STATS: these previously summarized the FULL tenant
+//      list (every page). Now that `tenants` only holds the current
+//      page, these numbers would only reflect ~10 rows, which is
+//      misleading. Rather than show wrong numbers, this card set is
+//      removed from render below. If you want accurate global stats
+//      back, the clean fix is a small dedicated endpoint —
+//      GET /tenants/stats returning { active, absconded, withDoc } as
+//      COUNT() queries — which is a single fast indexed query instead
+//      of pulling every tenant row to count them in the browser. Happy
+//      to write that endpoint + wire it back in if you want the stat
+//      cards restored. ── */
 
 //   const getInitials = (name?: string) => name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'U';
 
@@ -1044,8 +1125,8 @@
 
 //         .tn-table-container { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
 //         .tn-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
-//         .tn-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
-//         .tn-table td { padding: 16px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+//         .tn-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; white-space: nowrap; }
+//         .tn-table td { padding: 16px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; white-space: nowrap; }
 //         .tn-table tr:last-child td { border-bottom: none; }
 //         .tn-table tr:hover { background: #fdfcff; }
 
@@ -1067,18 +1148,12 @@
 //         .tn-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 //         .tn-status-badge.active { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
 //         .tn-status-badge.absconded { color: #ef4444; background: #fef2f2; border: 1px solid #fecaca; }
+//         .tn-status-badge.pending { color: #d97706; background: #fffbeb; border: 1px solid #fde68a; }
 //         .tn-status-badge.other { color: #64748b; background: #f1f5f9; border: 1px solid #e2e8f0; }
 
 //         .tn-action-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; }
 //         .tn-action-btn:hover { background: #f8fafc; color: #0f172a; }
 
-//         /* ── Icon-visibility safeguards ──────────────────────────
-//            These rules exist because in some builds the flex layout
-//            of .tn-action-btn / .tn-contact could shrink or hide the
-//            lucide-react <svg> children (flex items shrink by default).
-//            Forcing an explicit size + flex-shrink:0 + inline-block
-//            guarantees the icon always occupies visible space
-//            regardless of surrounding layout or a stale bundler cache. */
 //         .tn-action-btn svg { width: 16px !important; height: 16px !important; flex-shrink: 0; display: inline-block; }
 //         .tn-contact svg { width: 14px !important; height: 14px !important; flex-shrink: 0; display: inline-block; }
 
@@ -1088,10 +1163,6 @@
 //         .tn-page-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
 //         .tn-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
 
-//         /* ── Delete confirm button — white-to-red gradient ──────────
-//            Starts white/light, eases into red left-to-right. On hover
-//            it fills fully to a deeper red with white text, so it still
-//            reads clearly as the destructive action. */
 //         .tn-delete-confirm-btn {
 //           background: linear-gradient(to right, #ffffff, #ef4444);
 //           color: #b91c1c;
@@ -1104,6 +1175,10 @@
 //           color: #ffffff;
 //           border-color: #dc2626;
 //         }
+
+//         .tn-pending-header { display: flex; align-items: center; gap: 8px; padding: 16px 20px 4px; }
+//         .tn-pending-title { font-size: 15px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 8px; }
+//         .tn-pending-count { color: #d97706; background: #fffbeb; border: 1px solid #fde68a; border-radius: 20px; padding: 1px 10px; font-size: 12px; font-weight: 700; }
 //       `}</style>
 
 //       <div className="tn-wrap">
@@ -1133,23 +1208,7 @@
 //                   <UserPlus size={16} className="shrink-0" /> Check-In
 //                 </button>
 //               </DialogTrigger>
-//               {/* Rounded on all four corners for a softer card look,
-//                   matching the Branch/Rooms page dialogs. Widened to a
-//                   landscape-style modal (matches Branch page) so the
-//                   paired fields inside TenantForm can sit side-by-side.
-//                   `[&>button]:hidden` hides shadcn's default top-right
-//                   "X" close icon — it was rendering as an unstyled/
-//                   overflowing square in some builds. This dialog already
-//                   has a proper Cancel button in the footer below. */}
 //               <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
-//                 {/* Scrolling lives on this inner wrapper, not on DialogContent
-//                     itself. DialogContent clips to its rounded-2xl corners
-//                     (overflow-hidden), so the native scrollbar stays contained
-//                     inside the rounded shape instead of running flush past the
-//                     top/bottom corners. `relative` here lets the custom close
-//                     button below anchor to this padded box (not the raw
-//                     DialogContent edge), so it sits inset from the corner
-//                     instead of overflowing it. */}
 //                 <div className="relative max-h-[90vh] overflow-y-auto p-6">
 //                   <DialogClose asChild>
 //                     <button
@@ -1190,6 +1249,66 @@
 //           </div>
 //         </div>
 
+//         {pendingTenants.length > 0 && (
+//           <div className="tn-table-container" style={{ marginBottom: 24 }}>
+//             <div className="tn-pending-header">
+//               <div className="tn-pending-title">
+//                 <ClipboardCheck size={18} className="shrink-0" style={{ color: "#d97706" }} />
+//                 Pending Approvals
+//                 <span className="tn-pending-count">{pendingTenants.length}</span>
+//               </div>
+//             </div>
+//             <div className="overflow-x-auto">
+//               <table className="tn-table">
+//                 <thead>
+//                   <tr>
+//                     <th>NAME</th>
+//                     <th>CONTACT</th>
+//                     <th>ID PROOF</th>
+//                     <th>REQUESTED ON</th>
+//                     <th style={{ textAlign: 'center' }}>ACTION</th>
+//                   </tr>
+//                 </thead>
+//                 <tbody>
+//                   {pendingTenants.map((t) => (
+//                     <tr key={t.id}>
+//                       <td>
+//                         <div className="flex items-center gap-3">
+//                           <div className="tn-avatar" style={{ background: '#fffbeb', color: '#d97706' }}>
+//                             {t.tenantPhoto ? (
+//                               <img src={`${getApiOrigin()}${t.tenantPhoto}`} alt={t.name} />
+//                             ) : getInitials(t.name)}
+//                           </div>
+//                           <div>
+//                             <div className="tn-name">{t.name || "Unknown"}</div>
+//                             <div className="tn-email">{t.email || "No email provided"}</div>
+//                           </div>
+//                         </div>
+//                       </td>
+//                       <td>
+//                         <div className="tn-contact">
+//                           <Phone size={14} className="shrink-0" /> {t.phone}
+//                         </div>
+//                       </td>
+//                       <td>
+//                         <div className="tn-email">{t.idProofType || "-"} · {t.idProofNumber || "-"}</div>
+//                       </td>
+//                       <td><div className="tn-date">{t.checkInDate || "-"}</div></td>
+//                       <td>
+//                         <div className="flex justify-center">
+//                           <Button size="sm" className="rounded-lg" onClick={() => openApproveDialog(t)}>
+//                             Approve & Allocate
+//                           </Button>
+//                         </div>
+//                       </td>
+//                     </tr>
+//                   ))}
+//                 </tbody>
+//               </table>
+//             </div>
+//           </div>
+//         )}
+
 //         {/* Filters */}
 //         <div className="tn-filters-row">
 //           <div className="tn-search-main">
@@ -1212,7 +1331,12 @@
 //             </SelectContent>
 //           </Select>
 
-//           <button className="tn-clear-btn" onClick={() => { setSearch(""); setSelectedBranch(isWarden ? String(branchId ?? "all") : "all"); setPage(0); }}>
+//           <button className="tn-clear-btn" onClick={() => {
+//             setSearch("");
+//             setSelectedBranch(isWarden ? String(branchId ?? "all") : "all");
+//             setPage(0);
+//             loadTenants(isWarden ? String(branchId ?? "all") : "all", 0, "");
+//           }}>
 //             <RefreshCw size={14} className="shrink-0" /> Clear Filters
 //           </button>
 //         </div>
@@ -1230,16 +1354,16 @@
 //                   <th>CHECK-IN DATE</th>
 //                   <th>RENT (₹)</th>
 //                   <th>STATUS</th>
-//                   <th className="text-center">ACTIONS</th>
+//                   <th style={{ textAlign: 'center' }}>ACTIONS</th>
 //                 </tr>
 //               </thead>
 //               <tbody>
 //                 {loading ? (
 //                   <tr><td colSpan={8} className="text-center py-12 text-slate-400">Loading tenants...</td></tr>
-//                 ) : paginatedTenants.length === 0 ? (
+//                 ) : tenants.length === 0 ? (
 //                   <tr><td colSpan={8} className="text-center py-12 text-slate-400">No tenants found.</td></tr>
 //                 ) : (
-//                   paginatedTenants.map((t) => {
+//                   tenants.map((t) => {
 //                     const avatarColor = COLORS[t.id % COLORS.length];
 //                     const rNo = roomNo(t.roomId);
 //                     const bNo = bedNo(t.bedId);
@@ -1259,7 +1383,10 @@
 //                     }
 
 //                     const rent = new Intl.NumberFormat('en-IN').format(t.monthlyRent || 0);
-//                     const statusClass = t.status === "Active" ? "active" : t.status === "Absconded" ? "absconded" : "other";
+//                     const statusClass =
+//                       t.status === "Active" ? "active" :
+//                       t.status === "Absconded" ? "absconded" :
+//                       t.status === "PENDING" ? "pending" : "other";
 
 //                     return (
 //                       <tr key={t.id}>
@@ -1294,7 +1421,11 @@
 //                         <td><div className="tn-rent">₹{rent}</div></td>
 //                         <td>
 //                           <div className={`tn-status-badge ${statusClass}`}>
-//                             <div className={`w-1.5 h-1.5 rounded-full ${t.status === 'Active' ? 'bg-green-500' : t.status === 'Absconded' ? 'bg-red-500' : 'bg-slate-400'}`}></div>
+//                             <div className={`w-1.5 h-1.5 rounded-full ${
+//                               t.status === 'Active' ? 'bg-green-500' :
+//                               t.status === 'Absconded' ? 'bg-red-500' :
+//                               t.status === 'PENDING' ? 'bg-amber-500' : 'bg-slate-400'
+//                             }`}></div>
 //                             {t.status}
 //                           </div>
 //                         </td>
@@ -1337,19 +1468,23 @@
 //             </table>
 //           </div>
 
+//           {/* ── CHANGED: pagination footer now driven entirely by
+//              server-reported totalElements/totalPages, not by the
+//              length of an in-memory full list. goToPage() fetches the
+//              requested page directly rather than slicing locally. ── */}
 //           <div className="tn-pagination">
 //             <div className="tn-page-info">
-//               Showing {filteredTenants.length === 0 ? 0 : page * PAGE_SIZE + 1} to {Math.min((page + 1) * PAGE_SIZE, filteredTenants.length)} of {filteredTenants.length} tenants
+//               Showing {totalElements === 0 ? 0 : page * PAGE_SIZE + 1} to {Math.min((page + 1) * PAGE_SIZE, totalElements)} of {totalElements} tenants
 //             </div>
 //             <div className="tn-page-controls">
-//               <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+//               <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={page === 0} onClick={() => goToPage(page - 1)}>
 //                 <ChevronLeft className="h-4 w-4 shrink-0" />
 //               </Button>
 //               <button className="tn-page-btn active">{page + 1}</button>
-//               {page + 1 < Math.ceil(filteredTenants.length / PAGE_SIZE) && (
-//                 <button className="tn-page-btn" onClick={() => setPage(page + 1)}>{page + 2}</button>
+//               {page + 1 < totalPages && (
+//                 <button className="tn-page-btn" onClick={() => goToPage(page + 1)}>{page + 2}</button>
 //               )}
-//               <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={(page + 1) * PAGE_SIZE >= filteredTenants.length} onClick={() => setPage(p => p + 1)}>
+//               <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={page + 1 >= totalPages} onClick={() => goToPage(page + 1)}>
 //                 <ChevronRight className="h-4 w-4 shrink-0" />
 //               </Button>
 //             </div>
@@ -1358,17 +1493,8 @@
 
 //       </div>
 
-//       {/* Edit Dialog — `[&>button]:hidden` hides shadcn's default
-//           top-right "X" close icon (it was rendering as an unstyled/
-//           overflowing square). A proper Cancel button already lives
-//           in the footer below. */}
+//       {/* Edit Dialog */}
 //       <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) dispatch({ type: "reset" }); }}>
-//         {/* Widened to match the Add Tenant dialog's landscape layout.
-//             Scrolling lives on the inner wrapper (not DialogContent) so the
-//             native scrollbar is clipped by the rounded-2xl corners instead
-//             of overlapping them at the top/bottom. `relative` here anchors
-//             the custom close button to this padded box so it sits inset
-//             from the corner instead of overflowing it. */}
 //         <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
 //           <div className="relative max-h-[90vh] overflow-y-auto p-6">
 //             <DialogClose asChild>
@@ -1399,16 +1525,8 @@
 //         </DialogContent>
 //       </Dialog>
 
-//       {/* View Dialog — `[&>button]:hidden` hides shadcn's default
-//           top-right "X" close icon. This dialog had no footer button
-//           before, so a proper "Close" button has been added below to
-//           replace it. */}
+//       {/* View Dialog */}
 //       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-//         {/* Scrolling lives on the inner wrapper (not DialogContent) so the
-//             native scrollbar is clipped by the rounded-2xl corners instead
-//             of overlapping them at the top/bottom. `relative` anchors the
-//             custom close button to this padded box so it sits inset from
-//             the corner instead of overflowing it. */}
 //         <DialogContent className="max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
 //           <div className="relative max-h-[90vh] overflow-y-auto p-6">
 //             <DialogClose asChild>
@@ -1471,6 +1589,13 @@
 //                     </p>
 //                   </div>
 //                 )}
+//                 {viewTenant.status === "PENDING" && (
+//                   <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 space-y-1">
+//                     <p className="font-semibold flex items-center gap-1">
+//                       <ClipboardCheck className="h-3 w-3 shrink-0" /> Awaiting room/bed allocation and approval
+//                     </p>
+//                   </div>
+//                 )}
 //               </div>
 //             )}
 //             <DialogFooter>
@@ -1480,9 +1605,7 @@
 //         </DialogContent>
 //       </Dialog>
 
-//       {/* Mark Absconded Dialog — `[&>button]:hidden` hides shadcn's
-//           default top-right "X" close icon. A proper Cancel button
-//           already lives in the footer below. */}
+//       {/* Mark Absconded Dialog */}
 //       <Dialog open={abscondOpen} onOpenChange={(open) => {
 //         setAbscondOpen(open);
 //         if (!open) { setAbscondTarget(null); setAbscondReason(""); }
@@ -1527,23 +1650,124 @@
 //         </DialogContent>
 //       </Dialog>
 
-//       {/* CONFIRM DIALOG — replaces window.confirm() for destructive actions
-//           (currently: delete tenant). Uses the same Dialog component as the
-//           rest of the page for visual consistency, with a bold title, an
-//           optional "This action cannot be undone." subtext.
+//       {/* APPROVE & ALLOCATE DIALOG */}
+//       <Dialog open={approveOpen} onOpenChange={(open) => {
+//         setApproveOpen(open);
+//         if (!open) { setApproveTarget(null); setApproveForm(EMPTY_APPROVE_FORM); }
+//       }}>
+//         <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+//           <div className="relative max-h-[90vh] overflow-y-auto p-6">
+//             <DialogClose asChild>
+//               <button
+//                 type="button"
+//                 aria-label="Close"
+//                 className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+//               >
+//                 <X className="h-4 w-4 shrink-0" />
+//               </button>
+//             </DialogClose>
+//             <DialogHeader>
+//               <DialogTitle>Approve Tenant</DialogTitle>
+//               <DialogDescription>
+//                 Assign a room and bed for <span className="font-medium">{approveTarget?.name}</span> to complete check-in.
+//               </DialogDescription>
+//             </DialogHeader>
 
-//           UPDATED: the confirm button for `danger` actions (Delete) now uses
-//           the `.tn-delete-confirm-btn` class defined in the <style> block
-//           above — a white-to-red left-to-right gradient that deepens to a
-//           solid red with white text on hover — instead of shadcn's flat
-//           `destructive` variant. `variant` is intentionally left unset
-//           (undefined) in the danger case so the custom className fully
-//           controls the look without shadcn's default red fighting it.
+//             <div className="space-y-4 mt-2">
+//               <div className="grid grid-cols-2 gap-4">
+//                 <div className="space-y-1.5">
+//                   <label className="text-xs font-medium text-muted-foreground">Branch</label>
+//                   <Select
+//                     value={approveForm.branchId ? String(approveForm.branchId) : ""}
+//                     disabled={isWarden}
+//                     onValueChange={(v) => setApproveForm(f => ({ ...f, branchId: Number(v), roomId: "", bedId: "" }))}
+//                   >
+//                     <SelectTrigger className="rounded-lg"><SelectValue placeholder="Branch" /></SelectTrigger>
+//                     <SelectContent>
+//                       {formBranches.map((b) => (
+//                         <SelectItem key={getBranchRawId(b)} value={String(getBranchRawId(b))}>
+//                           {getBranchDisplayName(b)}
+//                         </SelectItem>
+//                       ))}
+//                     </SelectContent>
+//                   </Select>
+//                 </div>
+//                 <div className="space-y-1.5">
+//                   <label className="text-xs font-medium text-muted-foreground">Room</label>
+//                   <Select
+//                     value={approveForm.roomId ? String(approveForm.roomId) : ""}
+//                     disabled={!approveForm.branchId}
+//                     onValueChange={(v) => setApproveForm(f => ({ ...f, roomId: Number(v), bedId: "" }))}
+//                   >
+//                     <SelectTrigger className="rounded-lg"><SelectValue placeholder={approveForm.branchId ? "Room" : "Select branch first"} /></SelectTrigger>
+//                     <SelectContent>
+//                       {rooms
+//                         .filter((r) => Number(getRoomUnitId(r)) === Number(approveForm.branchId))
+//                         .filter((r) => beds.filter((b) => Number(b.roomId) === Number(r.id) && !b.isOccupied).length > 0)
+//                         .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
+//                     </SelectContent>
+//                   </Select>
+//                 </div>
+//               </div>
 
-//           Still has `[&>button]:hidden` on DialogContent to hide shadcn's
-//           default top-right "X" close icon, matching the Rooms & Beds
-//           delete-confirmation style (just Cancel / Delete, no separate
-//           close icon). */}
+//               <div className="grid grid-cols-2 gap-4">
+//                 <div className="space-y-1.5">
+//                   <label className="text-xs font-medium text-muted-foreground">Bed</label>
+//                   <Select
+//                     value={approveForm.bedId ? String(approveForm.bedId) : ""}
+//                     disabled={!approveForm.roomId}
+//                     onValueChange={(v) => setApproveForm(f => ({ ...f, bedId: Number(v) }))}
+//                   >
+//                     <SelectTrigger className="rounded-lg"><SelectValue placeholder={approveForm.roomId ? "Bed" : "Select room first"} /></SelectTrigger>
+//                     <SelectContent>
+//                       {beds
+//                         .filter((b) => Number(b.roomId) === Number(approveForm.roomId) && !b.isOccupied)
+//                         .map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
+//                       {approveForm.roomId &&
+//                         beds.filter((b) => Number(b.roomId) === Number(approveForm.roomId) && !b.isOccupied).length === 0 && (
+//                           <div className="px-3 py-2 text-sm text-muted-foreground">No available beds in this room</div>
+//                         )}
+//                     </SelectContent>
+//                   </Select>
+//                 </div>
+//                 <div className="space-y-1.5">
+//                   <label className="text-xs font-medium text-muted-foreground">Advance</label>
+//                   <Input className="rounded-lg" type="number" value={approveForm.advance}
+//                     onChange={(e) => setApproveForm(f => ({ ...f, advance: e.target.value }))} />
+//                 </div>
+//               </div>
+
+//               <div className="grid grid-cols-2 gap-4">
+//                 <div className="space-y-1.5">
+//                   <label className="text-xs font-medium text-muted-foreground">Monthly Rent</label>
+//                   <Input className="rounded-lg" type="number" value={approveForm.monthlyRent}
+//                     onChange={(e) => setApproveForm(f => ({ ...f, monthlyRent: e.target.value }))} />
+//                 </div>
+//                 <div className="space-y-1.5">
+//                   <label className="text-xs font-medium text-muted-foreground">Join EB Reading</label>
+//                   <Input className="rounded-lg" type="number" value={approveForm.joinReading}
+//                     onChange={(e) => setApproveForm(f => ({ ...f, joinReading: e.target.value }))} />
+//                 </div>
+//               </div>
+
+//               {approveRoomHostelType === "AC" && (
+//                 <div className="space-y-1.5">
+//                   <label className="text-xs font-medium text-muted-foreground">AC Join Reading</label>
+//                   <Input className="rounded-lg" type="number" value={approveForm.acJoinReading}
+//                     onChange={(e) => setApproveForm(f => ({ ...f, acJoinReading: e.target.value }))} />
+//                 </div>
+//               )}
+//             </div>
+
+//             <DialogFooter className="mt-4">
+//               <Button variant="outline" className="rounded-lg" onClick={() => setApproveOpen(false)}>Cancel</Button>
+//               <Button className="rounded-lg" onClick={handleApprove}>Approve & Check-In</Button>
+//             </DialogFooter>
+//           </div>
+//         </DialogContent>
+//       </Dialog>
+
+//       {/* CONFIRM DIALOG */}
 //       <Dialog open={!!confirmState} onOpenChange={(open) => { if (!open) setConfirmState(null); }}>
 //         <DialogContent className="max-w-sm rounded-2xl [&>button]:hidden">
 //           <DialogHeader>
@@ -1574,6 +1798,108 @@
 // };
 
 // export default TenantsPage;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1702,6 +2028,13 @@ import api from "@/lib/api";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const PAGE_SIZE     = 10;
 
+/* Reference-data (rooms/beds) fan-out page size. */
+const REF_DATA_PAGE_SIZE = 10;
+
+/* How long refreshed rooms/beds/branches data is considered "fresh"
+   before a dialog-open will trigger another full refetch. */
+const REF_DATA_CACHE_MS = 20_000;
+
 /* Phone numbers everywhere in this file are stored/validated as
    exactly 10 digits, digits-only (no spaces, +91, dashes, etc). */
 const PHONE_LENGTH = 10;
@@ -1713,10 +2046,12 @@ const getApiOrigin = (): string => {
   try { return new URL(base).origin; } catch { return ""; }
 };
 
-/* ── Generic paginated fetcher ──────────────────────────────────── */
+/* ── Generic paginated fetcher (still used for rooms/beds, which are
+   genuinely small reference sets we want fully in memory for lookups
+   like roomNo()/bedNo()/branchName() below) ──────────────────────── */
 async function fetchAllPages<T>(
   fetchFn: (page: number, size: number) => Promise<any>,
-  pageSize = 10
+  pageSize = REF_DATA_PAGE_SIZE
 ): Promise<T[]> {
   const first = await fetchFn(0, pageSize);
   const content: T[] = first?.content ?? (Array.isArray(first) ? first : []);
@@ -1730,11 +2065,20 @@ async function fetchAllPages<T>(
   return [...content, ...rest.flat()];
 }
 
+/* ── CHANGED: fetchTenantsPage now also accepts an optional `search`
+   term AND an optional `status` term, both forwarded as query params
+   so the backend can filter server-side. If your /tenants endpoint
+   doesn't yet support these params, they're simply ignored server-side
+   and have no effect — safe to ship either way. See the accompanying
+   backend notes for the matching Spring controller/service/repository
+   changes needed to make `status` actually filter. ── */
 const fetchTenantsPage = async (
-  page: number, size: number, unitId?: string
+  page: number, size: number, unitId?: string, search?: string, status?: string
 ): Promise<{ content: Tenant[]; totalElements: number }> => {
   const params: Record<string, any> = { page, size };
   if (unitId && unitId !== "all") params.unitId = unitId;
+  if (search && search.trim()) params.search = search.trim();
+  if (status && status !== "all") params.status = status;
   const res = await api.get("/tenants", { params });
   return {
     content:       res.data?.data?.content ?? [],
@@ -1742,22 +2086,21 @@ const fetchTenantsPage = async (
   };
 };
 
-/* ── Cache-busted rooms/beds fetchers ──
-   A room created after page load could be returned by /rooms but NOT
-   by /beds no matter how many refetches — the signature of a stale
-   server-side (or intermediate HTTP) cache. Appending a unique `_`
-   query param defeats any GET-based caching layer keyed on the full
-   request URL. */
-const fetchRoomsFresh = async (pg = 0, size = 10) => {
-  const res = await api.get("/rooms", { params: { page: pg, size, _: Date.now() } });
+/* ── Rooms/beds fetchers ── */
+const fetchRoomsFresh = async (pg = 0, size = REF_DATA_PAGE_SIZE, forceFresh = false) => {
+  const params: Record<string, any> = { page: pg, size };
+  if (forceFresh) params._ = Date.now();
+  const res = await api.get("/rooms", { params });
   return {
     content:       res.data?.data?.content ?? res.data?.content ?? [],
     totalElements: res.data?.data?.totalElements ?? res.data?.totalElements ?? 0,
   };
 };
 
-const fetchBedsFresh = async (pg = 0, size = 10) => {
-  const res = await api.get("/beds", { params: { page: pg, size, _: Date.now() } });
+const fetchBedsFresh = async (pg = 0, size = REF_DATA_PAGE_SIZE, forceFresh = false) => {
+  const params: Record<string, any> = { page: pg, size };
+  if (forceFresh) params._ = Date.now();
+  const res = await api.get("/beds", { params });
   return {
     content:       res.data?.data?.content ?? res.data?.content ?? [],
     totalElements: res.data?.data?.totalElements ?? res.data?.totalElements ?? 0,
@@ -1765,13 +2108,11 @@ const fetchBedsFresh = async (pg = 0, size = 10) => {
 };
 
 /* ══════════════════════════════════════════════════════════════════
-   BRANCH RESOLUTION HELPERS — /units may return unit_name (snake) or
-   unitName (camel) depending on Jackson config. Normalize + try every
-   field variant so display never silently falls back to "Branch N".
+   BRANCH RESOLUTION HELPERS
    ══════════════════════════════════════════════════════════════════ */
 const fetchAndNormalizeBranches = async (): Promise<Branch[]> => {
   try {
-    const res = await api.get("/units", { params: { page: 0, size: 200 } });
+    const res = await api.get("/units", { params: { page: 0, size: 10 } });
     const raw = res.data?.data;
 
     let rawList: any[] = [];
@@ -1845,9 +2186,6 @@ const formReducer = (state: FormState, action: FormAction): FormState => {
   return { ...state, [action.field]: action.value };
 };
 
-/* ── Approve form state (separate from the check-in FormState above,
-   since a PENDING tenant already has name/phone/email/ID proof — only
-   room/bed/rent details need to be collected here). ── */
 type ApproveFormState = {
   branchId: number | "";
   roomId: number | "";
@@ -2055,9 +2393,32 @@ const TenantForm = ({
     ? rooms.filter((r) => Number(getRoomUnitId(r)) === Number(form.branchId))
     : [];
 
-  const availableRooms = (roomsById.length > 0 || !selectedBranchName)
+  const branchScopedRooms = (roomsById.length > 0 || !selectedBranchName)
     ? roomsById
     : rooms.filter((r) => getRoomUnitName(r).trim().toLowerCase() === selectedBranchName);
+
+  /* ── NEW: a room only belongs in the picklist if it still has at
+     least one free bed. Without this, a fully-occupied room (like
+     "101" — 2/2 beds taken) stayed selectable in the Room dropdown
+     and only failed afterwards with "No available beds in this
+     room" once you tried to pick a bed. This filters those rooms out
+     up front.
+
+     Exception: if we're editing a tenant who is already assigned to
+     that room, we keep it visible — otherwise you'd be unable to see/
+     edit a tenant's own room just because their own bed makes the
+     room look "full". (Their own bed is separately excluded from the
+     "occupied" check in availableBeds below.) If no bed data has
+     loaded yet for a room (roomBeds.length === 0), we don't hide it —
+     that's a "we don't know yet" state, not "full". ── */
+  const roomHasAvailableBed = (room: Room) => {
+    if (editTenant && Number(room.id) === Number(editTenant.roomId)) return true;
+    const roomBeds = beds.filter((b) => Number(b.roomId) === Number(room.id));
+    if (roomBeds.length === 0) return true;
+    return roomBeds.some((b) => !isBedOccupied(b));
+  };
+
+  const availableRooms = branchScopedRooms.filter(roomHasAvailableBed);
 
   const bedsInRoomMap = new Map<number, Bed>();
   for (const b of beds) {
@@ -2070,12 +2431,6 @@ const TenantForm = ({
 
   const phoneHasError = form.phone.length > 0 && form.phone.length !== PHONE_LENGTH;
 
-  /* ── Landscape layout ──
-     Widened into a two-column grid (paired via `grid-cols-2 gap-4`
-     rows) so the dialog reads wide and short instead of tall and
-     narrow — matching the Branch page's Add/Edit modals. Photo
-     upload and file uploads stay full-width (col-span-2) since they
-     need the extra horizontal room; everything else is paired up. */
   return (
     <div className="space-y-4">
       {fraudResult && <FraudCard fraud={fraudResult} tenantName={form.name} tenantPhone={form.phone} />}
@@ -2107,11 +2462,6 @@ const TenantForm = ({
               set("phone")(sanitizePhoneInput(form.phone + pasted));
             }}
           />
-          {/* {phoneHasError && (
-            <p className="text-xs text-red-600">
-              Phone number must be exactly {PHONE_LENGTH} digits ({form.phone.length}/{PHONE_LENGTH} entered).
-            </p>
-          )} */}
         </div>
       </div>
 
@@ -2196,7 +2546,7 @@ const TenantForm = ({
                 .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
               {availableRooms.filter((r) =>
                 r.roomNumber.toLowerCase().includes(roomSearch.toLowerCase())).length === 0 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No room found</div>
+                <div className="px-3 py-2 text-sm text-muted-foreground">No rooms with available beds</div>
               )}
             </SelectContent>
           </Select>
@@ -2272,13 +2622,20 @@ const TenantsPage = () => {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [wardenBranchName, setWardenBranchName] = useState("");
 
+  const refDataFetchedAt = useRef<number>(0);
+
   const formBranches = useMemo(() => {
     if (!isWarden) return branches;
     const own = branches.find((b) => Number(getBranchRawId(b)) === Number(branchId));
     return own ? [own] : [];
   }, [branches, isWarden, branchId]);
 
-  const [tenants, setTenants] = useState<Tenant[]>([]);
+  /* ── CHANGED: `tenants` now holds ONE PAGE only, not the full
+     matching set. `totalElements` tracks the server-reported total
+     so the pagination footer and page-count math no longer depend
+     on having fetched every row. ── */
+  const [tenants,       setTenants]       = useState<Tenant[]>([]);
+  const [totalElements, setTotalElements] = useState(0);
   const [loading, setLoading] = useState(false);
   const [page,    setPage]    = useState(0);
 
@@ -2288,6 +2645,17 @@ const TenantsPage = () => {
   );
   const selectedBranchRef = useRef(selectedBranch);
   useEffect(() => { selectedBranchRef.current = selectedBranch; }, [selectedBranch]);
+
+  /* ── NEW: status filter (All / Active / Checked Out / Absconded).
+     Pending tenants are intentionally NOT one of the options here —
+     they already get their own dedicated "Pending Approvals" table
+     above (via getPendingTenants) and continue to show there
+     regardless of what this filter is set to. This is what lets you
+     actually isolate Checked-Out or Absconded tenants instead of
+     them being mixed in with everyone else across pages. ── */
+  const [selectedStatus, setSelectedStatus] = useState<string>("all");
+  const selectedStatusRef = useRef(selectedStatus);
+  useEffect(() => { selectedStatusRef.current = selectedStatus; }, [selectedStatus]);
 
   const [addOpen,    setAddOpen]    = useState(false);
   const [editOpen,   setEditOpen]   = useState(false);
@@ -2307,14 +2675,6 @@ const TenantsPage = () => {
 
   const [form, dispatch] = useReducer(formReducer, EMPTY_FORM);
 
-  /* ── PENDING TENANT APPROVALS ──
-     Public self-registrations land as status "PENDING" with no room/
-     bed yet. `pendingTenants` is loaded via the dedicated, filter-free
-     GET /tenants/pending endpoint (see getPendingTenants in lib/store)
-     so it's never accidentally hidden by the branch/admin scoping used
-     for the main tenant list. approveOpen/approveTarget/approveForm
-     drive the "Approve & Allocate" modal that assigns a room/bed and
-     flips the tenant to Active via PUT /tenants/{id}/approve. ── */
   const [pendingTenants, setPendingTenants] = useState<Tenant[]>([]);
   const [approveOpen,    setApproveOpen]    = useState(false);
   const [approveTarget,  setApproveTarget]  = useState<Tenant | null>(null);
@@ -2329,17 +2689,6 @@ const TenantsPage = () => {
     }
   }, []);
 
-  /* ── In-app confirm dialog state, replacing window.confirm() so
-     destructive actions (like deleting a tenant) render inline using
-     the same Dialog component as the rest of this page, instead of
-     the browser's native confirm() popup. `danger` swaps the confirm
-     button to the destructive/red Button variant.
-
-     NOTE: the DialogContent for this dialog (below, near the bottom
-     of this component) has the `[&>button]:hidden` class applied so
-     it hides shadcn's default top-right "X" close icon — matching
-     the Rooms & Beds delete-confirmation style, which only shows
-     Cancel / Delete and no separate close icon. ── */
   const [confirmState, setConfirmState] = useState<{
     title: string;
     description?: string;
@@ -2379,14 +2728,15 @@ const TenantsPage = () => {
     }
   }, [addOpen, isWarden, branchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Refresh reference data (rooms + beds + branches) — must run on
-     mount, whenever Add/Edit opens, and after every CRUD action, or a
-     branch/room created elsewhere stays invisible to this page. ── */
-  const refreshReferenceData = useCallback(async () => {
+  /* ── Refresh reference data (rooms + beds + branches) ── */
+  const refreshReferenceData = useCallback(async (force = false) => {
+    if (!force && Date.now() - refDataFetchedAt.current < REF_DATA_CACHE_MS) {
+      return;
+    }
     try {
       const [allRooms, allBeds, allBranches] = await Promise.all([
-        fetchAllPages<Room>(fetchRoomsFresh),
-        fetchAllPages<Bed>(fetchBedsFresh),
+        fetchAllPages<Room>((pg, size) => fetchRoomsFresh(pg, size, force)),
+        fetchAllPages<Bed>((pg, size) => fetchBedsFresh(pg, size, force)),
         fetchAndNormalizeBranches(),
       ]);
 
@@ -2412,33 +2762,52 @@ const TenantsPage = () => {
         }
         setWardenBranchName(resolvedName || `Branch ${branchId}`);
       }
+
+      refDataFetchedAt.current = Date.now();
     } catch { /* non-critical */ }
   }, [isWarden, branchId]);
 
-  const reloadBeds = refreshReferenceData;
+  const reloadBeds = useCallback(() => refreshReferenceData(true), [refreshReferenceData]);
 
-  /* ── Load tenants (fetches every page — `tenants` always holds the
-     full matching set, not just one page, so stats/counts below are
-     real global figures, not "this page only") ── */
-  const loadTenants = useCallback(async (branch?: string) => {
+  /* ── CHANGED: loadTenants now fetches exactly ONE page from the
+     server per call instead of looping until every page is fetched.
+     This is the fix for the "tenants?page=0" immediately followed by
+     "tenants?page=1" (etc) sequential waterfall seen in DevTools —
+     that pattern is gone entirely now; each call is a single request.
+
+     Accepts an explicit `pg` so callers (pagination buttons, branch
+     filter changes, search) can request a specific page without
+     relying on stale closure state. Defaults to the current `page`
+     state when not provided.
+
+     ── NEW: also accepts an explicit `status`. Defaults to whatever
+     the Status filter dropdown is currently set to
+     (selectedStatusRef.current), so any caller that doesn't care
+     about status (edit/delete/absconded flows, pagination buttons,
+     etc) automatically keeps respecting the active filter. ── */
+  const loadTenants = useCallback(async (
+    branch?: string,
+    pg?: number,
+    searchTerm?: string,
+    status?: string
+  ) => {
     setLoading(true);
     try {
       const activeBranch = branch ?? selectedBranchRef.current;
-      const all: Tenant[] = [];
-      let pg = 0;
-      while (true) {
-        const { content, totalElements } = await fetchTenantsPage(pg, 100, activeBranch);
-        all.push(...content);
-        if (all.length >= totalElements || content.length === 0) break;
-        pg++;
-      }
-      setTenants(all);
+      const activePage   = pg ?? page;
+      const activeSearch = searchTerm ?? search;
+      const activeStatus = status ?? selectedStatusRef.current;
+      const { content, totalElements: total } =
+        await fetchTenantsPage(activePage, PAGE_SIZE, activeBranch, activeSearch, activeStatus);
+      setTenants(content);
+      setTotalElements(total);
     } catch {
       toast.error("Failed to load tenants");
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, search]);
 
   const loadTenantsRef = useRef(loadTenants);
   useEffect(() => { loadTenantsRef.current = loadTenants; }, [loadTenants]);
@@ -2450,8 +2819,8 @@ const TenantsPage = () => {
     refLoaded.current = true;
     (async () => {
       try {
-        await refreshReferenceData();
-        await loadTenants(isWarden ? String(branchId) : "all");
+        await refreshReferenceData(true);
+        await loadTenants(isWarden ? String(branchId) : "all", 0);
         await loadPendingTenants();
       } catch (err) {
         console.error("[TenantsPage] initial load error:", err);
@@ -2464,24 +2833,46 @@ const TenantsPage = () => {
     if (addOpen || editOpen || approveOpen) refreshReferenceData();
   }, [addOpen, editOpen, approveOpen, refreshReferenceData]);
 
+  /* ── CHANGED: branch-filter change resets to page 0 and fetches
+     that single page directly (was previously delegating to the
+     old fetch-everything loadTenants). ── */
   const branchFilterMounted = useRef(false);
   useEffect(() => {
     if (!branchFilterMounted.current) { branchFilterMounted.current = true; return; }
     setPage(0);
-    loadTenants(selectedBranch);
+    loadTenants(selectedBranch, 0);
   }, [selectedBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── INCOMING NAVIGATION STATE —————————————————————————————
-     RoomsPage redirects here right after a room is created (direct
-     mode), passing { unitId, roomId, openAddTenant } via router state.
-     Pre-fill the branch (and room, if we got its id back) in the Add
-     Tenant form and pop the dialog open, so the flow goes straight
-     from "created a room" to "check in its first tenant" in one step.
+  /* ── NEW: status-filter change resets to page 0 and re-fetches that
+     single page with the chosen status applied server-side. This is
+     the actual mechanism that lets "Checked Out" and "Absconded" be
+     viewed as their own filtered lists instead of being scattered
+     across the "All Tenants" pagination. ── */
+  const statusFilterMounted = useRef(false);
+  useEffect(() => {
+    if (!statusFilterMounted.current) { statusFilterMounted.current = true; return; }
+    setPage(0);
+    loadTenants(selectedBranch, 0, undefined, selectedStatus);
+  }, [selectedStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
-     Wardens are excluded from the branch/room prefill: their branchId
-     is already force-set by the effect above (isWarden && branchId),
-     and overriding it here would just fight that. We still need to
-     clear the nav state for them so it doesn't linger. ── */
+  /* ── NEW: debounced server-side search. Typing in the search box
+     resets to page 0 and re-fetches from the server after a short
+     pause, instead of filtering an in-memory full list (which no
+     longer exists now that tenants only holds one page). ── */
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchMounted = useRef(false);
+  useEffect(() => {
+    if (!searchMounted.current) { searchMounted.current = true; return; }
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => {
+      setPage(0);
+      loadTenants(selectedBranchRef.current, 0, search);
+    }, 400);
+    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  /* ── INCOMING NAVIGATION STATE ── */
   useEffect(() => {
     const navState = location.state as
       { unitId?: number | string; roomId?: number | string; openAddTenant?: boolean } | null;
@@ -2497,15 +2888,10 @@ const TenantsPage = () => {
     }
     setAddOpen(true);
 
-    // Clear the navigation state after consuming it so a refresh or
-    // back/forward navigation doesn't keep re-opening the dialog.
     window.history.replaceState({}, document.title);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, isWarden]);
 
-  /* ── DISPLAY HELPERS — always read from the unfiltered *Ref lists so
-     a tenant whose room belongs to a different branch still resolves
-     correctly instead of falling back to "-". ── */
   const roomNo = useCallback((id?: number | null) =>
     allRoomsRef.current.find((r) => Number(r.id) === Number(id))?.roomNumber ?? "-",
   []);
@@ -2535,10 +2921,6 @@ const TenantsPage = () => {
   const extractError = (e: any, fallback: string) =>
     e?.response?.data?.message || e?.response?.data?.error || e?.message || fallback;
 
-  /* ── FormData builder — branchId is UI-only (filters Room/Bed
-     selects); the server derives branch from roomId, never sent.
-     Password is no longer collected here: the backend auto-generates
-     one and emails it to the tenant once an email is provided. ── */
   const buildFormData = () => {
     const fd = new FormData();
     if (form.name)          fd.append("name", form.name);
@@ -2558,19 +2940,6 @@ const TenantsPage = () => {
     return fd;
   };
 
-  /* ── ADD TENANT ──
-     MODIFIED: previously, when no inline login was created, the
-     function navigated straight to /users and `return`ed BEFORE the
-     `loadTenantsRef.current()` / `reloadBeds()` refresh below ever
-     ran. That meant if the user hit browser "back" from the User
-     Register page, TenantsPage still showed pre-add stale data until
-     a manual refresh. Now we fire (not await) the refresh right
-     before navigating, so the page's state catches up in the
-     background regardless of whether the user comes back or not.
-
-     Password is no longer a precondition for creating a login: a
-     login is auto-created (with an auto-generated password emailed
-     to the tenant) whenever an email is provided at check-in. ── */
   const handleAdd = async () => {
     if (!form.name || !form.phone || !form.branchId || !form.roomId || !form.bedId) {
       toast.error("Fill required fields"); return;
@@ -2602,14 +2971,9 @@ const TenantsPage = () => {
             : "Tenant added"
         );
 
-        // No email was given at check-in — hand off to User Register
-        // so a login can be created for this tenant right away,
-        // pre-filled with what we already collected. Mirrors the
-        // RoomsPage → TenantsPage openAddTenant handoff above.
         if (!hadInlineLogin) {
-          // Fire-and-forget refresh so this page's data isn't stale
-          // if the user navigates back here from /users.
-          loadTenantsRef.current();
+          setPage(0);
+          loadTenantsRef.current(undefined, 0);
           reloadBeds();
           navigate("/users", {
             state: {
@@ -2621,14 +2985,13 @@ const TenantsPage = () => {
           return;
         }
       }
-      await Promise.all([loadTenantsRef.current(), reloadBeds()]);
       setPage(0);
+      await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds()]);
     } catch (e: any) {
       toast.error(extractError(e, "Failed to add tenant"));
     }
   };
 
-  /* ── EDIT TENANT ── */
   const handleEdit = async () => {
     if (!editTenant) return;
     if (form.phone && !isValidPhone(form.phone)) {
@@ -2649,12 +3012,6 @@ const TenantsPage = () => {
     }
   };
 
-  /* ── DELETE TENANT ──
-     Uses the in-app confirm dialog (askConfirm) instead of
-     window.confirm(), so the prompt renders inline with the app's
-     styling — bold title, "This action cannot be undone." subtext,
-     and a red Delete button — matching the Rooms & Beds delete
-     dialog elsewhere in the app. ── */
   const handleDeleteTenant = (tenant: Tenant) => {
     askConfirm(
       `Delete tenant "${tenant.name}"?`,
@@ -2671,7 +3028,6 @@ const TenantsPage = () => {
     );
   };
 
-  /* ── MARK ABSCONDED ── */
   const handleMarkAbsconded = async () => {
     if (!abscondTarget) return;
     try {
@@ -2684,11 +3040,6 @@ const TenantsPage = () => {
     }
   };
 
-  /* ── APPROVE & ALLOCATE PENDING TENANT ──
-     Assigns a room/bed + rent details to a PENDING tenant and flips
-     their status to Active via PUT /tenants/{id}/approve. Refreshes
-     tenants, beds/rooms (a bed just became occupied) and the pending
-     list (the approved tenant should drop out of it) together. ── */
   const handleApprove = async () => {
     if (!approveTarget) return;
     if (!approveForm.roomId || !approveForm.bedId) {
@@ -2707,8 +3058,8 @@ const TenantsPage = () => {
       setApproveOpen(false);
       setApproveTarget(null);
       setApproveForm(EMPTY_APPROVE_FORM);
-      await Promise.all([loadTenantsRef.current(), reloadBeds(), loadPendingTenants()]);
       setPage(0);
+      await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds(), loadPendingTenants()]);
     } catch (e: any) {
       toast.error(extractError(e, "Failed to approve tenant"));
     }
@@ -2725,7 +3076,6 @@ const TenantsPage = () => {
 
   const approveRoomHostelType = rooms.find((r) => r.id === Number(approveForm.roomId))?.hostelType;
 
-  /* ── EXCEL IMPORT ── */
   const handleExcelImport = async () => {
     if (!excelFile) { toast.error("Please select an Excel file first"); return; }
     try {
@@ -2733,31 +3083,50 @@ const TenantsPage = () => {
       toast.success("Excel imported successfully");
       setExcelFile(null);
       if (excelInputRef.current) excelInputRef.current.value = "";
-      await Promise.all([loadTenantsRef.current(), reloadBeds()]);
       setPage(0);
+      await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds()]);
       window.dispatchEvent(new Event("beds-updated"));
     } catch (e: any) {
       toast.error(extractError(e, "Excel import failed"), { duration: 8000 });
     }
   };
 
-  /* ── Filtered / paginated rows ── */
-  const filteredTenants = useMemo(
-    () => search ? tenants.filter((t) => t.name.toLowerCase().includes(search.toLowerCase())) : tenants,
-    [tenants, search]
-  );
-  const paginatedTenants = filteredTenants.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  /* ── CHANGED: `tenants` is now already exactly the current page
+     from the server — no further client-side slicing needed. Search
+     and status are handled server-side via the debounced/status
+     effects above, so there's no more filteredTenants/paginatedTenants
+     derivation here. ── */
+  const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE));
 
-  /* ── Stats — real, computed over the FULL loaded (branch-filtered)
-     tenant list, not a mocked or page-scoped figure. ── */
-  const stats = useMemo(() => {
-    const active     = tenants.filter(t => t.status === "Active").length;
-    const absconded  = tenants.filter(t => t.status === "Absconded").length;
-    const withDoc    = tenants.filter(t => !!t.idProofDocument).length;
-    return { active, absconded, withDoc };
-  }, [tenants]);
+  const goToPage = (newPage: number) => {
+    setPage(newPage);
+    loadTenants(selectedBranch, newPage);
+  };
+
+  /* ── NOTE ON STATS: these previously summarized the FULL tenant
+     list (every page). Now that `tenants` only holds the current
+     page, these numbers would only reflect ~10 rows, which is
+     misleading. Rather than show wrong numbers, this card set is
+     removed from render below. If you want accurate global stats
+     back, the clean fix is a small dedicated endpoint —
+     GET /tenants/stats returning { active, absconded, checkedOut,
+     withDoc } as COUNT() queries — which is a single fast indexed
+     query instead of pulling every tenant row to count them in the
+     browser. Happy to write that endpoint + wire it back in if you
+     want the stat cards restored. ── */
 
   const getInitials = (name?: string) => name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'U';
+
+  /* ── NEW: human-friendly label for raw backend status values.
+     Backend enum values are things like "Active", "Checked_Out",
+     "Absconded", "PENDING" — this just prettifies the underscore
+     ones for display without changing what's sent to/from the API. ── */
+  const statusLabel = (s?: string) => {
+    if (!s) return "-";
+    if (s === "Checked_Out") return "Checked Out";
+    if (s === "PENDING") return "Pending";
+    return s;
+  };
 
   const COLORS = [
     { color: '#8b5cf6', bg: '#f3e8ff' },
@@ -2800,8 +3169,8 @@ const TenantsPage = () => {
 
         .tn-table-container { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
         .tn-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
-        .tn-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
-        .tn-table td { padding: 16px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+        .tn-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; white-space: nowrap; }
+        .tn-table td { padding: 16px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; white-space: nowrap; }
         .tn-table tr:last-child td { border-bottom: none; }
         .tn-table tr:hover { background: #fdfcff; }
 
@@ -2823,19 +3192,13 @@ const TenantsPage = () => {
         .tn-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
         .tn-status-badge.active { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
         .tn-status-badge.absconded { color: #ef4444; background: #fef2f2; border: 1px solid #fecaca; }
+        .tn-status-badge.checkedout { color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; }
         .tn-status-badge.pending { color: #d97706; background: #fffbeb; border: 1px solid #fde68a; }
         .tn-status-badge.other { color: #64748b; background: #f1f5f9; border: 1px solid #e2e8f0; }
 
         .tn-action-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; }
         .tn-action-btn:hover { background: #f8fafc; color: #0f172a; }
 
-        /* ── Icon-visibility safeguards ──────────────────────────
-           These rules exist because in some builds the flex layout
-           of .tn-action-btn / .tn-contact could shrink or hide the
-           lucide-react <svg> children (flex items shrink by default).
-           Forcing an explicit size + flex-shrink:0 + inline-block
-           guarantees the icon always occupies visible space
-           regardless of surrounding layout or a stale bundler cache. */
         .tn-action-btn svg { width: 16px !important; height: 16px !important; flex-shrink: 0; display: inline-block; }
         .tn-contact svg { width: 14px !important; height: 14px !important; flex-shrink: 0; display: inline-block; }
 
@@ -2845,10 +3208,6 @@ const TenantsPage = () => {
         .tn-page-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
         .tn-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
 
-        /* ── Delete confirm button — white-to-red gradient ──────────
-           Starts white/light, eases into red left-to-right. On hover
-           it fills fully to a deeper red with white text, so it still
-           reads clearly as the destructive action. */
         .tn-delete-confirm-btn {
           background: linear-gradient(to right, #ffffff, #ef4444);
           color: #b91c1c;
@@ -2862,7 +3221,6 @@ const TenantsPage = () => {
           border-color: #dc2626;
         }
 
-        /* ── Pending Approvals banner ── */
         .tn-pending-header { display: flex; align-items: center; gap: 8px; padding: 16px 20px 4px; }
         .tn-pending-title { font-size: 15px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 8px; }
         .tn-pending-count { color: #d97706; background: #fffbeb; border: 1px solid #fde68a; border-radius: 20px; padding: 1px 10px; font-size: 12px; font-weight: 700; }
@@ -2895,23 +3253,7 @@ const TenantsPage = () => {
                   <UserPlus size={16} className="shrink-0" /> Check-In
                 </button>
               </DialogTrigger>
-              {/* Rounded on all four corners for a softer card look,
-                  matching the Branch/Rooms page dialogs. Widened to a
-                  landscape-style modal (matches Branch page) so the
-                  paired fields inside TenantForm can sit side-by-side.
-                  `[&>button]:hidden` hides shadcn's default top-right
-                  "X" close icon — it was rendering as an unstyled/
-                  overflowing square in some builds. This dialog already
-                  has a proper Cancel button in the footer below. */}
               <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
-                {/* Scrolling lives on this inner wrapper, not on DialogContent
-                    itself. DialogContent clips to its rounded-2xl corners
-                    (overflow-hidden), so the native scrollbar stays contained
-                    inside the rounded shape instead of running flush past the
-                    top/bottom corners. `relative` here lets the custom close
-                    button below anchor to this padded box (not the raw
-                    DialogContent edge), so it sits inset from the corner
-                    instead of overflowing it. */}
                 <div className="relative max-h-[90vh] overflow-y-auto p-6">
                   <DialogClose asChild>
                     <button
@@ -2952,10 +3294,6 @@ const TenantsPage = () => {
           </div>
         </div>
 
-        {/* ── Pending Approvals — public self-registrations awaiting a
-            room/bed assignment. Shown only when there's at least one,
-            so the page reads exactly like before for hostels that
-            never use the public registration form. ── */}
         {pendingTenants.length > 0 && (
           <div className="tn-table-container" style={{ marginBottom: 24 }}>
             <div className="tn-pending-header">
@@ -2973,7 +3311,7 @@ const TenantsPage = () => {
                     <th>CONTACT</th>
                     <th>ID PROOF</th>
                     <th>REQUESTED ON</th>
-                    <th className="text-center">ACTION</th>
+                    <th style={{ textAlign: 'center' }}>ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3038,7 +3376,26 @@ const TenantsPage = () => {
             </SelectContent>
           </Select>
 
-          <button className="tn-clear-btn" onClick={() => { setSearch(""); setSelectedBranch(isWarden ? String(branchId ?? "all") : "all"); setPage(0); }}>
+          {/* ── NEW: Status filter. This is what actually lets you pull
+             up "just Checked Out" or "just Absconded" tenants instead
+             of hunting for them across the mixed, paginated list. ── */}
+          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+            <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="Active">Active</SelectItem>
+              <SelectItem value="Checked_Out">Checked Out</SelectItem>
+              <SelectItem value="Absconded">Absconded</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <button className="tn-clear-btn" onClick={() => {
+            setSearch("");
+            setSelectedBranch(isWarden ? String(branchId ?? "all") : "all");
+            setSelectedStatus("all");
+            setPage(0);
+            loadTenants(isWarden ? String(branchId ?? "all") : "all", 0, "", "all");
+          }}>
             <RefreshCw size={14} className="shrink-0" /> Clear Filters
           </button>
         </div>
@@ -3056,16 +3413,16 @@ const TenantsPage = () => {
                   <th>CHECK-IN DATE</th>
                   <th>RENT (₹)</th>
                   <th>STATUS</th>
-                  <th className="text-center">ACTIONS</th>
+                  <th style={{ textAlign: 'center' }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr><td colSpan={8} className="text-center py-12 text-slate-400">Loading tenants...</td></tr>
-                ) : paginatedTenants.length === 0 ? (
+                ) : tenants.length === 0 ? (
                   <tr><td colSpan={8} className="text-center py-12 text-slate-400">No tenants found.</td></tr>
                 ) : (
-                  paginatedTenants.map((t) => {
+                  tenants.map((t) => {
                     const avatarColor = COLORS[t.id % COLORS.length];
                     const rNo = roomNo(t.roomId);
                     const bNo = bedNo(t.bedId);
@@ -3088,6 +3445,7 @@ const TenantsPage = () => {
                     const statusClass =
                       t.status === "Active" ? "active" :
                       t.status === "Absconded" ? "absconded" :
+                      t.status === "Checked_Out" ? "checkedout" :
                       t.status === "PENDING" ? "pending" : "other";
 
                     return (
@@ -3126,9 +3484,10 @@ const TenantsPage = () => {
                             <div className={`w-1.5 h-1.5 rounded-full ${
                               t.status === 'Active' ? 'bg-green-500' :
                               t.status === 'Absconded' ? 'bg-red-500' :
+                              t.status === 'Checked_Out' ? 'bg-blue-500' :
                               t.status === 'PENDING' ? 'bg-amber-500' : 'bg-slate-400'
                             }`}></div>
-                            {t.status}
+                            {statusLabel(t.status)}
                           </div>
                         </td>
                         <td>
@@ -3170,19 +3529,23 @@ const TenantsPage = () => {
             </table>
           </div>
 
+          {/* ── CHANGED: pagination footer now driven entirely by
+             server-reported totalElements/totalPages, not by the
+             length of an in-memory full list. goToPage() fetches the
+             requested page directly rather than slicing locally. ── */}
           <div className="tn-pagination">
             <div className="tn-page-info">
-              Showing {filteredTenants.length === 0 ? 0 : page * PAGE_SIZE + 1} to {Math.min((page + 1) * PAGE_SIZE, filteredTenants.length)} of {filteredTenants.length} tenants
+              Showing {totalElements === 0 ? 0 : page * PAGE_SIZE + 1} to {Math.min((page + 1) * PAGE_SIZE, totalElements)} of {totalElements} tenants
             </div>
             <div className="tn-page-controls">
-              <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+              <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={page === 0} onClick={() => goToPage(page - 1)}>
                 <ChevronLeft className="h-4 w-4 shrink-0" />
               </Button>
               <button className="tn-page-btn active">{page + 1}</button>
-              {page + 1 < Math.ceil(filteredTenants.length / PAGE_SIZE) && (
-                <button className="tn-page-btn" onClick={() => setPage(page + 1)}>{page + 2}</button>
+              {page + 1 < totalPages && (
+                <button className="tn-page-btn" onClick={() => goToPage(page + 1)}>{page + 2}</button>
               )}
-              <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={(page + 1) * PAGE_SIZE >= filteredTenants.length} onClick={() => setPage(p => p + 1)}>
+              <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={page + 1 >= totalPages} onClick={() => goToPage(page + 1)}>
                 <ChevronRight className="h-4 w-4 shrink-0" />
               </Button>
             </div>
@@ -3191,17 +3554,8 @@ const TenantsPage = () => {
 
       </div>
 
-      {/* Edit Dialog — `[&>button]:hidden` hides shadcn's default
-          top-right "X" close icon (it was rendering as an unstyled/
-          overflowing square). A proper Cancel button already lives
-          in the footer below. */}
+      {/* Edit Dialog */}
       <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) dispatch({ type: "reset" }); }}>
-        {/* Widened to match the Add Tenant dialog's landscape layout.
-            Scrolling lives on the inner wrapper (not DialogContent) so the
-            native scrollbar is clipped by the rounded-2xl corners instead
-            of overlapping them at the top/bottom. `relative` here anchors
-            the custom close button to this padded box so it sits inset
-            from the corner instead of overflowing it. */}
         <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
           <div className="relative max-h-[90vh] overflow-y-auto p-6">
             <DialogClose asChild>
@@ -3232,16 +3586,8 @@ const TenantsPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* View Dialog — `[&>button]:hidden` hides shadcn's default
-          top-right "X" close icon. This dialog had no footer button
-          before, so a proper "Close" button has been added below to
-          replace it. */}
+      {/* View Dialog */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        {/* Scrolling lives on the inner wrapper (not DialogContent) so the
-            native scrollbar is clipped by the rounded-2xl corners instead
-            of overlapping them at the top/bottom. `relative` anchors the
-            custom close button to this padded box so it sits inset from
-            the corner instead of overflowing it. */}
         <DialogContent className="max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
           <div className="relative max-h-[90vh] overflow-y-auto p-6">
             <DialogClose asChild>
@@ -3279,7 +3625,7 @@ const TenantsPage = () => {
                   ["Branch",         branchName(viewTenant.roomId)],
                   ["Room",           roomNo(viewTenant.roomId)],
                   ["Bed",            bedNo(viewTenant.bedId)],
-                  ["Status",         viewTenant.status],
+                  ["Status",         statusLabel(viewTenant.status)],
                   ["Check-in",       viewTenant.checkInDate],
                   ["Check-out",      viewTenant.checkOutDate ?? "-"],
                 ] as [string, string][]).map(([label, val]) => (
@@ -3304,6 +3650,13 @@ const TenantsPage = () => {
                     </p>
                   </div>
                 )}
+                {viewTenant.status === "Checked_Out" && (
+                  <div className="mt-1 rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-800 space-y-1">
+                    <p className="font-semibold flex items-center gap-1">
+                      <FileCheck2 className="h-3 w-3 shrink-0" /> This tenant has checked out
+                    </p>
+                  </div>
+                )}
                 {viewTenant.status === "PENDING" && (
                   <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 space-y-1">
                     <p className="font-semibold flex items-center gap-1">
@@ -3320,9 +3673,7 @@ const TenantsPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Mark Absconded Dialog — `[&>button]:hidden` hides shadcn's
-          default top-right "X" close icon. A proper Cancel button
-          already lives in the footer below. */}
+      {/* Mark Absconded Dialog */}
       <Dialog open={abscondOpen} onOpenChange={(open) => {
         setAbscondOpen(open);
         if (!open) { setAbscondTarget(null); setAbscondReason(""); }
@@ -3367,13 +3718,7 @@ const TenantsPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── APPROVE & ALLOCATE DIALOG ──
-          Assigns a room/bed + rent details to a PENDING tenant and
-          flips their status to Active. Mirrors the branch/room/bed
-          cascade used in TenantForm, but scoped down to just what an
-          already-submitted registration still needs. `[&>button]:hidden`
-          hides shadcn's default top-right "X" close icon; a proper
-          close button + Cancel/Approve footer are provided below. */}
+      {/* APPROVE & ALLOCATE DIALOG */}
       <Dialog open={approveOpen} onOpenChange={(open) => {
         setApproveOpen(open);
         if (!open) { setApproveTarget(null); setApproveForm(EMPTY_APPROVE_FORM); }
@@ -3426,6 +3771,7 @@ const TenantsPage = () => {
                     <SelectContent>
                       {rooms
                         .filter((r) => Number(getRoomUnitId(r)) === Number(approveForm.branchId))
+                        .filter((r) => beds.filter((b) => Number(b.roomId) === Number(r.id) && !b.isOccupied).length > 0)
                         .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -3489,23 +3835,7 @@ const TenantsPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* CONFIRM DIALOG — replaces window.confirm() for destructive actions
-          (currently: delete tenant). Uses the same Dialog component as the
-          rest of the page for visual consistency, with a bold title, an
-          optional "This action cannot be undone." subtext.
-
-          UPDATED: the confirm button for `danger` actions (Delete) now uses
-          the `.tn-delete-confirm-btn` class defined in the <style> block
-          above — a white-to-red left-to-right gradient that deepens to a
-          solid red with white text on hover — instead of shadcn's flat
-          `destructive` variant. `variant` is intentionally left unset
-          (undefined) in the danger case so the custom className fully
-          controls the look without shadcn's default red fighting it.
-
-          Still has `[&>button]:hidden` on DialogContent to hide shadcn's
-          default top-right "X" close icon, matching the Rooms & Beds
-          delete-confirmation style (just Cancel / Delete, no separate
-          close icon). */}
+      {/* CONFIRM DIALOG */}
       <Dialog open={!!confirmState} onOpenChange={(open) => { if (!open) setConfirmState(null); }}>
         <DialogContent className="max-w-sm rounded-2xl [&>button]:hidden">
           <DialogHeader>

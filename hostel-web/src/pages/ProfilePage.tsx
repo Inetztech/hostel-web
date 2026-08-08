@@ -1,4 +1,3 @@
-// src/pages/ProfilePage.tsx
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getUserRole, logout } from "@/lib/auth";
@@ -13,7 +12,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/* ── Role badge config ── */
 const roleMeta: Record<string, { label: string; bg: string; text: string; ring: string; dot: string; accent: string }> = {
   SUPER_ADMIN: { label: "Super Admin", bg: "bg-violet-50",  text: "text-violet-700",  ring: "ring-violet-200",  dot: "bg-violet-500",  accent: "from-violet-500 to-purple-600" },
   ADMIN:       { label: "Admin",       bg: "bg-blue-50",    text: "text-blue-700",    ring: "ring-blue-200",    dot: "bg-blue-500",    accent: "from-blue-500 to-indigo-600" },
@@ -31,21 +29,18 @@ export default function ProfilePage() {
   };
   const navigate = useNavigate();
 
-  /* ── Profile state — populated from GET /users/me ── */
   const [name,  setName]  = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [branchName, setBranchName] = useState("");
   const [loadingProfile, setLoadingProfile] = useState(true);
 
-  /* ── Edit mode ── */
   const [editing,    setEditing]    = useState(false);
   const [editName,   setEditName]   = useState("");
   const [editPhone,  setEditPhone]  = useState("");
   const [saving,     setSaving]     = useState(false);
   const [saveMsg,    setSaveMsg]    = useState<"" | "success" | "error">("");
 
-  /* ── Change-password form ── */
   const [showPwd,    setShowPwd]    = useState(false);
   const [oldPwd,     setOldPwd]     = useState("");
   const [newPwd,     setNewPwd]     = useState("");
@@ -57,10 +52,6 @@ export default function ProfilePage() {
   const [pwdMsg,     setPwdMsg]     = useState<"" | "success" | "mismatch" | "short" | "empty" | "error">("");
   const [pwdErrorText, setPwdErrorText] = useState("");
 
-  /* ── Subscription (ADMIN only) ──
-     Sourced from GET /api/subscriptions/me — always reachable even when
-     the subscription itself is expired, since it's whitelisted in
-     SubscriptionAccessFilter. */
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState(false);
@@ -110,7 +101,6 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [isAdmin]);
 
-  /* Sync edit fields whenever the loaded profile changes */
   useEffect(() => {
     setEditName(name);
     setEditPhone(phone);
@@ -168,7 +158,6 @@ export default function ProfilePage() {
     }
   }
 
-  /* ── Computed display values ── */
   const displayName   = name       || "—";
   const displayEmail  = email      || "—";
   const displayPhone  = phone      || "—";
@@ -176,16 +165,10 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-10 mt-2">
-
-      {/* ══════════════════════════════════════════
-          AVATAR + IDENTITY CARD
-      ══════════════════════════════════════════ */}
       <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden">
-        {/* Gradient banner — role-tinted */}
         <div className={cn("h-32 bg-gradient-to-r", meta.accent)} />
 
         <div className="px-8 pb-8 relative">
-          {/* Avatar row */}
           <div className="flex justify-between items-end -mt-12 mb-5">
             <div className="relative">
               <div className="h-[100px] w-[100px] rounded-full flex items-center justify-center text-[34px] font-semibold text-orange-500 bg-[#fff4ed] shadow-sm ring-4 ring-white">
@@ -204,7 +187,6 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* ── View / Edit mode ── */}
           {editing ? (
             <div className="space-y-4 max-w-xl">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -275,7 +257,6 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {/* Save feedback */}
           {saveMsg === "success" && (
             <div className="mt-5 flex items-center gap-2 text-emerald-600 text-sm bg-emerald-50 px-4 py-3 rounded-xl max-w-xl">
               <CheckCircle2 className="h-4 w-4 shrink-0" /> Profile updated successfully
@@ -289,9 +270,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════
-          SUBSCRIPTION & BILLING SECTION (ADMIN only)
-      ══════════════════════════════════════════ */}
       {isAdmin && (
         <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm">
           <div className="p-6 border-b border-gray-50 flex items-center justify-between gap-3 flex-wrap">
@@ -388,9 +366,6 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════
-          ACCOUNT DETAILS SECTION
-      ══════════════════════════════════════════ */}
       <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm">
         <div className="p-6 border-b border-gray-50 flex items-center gap-3">
           <div className="h-10 w-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
@@ -423,9 +398,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════
-          SECURITY SECTION
-      ══════════════════════════════════════════ */}
       <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm">
         <div className="p-6 border-b border-gray-50 flex items-center gap-3">
           <div className="h-10 w-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
@@ -511,9 +483,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════
-          SIGN OUT
-      ══════════════════════════════════════════ */}
       <div className="flex justify-end pt-2 pb-6">
         <button
           onClick={logout}
@@ -527,7 +496,6 @@ export default function ProfilePage() {
   );
 }
 
-/* ── Info box component for the account-details grid ── */
 function DetailBox({
   icon: Icon, label, value, valueColor = "text-gray-900", iconBg = "bg-gray-50", iconColor = "text-gray-500", loading = false,
 }: any) {
@@ -548,7 +516,6 @@ function DetailBox({
   );
 }
 
-/* ── Password input ── */
 function PwdInput({
   label, value, onChange, show, toggleShow,
 }: {
@@ -580,7 +547,6 @@ function PwdInput({
   );
 }
 
-/* ── Password strength indicator ── */
 function PasswordStrength({ password }: { password: string }) {
   const len   = password.length;
   const hasUpper = /[A-Z]/.test(password);
@@ -599,7 +565,7 @@ function PasswordStrength({ password }: { password: string }) {
   return (
     <div className="space-y-1.5 pt-1">
       <div className="flex gap-1">
-        {levels.map((l, i) => (
+        {levels.map((_, i) => (
           <div
             key={i}
             className={cn(
@@ -616,7 +582,6 @@ function PasswordStrength({ password }: { password: string }) {
   );
 }
 
-/* ── Feedback message ── */
 function FeedbackMsg({ type, message }: { type: "success" | "error"; message: string }) {
   return (
     <div className={cn(

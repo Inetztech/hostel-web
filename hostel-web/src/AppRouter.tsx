@@ -36,12 +36,14 @@ import MaintenancePage from "@/pages/MaintenancePage";
 import SubscriptionPage from "@/pages/SubscriptionPage";
 
 import HomePage from "./pages/Home";
+import DamagePage from "@/pages/DamagePage";
 
 export const router = createBrowserRouter([
 
   // ── Public ──────────────────────────────────────────────────────────────
   { path: "/",             element: <HomePage /> },
-  { path: "/login",             element: <Login /> },
+  { path: "/login",        element: <Login /> },
+  { path: "/admin",        element: <Navigate to="/dashboard" replace /> },
   { path: "/unauthorized", element: <Unauthorized /> },
 
   // ── ONE shared layout tree — all authenticated roles ────────────────────
@@ -86,6 +88,16 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
+
+      {
+        path: "/damages",
+        element: (
+          <ProtectedRoute allow={["ADMIN", "WARDEN"]} permission="MANAGE_DAMAGES">
+            <DamagePage />
+          </ProtectedRoute>
+        ),
+      },
+
       // {
       //   path: "/super-admin/subscriptions",
       //   element: (
@@ -324,4 +336,13 @@ export const router = createBrowserRouter([
 
   // ── 404 ─────────────────────────────────────────────────────────────────
   { path: "*", element: <NotFound /> },
-]);
+], {
+  future: {
+    v7_startTransition: true,
+    v7_relativeSplatPath: true,
+    v7_fetcherPersist: true,
+    v7_normalizeFormMethod: true,
+    v7_partialHydration: true,
+    v7_skipActionErrorRevalidation: true,
+  }
+});

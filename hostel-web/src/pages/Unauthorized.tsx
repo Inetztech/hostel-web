@@ -1,12 +1,6 @@
 import { Link } from "react-router-dom";
 import { getUserRole, getUserPermissions } from "@/lib/auth";
 
-/**
- * FIX (RBAC): distinguishes "you have permissions, just not this one" from
- * "you have been granted no permissions at all" — the latter needs the
- * specific messaging required by the RBAC spec ("No permissions have been
- * assigned. Please contact the Super Admin / your Administrator.").
- */
 export default function Unauthorized() {
   const role = getUserRole();
   const noPermissionsAssigned = role !== "SUPER_ADMIN" && getUserPermissions().length === 0;

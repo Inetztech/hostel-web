@@ -303,6 +303,10 @@ const RoomsPage = () => {
   const updateRoomEntry = (key: string, patch: Partial<RoomEntryValue>) =>
     setFlatRoomEntries(prev => prev.map(e => (e.key === key ? { ...e, ...patch } : e)));
 
+  // Local search filter over the branch strip in the top bar (design-only,
+  // narrows the pills shown — does not touch the room list/API).
+  const [branchSearchTerm, setBranchSearchTerm] = useState("");
+
   const [wardenBranchName, setWardenBranchName] = useState("");
 
   const role     = getUserRole()?.toUpperCase();
@@ -325,7 +329,7 @@ const RoomsPage = () => {
      a 401 that recovered, a race with auth token attachment, etc.),
      `branches` stayed `[]` forever and the "Select Branch" dropdown in
      Add Room would show "No branches found" for the rest of the
-     session — even though the sidebar (populated from the same array)
+     session — even though the top bar (populated from the same array)
      might have rendered correctly if the retry happened to succeed on
      a later unrelated re-render.
 
@@ -681,6 +685,10 @@ const RoomsPage = () => {
     (r.unitName && r.unitName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const visibleBranches = branchSearchTerm.trim()
+    ? branches.filter(b => (b.unitName || "").toLowerCase().includes(branchSearchTerm.toLowerCase()))
+    : branches;
+
   /* ================= UI ================= */
   return (
     <div className="min-h-full bg-[#fcfcfc] text-gray-900 font-sans pb-10">
@@ -688,18 +696,19 @@ const RoomsPage = () => {
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         .rm-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: 1600px; margin: 0 auto; }
 
-        .rm-layout { display: flex; gap: 24px; align-items: flex-start; margin-top: 12px; }
-        .rm-sidebar { width: 260px; flex-shrink: 0; background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; overflow: hidden; }
+        .rm-layout { display: flex; flex-direction: column; gap: 24px; align-items: stretch; margin-top: 12px; }
+        .rm-sidebar { width: 100%; flex-shrink: 0; background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; overflow: hidden; }
         .rm-main { flex: 1; min-width: 0; }
 
-        .rm-sidebar-title { font-size: 14px; font-weight: 700; color: #0f172a; padding: 16px 20px 12px; }
-        .rm-sidebar-search { margin: 0 20px 16px; display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; }
+        .rm-sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 12px; flex-wrap: wrap; gap: 12px; }
+        .rm-sidebar-title { font-size: 14px; font-weight: 700; color: #0f172a; padding: 0; }
+        .rm-sidebar-search { margin: 0; width: 300px; display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; max-width: 100%; }
         .rm-sidebar-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
 
-        .rm-branch-list { padding-bottom: 16px; }
-        .rm-branch-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; cursor: pointer; transition: background 0.2s; }
+        .rm-branch-list { display: flex; gap: 12px; overflow-x: auto; padding: 0 20px 16px; scrollbar-width: thin; }
+        .rm-branch-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-radius: 8px; cursor: pointer; transition: background 0.2s; border: 1px solid #f1f5f9; white-space: nowrap; flex-shrink: 0; }
         .rm-branch-item:hover { background: #f8fafc; }
-        .rm-branch-item.active { background: #f3e8ff; border-left: 3px solid #5200FF; padding-left: 17px; }
+        .rm-branch-item.active { background: #f3e8ff; border: 1px solid #5200FF; }
 
         .rm-branch-item-left { display: flex; align-items: center; gap: 12px; }
         .rm-branch-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
@@ -757,13 +766,21 @@ const RoomsPage = () => {
 
         <div className="rm-layout">
 
-          {/* Left Sidebar — branch filter, wired to the real selectedBranch/page state */}
+          {/* Top Bar — branch filter, wired to the real selectedBranch/page state */}
           <div className="rm-sidebar">
-            <div className="rm-sidebar-title">Branches</div>
-            {/* <div className="rm-sidebar-search">
-              <Search size={14} color="#94a3b8" />
-              <input type="text" placeholder="Search branches..." />
-            </div> */}
+            <div className="rm-sidebar-header">
+              <div className="rm-sidebar-title">Branches</div>
+              <div className="rm-sidebar-search">
+                <Search size={14} color="#94a3b8" />
+                <input
+                  type="text"
+                  placeholder="Search branches..."
+                  value={branchSearchTerm}
+                  onChange={(e) => setBranchSearchTerm(e.target.value)}
+                  disabled={isWarden}
+                />
+              </div>
+            </div>
 
             <div className="rm-branch-list">
               <div
@@ -778,7 +795,7 @@ const RoomsPage = () => {
                 </div>
               </div>
 
-              {branches.map(branch => {
+              {visibleBranches.map(branch => {
                 const bgColors   = ['#eff6ff', '#dcfce7', '#ffedd5', '#f3e8ff', '#ffe4e6', '#f1f5f9'];
                 const textColors = ['#3b82f6', '#22c55e', '#f97316', '#8b5cf6', '#e11d48', '#64748b'];
                 const idx = branch.id % 6;
@@ -805,7 +822,7 @@ const RoomsPage = () => {
           {/* Main Content Area */}
           <div className="rm-main">
             <div className="rm-main-header">
-              {/* <button className="rm-btn-outline"><Download size={16} /> Export</button> */}
+              <button className="rm-btn-outline"><Download size={16} /> Export</button>
 
               {isAdmin && (
                 <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) resetAddForm(); }}>

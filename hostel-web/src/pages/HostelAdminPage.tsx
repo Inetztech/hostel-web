@@ -25,14 +25,9 @@ import {
   Wallet, FileText, BedDouble, DoorOpen, User as UserIcon, CheckCircle2, PauseCircle, Ban,
 } from "lucide-react";
 
-// ── Add-form: NO adminPassword field anymore. The backend auto-generates
-// a random password, hashes it before saving, and emails the PLAIN password
-// to adminEmail. Nothing is ever typed in here for a brand-new admin.
 interface CombinedForm {
   name: string; address: string; city: string;
   totalBeds: string; duration: string; document: File | null;
-  /** Price per bed (INR) as typed into the form. REQUIRED — validated
-   *  in handleAdd/handleEdit as a positive number before submission. */
   bedPrice: string;
   adminName: string; adminPhone: string; adminEmail: string;
 }
@@ -43,9 +38,6 @@ const EMPTY_FORM: CombinedForm = {
   adminName: "", adminPhone: "", adminEmail: "",
 };
 
-// ── Edit-form: keeps an OPTIONAL adminPassword field — resetting an
-// existing admin's password is a distinct, deliberate action (leave blank
-// to keep the current password), separate from initial account creation.
 interface EditCombinedForm extends CombinedForm {
   adminPassword: string;
 }
@@ -54,8 +46,6 @@ const EMPTY_EDIT_FORM: EditCombinedForm = {
   adminPassword: "",
 };
 
-/** Duration options offered on the Hostel + Admin form — maps a display
- *  label to the number of months sent to the backend as durationMonths. */
 const DURATION_OPTIONS: { label: string; months: number }[] = [
   { label: "1 Month",  months: 1 },
   { label: "3 Months", months: 3 },
@@ -63,16 +53,12 @@ const DURATION_OPTIONS: { label: string; months: number }[] = [
   { label: "1 Year",   months: 12 },
 ];
 
-/** The three raw backend status values (HostelStatus enum) a hostel can be
- *  moved to from the row's "More" menu, along with the display label and
- *  icon used for that action. Order here is the order shown in the menu. */
 const STATUS_ACTIONS: { status: "ACTIVE" | "INACTIVE" | "SUSPENDED"; label: string; icon: typeof CheckCircle2; color: string }[] = [
   { status: "ACTIVE",    label: "Mark Active",    icon: CheckCircle2, color: "#16a34a" },
   { status: "INACTIVE",  label: "Mark Inactive",  icon: PauseCircle,  color: "#f59e0b" },
   { status: "SUSPENDED", label: "Suspend Hostel", icon: Ban,          color: "#ef4444" },
 ];
 
-/** Indian Rupee formatter for bed price / total price display. */
 const formatINR = (amount: number): string =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -80,14 +66,6 @@ const formatINR = (amount: number): string =>
     maximumFractionDigits: 0,
   }).format(amount || 0);
 
-/** Turns a relative documentUrl like "/uploads/hostel-documents/xyz.pdf"
- *  (as returned by SuperAdminServiceImpl#saveHostelDocument) into an
- *  absolute URL against the ACTUAL backend origin — not the Vite dev
- *  server this page is served from. Reads the origin straight off the
- *  shared axios instance's own baseURL (e.g. "http://localhost:8080/api"
- *  -> "http://localhost:8080"), so it always matches wherever the API
- *  really lives instead of a hardcoded guess. Already-absolute URLs
- *  (http(s)://...) pass through untouched. */
 const resolveDocumentUrl = (url?: string | null): string | null => {
   if (!url) return null;
   if (/^https?:\/\//i.test(url)) return url;
@@ -101,8 +79,6 @@ const resolveDocumentUrl = (url?: string | null): string | null => {
   return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
 };
 
-/** Small badge showing the per-bed price, or "No Price Set" if none.
- *  Kept for older records created before bedPrice became mandatory. */
 function PriceBadge({ bedPrice }: { bedPrice: number }) {
   if (!bedPrice) {
     return (
@@ -130,46 +106,17 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ── Display-row type ────────────────────────────────────────────────────
-// Table rows are HostelAdmin plus computed fields (activeTenantCount,
-// totalPrice, etc.) AND a display-friendly status ("Active" instead of
-// the raw "ACTIVE"). That reassigned `status` is a plain string, which is
-// NOT assignable back to HostelAdmin.status (the strict HostelStatus
-// union) — that mismatch was the source of the TS errors on AdminBadge /
-// openView / openEdit. This type documents the real shape of a row.
-//
-// NOTE on beds: `totalBeds` (from HostelAdminResponse) is the ACTUAL bed
-// count derived from rooms/beds created under this hostel — it's 0 until
-// rooms are built out. `capacityBeds` is the bed CAPACITY typed into the
-// Add/Edit form at hostel creation time. These are two different numbers
-// and must not be conflated. Occupancy ("x/y Beds") must always be shown
-// against `totalBeds` (real beds that exist), not `capacityBeds` (a
-// manually declared target) — otherwise the fraction implies more beds
-// physically exist than actually do.
 type EnrichedHostel = Omit<HostelAdmin, "status"> & {
   activeTenantCount: number;
-  /** Count of Branch records under this hostel (via branchId/hostelName match). */
   branchCount: number;
   totalRooms: number;
   totalBeds: number;
   occupiedBeds: number;
-  /** Bed capacity entered on the Add/Edit form (distinct from totalBeds above). */
   capacityBeds: number;
-  /** Price per bed (INR), set directly on this screen — 0 if not set (legacy records only). */
   bedPrice: number;
-  /** Number of months this hostel's plan/duration covers, as chosen on
-   *  the Add/Edit form (1 / 3 / 6 / 12). Defaults to 1 for legacy
-   *  records that predate this field. */
   durationMonths: number;
-  /** capacityBeds * bedPrice * durationMonths — the full contract value
-   *  for this hostel over its chosen duration (NOT just a monthly
-   *  figure — e.g. 100 beds × ₹100/bed × 3 months = ₹30,000). */
   totalPrice: number;
-  /** Display-friendly status ("Active" / "Inactive" / "Suspended"). */
   status: string;
-  /** Raw backend enum value ("ACTIVE" / "INACTIVE" / "SUSPENDED"), kept
-   *  alongside the display status so status-change calls always send the
-   *  exact value the backend HostelStatus enum expects. */
   rawStatus: "ACTIVE" | "INACTIVE" | "SUSPENDED";
   city: string;
 };
@@ -191,8 +138,6 @@ function AdminBadge({ hostel }: { hostel: EnrichedHostel }) {
   );
 }
 
-/** Normalizes a raw backend status ("ACTIVE"/"INACTIVE"/"SUSPENDED", any
- *  casing) into the display label shown in the table/badges. */
 const normalizeHostelStatus = (status?: string | null): string | undefined => {
   if (!status) return undefined;
   switch (status.toUpperCase()) {
@@ -203,27 +148,12 @@ const normalizeHostelStatus = (status?: string | null): string | undefined => {
   }
 };
 
-/** Inverse of normalizeHostelStatus — coerces whatever's on the record
- *  into one of the three raw enum values the backend expects, defaulting
- *  to ACTIVE for legacy/unset records. */
 const toRawHostelStatus = (status?: string | null): "ACTIVE" | "INACTIVE" | "SUSPENDED" => {
   const upper = (status || "").toUpperCase();
   if (upper === "INACTIVE" || upper === "SUSPENDED") return upper;
   return "ACTIVE";
 };
 
-// ── CSV export helpers ──────────────────────────────────────────────────
-// Escapes a single value for safe inclusion in a CSV cell (wraps in quotes,
-// doubles any embedded quotes) — handles names/addresses that contain
-// commas, quotes, or newlines without corrupting the file.
-/** Builds the Hostel + Admin submission payload. When a document file is
- *  attached, this returns multipart FormData (required to send a file);
- *  otherwise it returns the plain JSON request body.
- *
- *  NOTE: adminPassword is OPTIONAL now. On Add, it's simply never present
- *  in the base object — the backend generates + emails one. On Edit, it's
- *  only present if the user typed a new one (reset flow); undefined/blank
- *  means "keep current password" per the backend contract. */
 function buildHostelAdminPayload(
   base: Omit<HostelAdminRequest, "document">,
   document: File | null
@@ -247,7 +177,6 @@ function csvEscape(value: unknown): string {
 
 function downloadCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const lines = [headers, ...rows].map(row => row.map(csvEscape).join(","));
-  // Leading BOM so Excel opens UTF-8 CSVs (₹, accented characters, etc.) correctly.
   const csvContent = "\uFEFF" + lines.join("\r\n");
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -260,15 +189,6 @@ function downloadCsv(filename: string, headers: string[], rows: (string | number
   URL.revokeObjectURL(url);
 }
 
-/** Live "Total Price" preview shown inside the Add/Edit forms as the user
- *  types a bed count / price per bed and picks a duration —
- *  totalBeds * bedPrice * durationMonths. This is the FULL contract
- *  value for the chosen duration (e.g. 100 beds × ₹100/bed × 3 months
- *  = ₹30,000), not a flat monthly figure — so changing the duration
- *  dropdown from "1 Month" to "3 Months" or "6 Months" correctly scales
- *  the total shown here (and, after computed the same way below in
- *  enrichedHostels, everywhere else it's displayed: the table row,
- *  the View dialog, and the CSV export). */
 function TotalPricePreview({ totalBeds, bedPrice, durationMonths }: {
   totalBeds: string; bedPrice: string; durationMonths: string;
 }) {
@@ -300,24 +220,16 @@ const HostelAdminPage = () => {
   const [beds, setBeds] = useState<Bed[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Branch/Room/Bed drill-down dialog — opened by clicking the
-  // "Branch/Tenant/Bed/Room" cell in the table.
   const [bedDetailsOpen, setBedDetailsOpen] = useState(false);
   const [bedDetailsHostel, setBedDetailsHostel] = useState<EnrichedHostel | null>(null);
 
-  // Pagination & Filtering
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Status");
   const [cityFilter, setCityFilter] = useState("All Cities");
-  // FIX: "Filter" button previously had no onClick — it just sat there.
-  // The filter row was always rendered anyway, so the button did nothing.
-  // Now it toggles visibility of the filter row, giving it a real purpose
-  // (and letting users collapse it to reclaim space once filters are set).
   const [showFilters, setShowFilters] = useState(true);
 
-  // Dialogs
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState<CombinedForm>(EMPTY_FORM);
@@ -328,9 +240,6 @@ const HostelAdminPage = () => {
   const [viewOpen, setViewOpen] = useState(false);
   const [viewHostel, setViewHostel] = useState<EnrichedHostel | null>(null);
 
-  // Tracks which hostel id currently has a status-change request in
-  // flight, so its row's "More" menu items can be disabled to prevent
-  // double-submits while the call is pending.
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
 
   const err = (e: any, fallback: string) =>
@@ -340,11 +249,11 @@ const HostelAdminPage = () => {
     setLoading(true);
     try {
       const [hList, tList, bList, rList, bedList] = await Promise.all([
-        fetchAllPages<HostelAdmin>((pg, size) => getAllHostelsWithAdmins(pg, size), 50).catch(() => []),
-        fetchAllPages<Tenant>((pg, size) => fetchTenants(pg, size), 100).catch(() => []),
-        fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size), 100).catch(() => []),
-        fetchAllPages<Room>((pg, size) => fetchRooms(pg, size), 100).catch(() => []),
-        fetchAllPages<Bed>((pg, size) => fetchBeds(pg, size), 200).catch(() => []),
+        fetchAllPages<HostelAdmin>((pg, size) => getAllHostelsWithAdmins(pg, size), 10).catch(() => []),
+        fetchAllPages<Tenant>((pg, size) => fetchTenants(pg, size), 10).catch(() => []),
+        fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size), 10).catch(() => []),
+        fetchAllPages<Room>((pg, size) => fetchRooms(pg, size), 10).catch(() => []),
+        fetchAllPages<Bed>((pg, size) => fetchBeds(pg, size), 10).catch(() => []),
       ]);
       setHostels(hList);
       setTenants(tList);
@@ -360,40 +269,37 @@ const HostelAdminPage = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  /* ── Computed Data ── */
   const activeTenants = tenants.filter(t => t.status === "Active");
 
+  // NOTE: totalRooms / totalBeds / occupiedBeds are computed locally by
+  // joining branches -> rooms -> beds (same pattern as getHostelHierarchy
+  // below), rather than trusting HostelAdmin.totalRooms / totalBeds /
+  // occupiedBeds from the backend. Those backend-computed fields were not
+  // being populated by getAllHostelsWithAdmins, which caused the
+  // "0/0 Beds · 0 Rooms" display even for hostels with branches and tenants.
   const enrichedHostels: EnrichedHostel[] = hostels.map((h) => {
     const hostelActiveTenants = activeTenants.filter(t =>
       (t as any).hostelId === h.id || (t as any).hostelName === h.name);
 
-    // Branches belonging to this hostel — matched the same way tenants are
-    // (by hostelId first, falling back to hostelName) since Branch records
-    // are scoped to a parent hostel just like tenants are.
     const hostelBranches = branches.filter(b =>
       (b as any).hostelId === h.id || (b as any).hostelName === h.name);
 
-    // FIX: "Total Beds" as entered on the Add/Edit form lives on
-    // h.capacityBeds. h.totalBeds is a DIFFERENT number — the count of
-    // beds actually created under this hostel's rooms (0 until rooms
-    // exist). Using the wrong one made the View dialog show "0" for a
-    // hostel that was clearly set up with a bed capacity.
+    const branchIds = new Set(hostelBranches.map(b => b.id));
+    const hostelRooms = rooms.filter(r => branchIds.has(r.unitId));
+    const roomIds = new Set(hostelRooms.map(r => r.id));
+    const hostelBeds = beds.filter(bd => roomIds.has(bd.roomId));
+
     const capacityBeds = h.capacityBeds ?? 0;
     const bedPrice = h.bedPrice ?? 0;
-    // FIX: totalPrice previously ignored durationMonths entirely
-    // (capacityBeds * bedPrice only), so picking "3 Months" or
-    // "6 Months" on the form never changed the total shown anywhere —
-    // it always displayed as if duration were 1 month. Defaults to 1
-    // for legacy records that predate this field.
     const durationMonths = h.durationMonths ?? 1;
 
     return {
       ...h,
       activeTenantCount: hostelActiveTenants.length,
       branchCount: hostelBranches.length,
-      totalRooms: h.totalRooms ?? 0,
-      totalBeds: h.totalBeds ?? 0,
-      occupiedBeds: h.occupiedBeds ?? 0,
+      totalRooms: hostelRooms.length,
+      totalBeds: hostelBeds.length,
+      occupiedBeds: hostelBeds.filter(bd => bd.isOccupied).length,
       capacityBeds,
       bedPrice,
       durationMonths,
@@ -420,15 +326,6 @@ const HostelAdminPage = () => {
 
   const cities = Array.from(new Set(enrichedHostels.map(h => h.city).filter(c => c && c !== "—")));
 
-  // FIX: "Export" button previously had no onClick at all. Now exports the
-  // *currently filtered* hostel list (respecting search/status/city, same
-  // rows the table is showing) as a CSV file the browser downloads directly.
-  // Includes bed capacity, actual bed count, price per bed, duration,
-  // branch count, and computed total price (which now correctly factors
-  // in duration — see enrichedHostels above). "Total Beds" here reports
-  // the REAL bed count (h.totalBeds, actual Bed rows created) rather than
-  // the declared capacity — "Bed Capacity" is exported as its own separate
-  // column so the two are never conflated.
   const handleExport = useCallback(() => {
     if (filteredHostels.length === 0) {
       toast.error("No hostels to export — adjust your filters and try again");
@@ -463,21 +360,16 @@ const HostelAdminPage = () => {
     toast.success(`Exported ${filteredHostels.length} hostel${filteredHostels.length === 1 ? "" : "s"}`);
   }, [filteredHostels]);
 
-  /* ── CRUD Handlers ── */
   const handleAdd = async () => {
     if (!form.name.trim())         { toast.error("Hostel name required"); return; }
     if (!form.address.trim())      { toast.error("Address required"); return; }
     if (!form.city.trim())         { toast.error("City required"); return; }
     if (!form.totalBeds || Number(form.totalBeds) <= 0) { toast.error("Total beds required"); return; }
     if (!form.duration)            { toast.error("Duration required"); return; }
-    // Price per bed is required — must be a positive number.
     if (!form.bedPrice || Number(form.bedPrice) <= 0) { toast.error("Price per bed is required"); return; }
     if (!form.adminName.trim())    { toast.error("Admin name required"); return; }
     if (!/^\d{10}$/.test(form.adminPhone)) { toast.error("Admin phone must be 10 digits"); return; }
     if (!form.adminEmail.trim())   { toast.error("Admin email required"); return; }
-    // NOTE: no admin password validation here anymore — the backend
-    // generates a random password, hashes it for storage, and emails the
-    // plain-text password to form.adminEmail. Nothing is typed by hand.
     setSubmitting(true);
     try {
       const payload = buildHostelAdminPayload({
@@ -486,7 +378,6 @@ const HostelAdminPage = () => {
         bedPrice: Number(form.bedPrice),
         adminName: form.adminName, adminPhone: form.adminPhone,
         adminEmail: form.adminEmail,
-        // adminPassword intentionally omitted — auto-generated server-side.
       }, form.document);
       await createHostelWithAdmin(payload);
       toast.success("Hostel created — login details emailed to the admin");
@@ -501,17 +392,11 @@ const HostelAdminPage = () => {
     setEditHostel(h);
     setEditForm({
       name: h.name, address: h.address, city: h.city || "",
-      // FIX: this was pre-filling from h.totalBeds (actual room/bed count,
-      // usually 0) instead of h.capacityBeds (the capacity that was
-      // actually set up). Left as-is, saving the edit form without
-      // touching this field would have silently overwritten the hostel's
-      // real bed capacity with 0.
       totalBeds: h.capacityBeds ? String(h.capacityBeds) : "",
       duration: h.durationMonths ? String(h.durationMonths) : "",
       document: null,
       bedPrice: h.bedPrice ? String(h.bedPrice) : "",
       adminName: h.adminName || "", adminPhone: h.adminPhone || "", adminEmail: h.adminEmail || "",
-      // Reset flow only — blank means "keep current password".
       adminPassword: "",
     });
     setEditOpen(true);
@@ -524,7 +409,6 @@ const HostelAdminPage = () => {
     if (!editForm.city.trim())    { toast.error("City required"); return; }
     if (!editForm.totalBeds || Number(editForm.totalBeds) <= 0) { toast.error("Total beds required"); return; }
     if (!editForm.duration)       { toast.error("Duration required"); return; }
-    // Price per bed is required — must be a positive number.
     if (!editForm.bedPrice || Number(editForm.bedPrice) <= 0) { toast.error("Price per bed is required"); return; }
     if (!editForm.adminName.trim()) { toast.error("Admin name required"); return; }
     if (!/^\d{10}$/.test(editForm.adminPhone)) { toast.error("Admin phone must be 10 digits"); return; }
@@ -537,8 +421,6 @@ const HostelAdminPage = () => {
         bedPrice: Number(editForm.bedPrice),
         adminName: editForm.adminName, adminPhone: editForm.adminPhone,
         adminEmail: editForm.adminEmail,
-        // Blank = keep current password, per backend contract. If filled,
-        // the backend should hash it before saving (same as before).
         adminPassword: editForm.adminPassword || undefined,
       }, editForm.document);
       await updateHostelWithAdmin(editHostel.id, payload);
@@ -558,12 +440,6 @@ const HostelAdminPage = () => {
     } catch (e: any) { err(e, "Delete failed — a hostel with branches assigned to it cannot be deleted"); }
   };
 
-  // NEW: moves a hostel to ACTIVE / INACTIVE / SUSPENDED via the dedicated
-  // status endpoint (see updateHostelStatus in lib/store + the backend
-  // SuperAdminServiceImpl#updateHostelStatus method). Deliberately a
-  // separate call from handleEdit/handleAdd — status changes are a single
-  // targeted action (available straight from the row menu) and shouldn't
-  // require opening the full Edit form.
   const handleStatusChange = async (h: EnrichedHostel, status: "ACTIVE" | "INACTIVE" | "SUSPENDED") => {
     if (h.rawStatus === status) return;
     setStatusUpdatingId(h.id);
@@ -582,9 +458,6 @@ const HostelAdminPage = () => {
 
   const openBedDetails = (h: EnrichedHostel) => { setBedDetailsHostel(h); setBedDetailsOpen(true); };
 
-  /** Builds Branch → Room → Bed (+ occupying Tenant, if any) for one
-   *  hostel, for the drill-down dialog. Matches the same
-   *  hostelId-then-hostelName fallback used elsewhere on this page. */
   const getHostelHierarchy = (h: EnrichedHostel) => {
     const hostelBranches = branches.filter(b =>
       (b as any).hostelId === h.id || (b as any).hostelName === h.name);
@@ -660,8 +533,6 @@ const HostelAdminPage = () => {
         .h-form-section { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin: 14px 0 6px; grid-column: 1 / -1; }
         .h-form-section:first-child { margin-top: 0; }
         .h-required { color: #ef4444; margin-left: 2px; }
-        /* Landscape form layout: two columns side by side instead of one
-           long vertical stack, so the dialog reads wide instead of tall. */
         .h-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
         .h-form-grid .h-span-2 { grid-column: 1 / -1; }
         .h-form-grid input, .h-form-grid button[role="combobox"] { border-radius: 999px !important; }
@@ -800,9 +671,6 @@ const HostelAdminPage = () => {
                       </td>
                       <td><AdminBadge hostel={h} /></td>
                       <td>
-                        {/* Clickable — opens a drill-down dialog listing
-                            every branch, its rooms, and bed-by-bed
-                            occupancy (with the tenant name if occupied). */}
                         <div
                           onClick={() => openBedDetails(h)}
                           title="Click to view branch, room & bed details"
@@ -816,12 +684,6 @@ const HostelAdminPage = () => {
                             <Users size={16} color="#94a3b8" />
                             <span>{h.activeTenantCount} Tenant{h.activeTenantCount === 1 ? "" : "s"}</span>
                           </div>
-                          {/* FIX: was occupiedBeds/capacityBeds (real vs. a
-                              manually-typed target), which could badly
-                              overstate how many beds actually exist
-                              (e.g. "1/100" when only a handful of Bed rows
-                              are really created). Now occupiedBeds/totalBeds
-                              — both are real counts from actual Bed rows. */}
                           <span style={{ fontSize: 11, color: "#3b82f6", fontWeight: 600, textDecoration: "underline", textDecorationStyle: "dotted" }}>
                             {h.occupiedBeds}/{h.totalBeds} Beds · {h.totalRooms} Room{h.totalRooms === 1 ? "" : "s"}
                           </span>
@@ -850,10 +712,6 @@ const HostelAdminPage = () => {
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {/* NEW: change hostel status (Active / Inactive /
-                                  Suspended) straight from the row menu. The
-                                  hostel's current status is skipped since
-                                  re-applying it would be a no-op. */}
                               {STATUS_ACTIONS.filter(a => a.status !== h.rawStatus).map(a => {
                                 const Icon = a.icon;
                                 return (
@@ -911,7 +769,6 @@ const HostelAdminPage = () => {
         </div>
       </div>
 
-      {/* View Dialog */}
       <Dialog open={viewOpen} onOpenChange={(open) => { setViewOpen(open); if (!open) setViewHostel(null); }}>
         <DialogContent className="sm:max-w-[420px] rounded-3xl">
           <DialogHeader>
@@ -926,12 +783,7 @@ const HostelAdminPage = () => {
               <div className="h-view-row"><span className="h-view-label">City</span><span className="h-view-value">{viewHostel.city || "—"}</span></div>
               <div className="h-view-row"><span className="h-view-label">Status</span><span className="h-view-value">{normalizeHostelStatus(viewHostel.status)}</span></div>
               <div className="h-view-row"><span className="h-view-label">Branches</span><span className="h-view-value">{viewHostel.branchCount ?? 0}</span></div>
-              {/* Bed Capacity = the manually-declared target from the
-                  Add/Edit form (h.capacityBeds), kept separate from the
-                  real bed count below so the two are never conflated. */}
               <div className="h-view-row"><span className="h-view-label">Bed Capacity</span><span className="h-view-value">{viewHostel.capacityBeds ?? "—"}</span></div>
-              {/* FIX: was occupiedBeds/capacityBeds — now occupiedBeds/totalBeds,
-                  both real counts of actual Bed rows created under this hostel. */}
               <div className="h-view-row"><span className="h-view-label">Rooms / Beds</span><span className="h-view-value">{viewHostel.totalRooms ?? 0} Rooms · {viewHostel.occupiedBeds ?? 0}/{viewHostel.totalBeds ?? 0} Beds</span></div>
               <div className="h-view-row">
                 <span className="h-view-label">Price / Bed</span>
@@ -939,26 +791,18 @@ const HostelAdminPage = () => {
                   {viewHostel.bedPrice ? `${formatINR(viewHostel.bedPrice)}/bed` : "No price set"}
                 </span>
               </div>
-              {/* Duration this hostel's plan/subscription covers, as chosen
-                  on the Add/Edit form — drives the Total Price below. */}
               <div className="h-view-row">
                 <span className="h-view-label">Duration</span>
                 <span className="h-view-value">
                   {viewHostel.durationMonths} month{viewHostel.durationMonths === 1 ? "" : "s"}
                 </span>
               </div>
-              {/* Total Price = capacityBeds * bedPrice * durationMonths.
-                  Shows "—" only when no price is set (legacy records) —
-                  set one via Edit to populate it. */}
               <div className="h-view-row">
                 <span className="h-view-label">Total Price</span>
                 <span className="h-view-value price">
                   {viewHostel.bedPrice ? formatINR(viewHostel.totalPrice) : "—"}
                 </span>
               </div>
-              {/* Uploaded hostel document (registration cert, agreement,
-                  etc.) — opens in a new tab. Falls back to a muted
-                  "No document uploaded" label when documentUrl is unset. */}
               <div className="h-view-row">
                 <span className="h-view-label">Document</span>
                 {viewHostel.documentUrl ? (
@@ -996,7 +840,6 @@ const HostelAdminPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Branch / Room / Bed drill-down Dialog */}
       <Dialog open={bedDetailsOpen} onOpenChange={(open) => { setBedDetailsOpen(open); if (!open) setBedDetailsHostel(null); }}>
         <DialogContent className="sm:max-w-[520px] rounded-3xl">
           <DialogHeader>
@@ -1084,10 +927,6 @@ const HostelAdminPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Add Dialog — Hostel + Admin combined. No password field: the
-          backend generates one automatically and emails it to the admin.
-          Widened to a landscape layout with fields arranged two-per-row,
-          and rounded (pill/circle) inputs, buttons & icons throughout. */}
       <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setForm(EMPTY_FORM); }}>
         <DialogContent className="sm:max-w-[720px] rounded-3xl">
           <DialogHeader>
@@ -1115,8 +954,6 @@ const HostelAdminPage = () => {
               </SelectContent>
             </Select>
 
-            {/* Price per bed — REQUIRED. Set directly here, independent
-                of any subscription Plan. */}
             <Input
               type="number"
               min={1}
@@ -1125,10 +962,6 @@ const HostelAdminPage = () => {
               value={form.bedPrice}
               onChange={(e) => setForm({ ...form, bedPrice: e.target.value.replace(/\D/g, "") })}
             />
-            {/* Total Price preview now factors in the selected duration
-                too — beds × price/bed × months — so choosing "3 Months"
-                or "6 Months" here correctly scales the total shown
-                (e.g. 100 beds × ₹100/bed × 3 months = ₹30,000). */}
             <div className="h-span-2">
               <TotalPricePreview totalBeds={form.totalBeds} bedPrice={form.bedPrice} durationMonths={form.duration} />
             </div>
@@ -1150,11 +983,6 @@ const HostelAdminPage = () => {
             <Input placeholder="Admin Name" value={form.adminName} onChange={(e) => setForm({ ...form, adminName: e.target.value })} />
             <Input placeholder="Admin Phone (10 digits)" value={form.adminPhone} maxLength={10} onChange={(e) => setForm({ ...form, adminPhone: e.target.value.replace(/\D/g, "") })} />
             <Input placeholder="Admin Email" value={form.adminEmail} onChange={(e) => setForm({ ...form, adminEmail: e.target.value })} />
-
-            {/* Password is NO LONGER typed here. The backend generates a
-                random password, hashes it before saving, and emails the
-                plain-text password straight to Admin Email above. The
-                info banner previously shown here has been removed. */}
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline" className="rounded-full">Cancel</Button></DialogClose>
@@ -1165,9 +993,6 @@ const HostelAdminPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Dialog — Hostel + Admin combined. Password field kept here
-          ONLY as an optional reset — blank keeps the current password.
-          Same landscape, two-column, rounded layout as the Add dialog. */}
       <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditHostel(null); }}>
         <DialogContent className="sm:max-w-[720px] rounded-3xl">
           <DialogHeader>
@@ -1196,9 +1021,6 @@ const HostelAdminPage = () => {
                 </SelectContent>
               </Select>
 
-              {/* Price per bed — REQUIRED, mirrors the Add dialog.
-                  Pre-filled from editHostel.bedPrice in openEdit() above —
-                  changing it here updates the hostel's price on Save. */}
               <Input
                 type="number"
                 min={1}
@@ -1207,7 +1029,6 @@ const HostelAdminPage = () => {
                 value={editForm.bedPrice}
                 onChange={(e) => setEditForm({ ...editForm, bedPrice: e.target.value.replace(/\D/g, "") })}
               />
-              {/* Same duration-aware preview as the Add dialog. */}
               <div className="h-span-2">
                 <TotalPricePreview totalBeds={editForm.totalBeds} bedPrice={editForm.bedPrice} durationMonths={editForm.duration} />
               </div>
@@ -1231,10 +1052,6 @@ const HostelAdminPage = () => {
               <Input placeholder="Admin Name" value={editForm.adminName} onChange={(e) => setEditForm({ ...editForm, adminName: e.target.value })} />
               <Input placeholder="Admin Phone (10 digits)" value={editForm.adminPhone} maxLength={10} onChange={(e) => setEditForm({ ...editForm, adminPhone: e.target.value.replace(/\D/g, "") })} />
               <Input placeholder="Admin Email" value={editForm.adminEmail} onChange={(e) => setEditForm({ ...editForm, adminEmail: e.target.value })} />
-              {/* Password reset field removed from this dialog. editForm.adminPassword
-                  stays "" (never set by the user here), so buildHostelAdminPayload
-                  below always sends adminPassword: undefined — i.e. "keep current
-                  password" per the backend contract. */}
             </div>
           )}
           <DialogFooter>

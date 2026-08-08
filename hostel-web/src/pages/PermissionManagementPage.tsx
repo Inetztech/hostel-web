@@ -21,14 +21,6 @@ type Subordinate = {
   avatarBg?: string;
 };
 
-// FIX: the permission matrix used to be nine hardcoded module rows with a
-// hardcoded Full/View/Custom/None radio state (`defaultVal`) — none of it
-// wired to any real data, so nothing you clicked ever did anything. The
-// backend's actual permission model is a flat, per-permission grant/revoke
-// (see Permission.java), grouped into five real modules (Property, People,
-// Finance, Operations, Reporting — see Permission.module()). This maps
-// those five real module names to display metadata; the permission rows
-// themselves now come from the live catalog fetched per admin.
 const MODULE_META: Record<string, { icon: any; color: string; bg: string; order: number }> = {
   Property:  { icon: Building2,     color: '#3b82f6', bg: '#eff6ff', order: 0 },
   People:    { icon: Users,         color: '#f97316', bg: '#ffedd5', order: 1 },
@@ -54,20 +46,14 @@ export default function PermissionManagementPage() {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSub, setSelectedSub] = useState<Subordinate | null>(null);
-  // Total number of permissions that exist in the system — used as the
-  // denominator to decide Full vs Limited vs No Access for each admin.
   const [catalogSize, setCatalogSize] = useState<number | null>(null);
 
   useEffect(() => {
     getPermissionCatalog()
       .then(list => setCatalogSize(list.length))
-      .catch(() => { /* falls back to permissions.length > 0 check below */ });
+      .catch(() => {});
   }, []);
 
-  // FIX: access level was previously hardcoded to alternate
-  // Full/Limited by array index (i % 2), which had nothing to do with
-  // an admin's real permissions. Derive it from the actual permission
-  // set the backend returns for each user.
   const deriveAccess = (permissions?: string[]): Subordinate["access"] => {
     const count = permissions?.length ?? 0;
     if (count === 0) return "No Access";
@@ -75,12 +61,6 @@ export default function PermissionManagementPage() {
     return "Limited Access";
   };
 
-  // NOTE: SUPER_ADMIN no longer has access to this page — they manage only
-  // hostel/admin creation, subscription plans, and account status. New
-  // Admins receive full permissions automatically at creation time, so
-  // there is nothing for a SUPER_ADMIN to configure here. This page is now
-  // reached only by ADMIN (manages WARDEN + TENANT) and WARDEN (manages
-  // TENANT only).
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -114,13 +94,6 @@ export default function PermissionManagementPage() {
     }
   }, [subordinates, selectedSub]);
 
-  // ── Permission matrix for the currently selected admin ─────────────────
-  // FIX: this used to be a static MODULES array with a hardcoded
-  // `defaultVal` per row and non-interactive radio divs — clicking
-  // anything in the table did nothing, and "Save Changes" had no
-  // onClick at all. Now it's the target admin's real permission set,
-  // fetched from GET /permissions/user/{id}, with a pending edit set
-  // that's only committed to the server when Save Changes is pressed.
   const [catalog, setCatalog] = useState<PermissionCatalogItem[]>([]);
   const [pending, setPending] = useState<Set<PermissionCatalogItem["name"]>>(new Set());
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -196,8 +169,6 @@ export default function PermissionManagementPage() {
     }
   };
 
-  // Group the live catalog by the backend's real module names (Property /
-  // People / Finance / Operations / Reporting), in a stable display order.
   const groupedCatalog = useMemo(() => {
     const map: Record<string, PermissionCatalogItem[]> = {};
     catalog.forEach(item => { (map[item.module] ||= []).push(item); });
@@ -212,18 +183,9 @@ export default function PermissionManagementPage() {
   const limitedAccessCount = subordinates.filter(s => s.access === "Limited Access").length;
   const noAccessCount = subordinates.filter(s => s.access === "No Access").length;
 
-  // FIX: the stat cards, page subtitle, and "Showing X of Y" footer were
-  // hardcoded to say "Admin(s)" no matter who was logged in. That's correct
-  // for SUPER_ADMIN (whose subordinates really are Admins), but wrong for
-  // ADMIN (whose subordinates are a mix of Wardens + Tenants) and WARDEN
-  // (whose subordinates are Tenants only) — e.g. an Admin managing one
-  // Warden used to see a card literally labeled "Total Admins: 1". Derive
-  // role-correct copy and counts instead.
   const wardenCount = subordinates.filter(s => s.role === "WARDEN").length;
   const tenantCount = subordinates.filter(s => s.role === "TENANT").length;
 
-  // NOTE: SUPER_ADMIN branches removed below — this page is only ever
-  // reached by ADMIN or WARDEN now (see AppRouter.tsx / ProtectedRoute).
   const roleNounPlural = role === "ADMIN" ? "wardens & tenants" : "tenants";
   const pageSubtitle =
     role === "ADMIN" ? "Manage Warden & Tenant Permissions" : "Manage Tenant Permissions";
@@ -254,7 +216,6 @@ export default function PermissionManagementPage() {
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         .perm-wrap { font-family: 'Inter', sans-serif; width: 100%; max-width: 100%; }
         
-        /* Stats row */
         .perm-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
         @media (max-width: 1100px) { .perm-stats { grid-template-columns: repeat(2, 1fr); } }
         .perm-stat-card { background: #fff; border-radius: 12px; padding: 16px 20px; display: flex; align-items: center; gap: 14px; border: 1px solid #f1f5f9; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
@@ -264,13 +225,11 @@ export default function PermissionManagementPage() {
         .perm-stat-value { font-size: 24px; font-weight: 700; color: #0f172a; line-height: 1; margin-bottom: 4px; }
         .perm-stat-subtext { font-size: 11px; color: #94a3b8; font-weight: 500; }
 
-        /* Split View */
         .perm-subtitle { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
         .perm-subtext { font-size: 12px; color: #64748b; margin-bottom: 20px; }
         .perm-split { display: flex; gap: 24px; align-items: flex-start; }
         @media (max-width: 900px) { .perm-split { flex-direction: column; } }
         
-        /* Sidebar */
         .perm-sidebar { width: 340px; background: #fff; border-radius: 12px; border: 1px solid #f1f5f9; padding: 20px; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
         @media (max-width: 900px) { .perm-sidebar { width: 100%; } }
         .perm-sidebar-title { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
@@ -294,7 +253,6 @@ export default function PermissionManagementPage() {
         .perm-item-badge.limited { color: #f97316; }
         .perm-item-badge.none { color: #94a3b8; }
 
-        /* Main Panel */
         .perm-main { flex: 1; background: #fff; border-radius: 12px; border: 1px solid #f1f5f9; padding: 24px; min-width: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
         .perm-main-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 20px; flex-wrap: wrap; gap: 16px; }
         .perm-main-title { font-size: 16px; font-weight: 700; color: #0f172a; }
@@ -345,7 +303,6 @@ export default function PermissionManagementPage() {
       `}</style>
 
       <div className="perm-wrap">
-        {/* Stats */}
         <div className="perm-stats">
           {statCards.map((card) => (
             <div className="perm-stat-card" key={card.title}>
@@ -364,9 +321,7 @@ export default function PermissionManagementPage() {
         <div className="perm-subtitle">{pageSubtitle}</div>
         <div className="perm-subtext">{pageSubtext}</div>
 
-        {/* Split View */}
         <div className="perm-split">
-          {/* Sidebar */}
           <div className="perm-sidebar">
             <div className="perm-sidebar-title">{role === "ADMIN" ? "Wardens & Tenants" : "Tenants"}</div>
             <div className="perm-search">
@@ -406,7 +361,6 @@ export default function PermissionManagementPage() {
             </div>
           </div>
 
-          {/* Main Content */}
           <div className="perm-main">
             {selectedSub ? (
               <>

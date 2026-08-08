@@ -17,7 +17,6 @@ export const getUserRole = (): Role | null => {
   return null;
 };
 
-// ─── NEW: profile getters/setters ──────────────────────────
 export const setUserProfile = (data: {
   email?: string;
   name?: string;
@@ -31,10 +30,6 @@ export const setUserProfile = (data: {
   if (data.phone) sessionStorage.setItem("phone", data.phone);
   if (data.userId != null) sessionStorage.setItem("userId", String(data.userId));
   else sessionStorage.removeItem("userId");
-  // hostelId/hostelName are only meaningful for ADMIN accounts, and can
-  // legitimately be null (no hostel assigned yet) — always sync so a
-  // reassignment or a login by an unassigned admin doesn't leave a stale
-  // value from a previous session.
   if (data.hostelId != null) sessionStorage.setItem("hostelId", String(data.hostelId));
   else sessionStorage.removeItem("hostelId");
   if (data.hostelName) sessionStorage.setItem("hostelName", data.hostelName);
@@ -62,13 +57,7 @@ export const getUserHostelId = (): number | null => {
 
 export const getUserHostelName = (): string | null =>
   sessionStorage.getItem("hostelName");
-// ─────────────────────────────────────────────────────────
 
-// ─── NEW: hierarchical RBAC — fine-grained permission storage ──────
-// Populated after login/profile-fetch from UserResponse.permissions
-// (see getMyProfile in lib/store.ts). SUPER_ADMIN implicitly has every
-// permission and always passes the checks below regardless of what's
-// cached here.
 const PERMISSIONS_KEY = "permissions";
 
 export const setUserPermissions = (permissions: string[] | undefined | null) => {
@@ -102,7 +91,6 @@ export const hasAllPermissions = (names: string[]): boolean => {
   const mine = getUserPermissions();
   return names.every((n) => mine.includes(n));
 };
-// ─────────────────────────────────────────────────────────────────
 
 export const logout = () => {
   sessionStorage.removeItem("token");
@@ -116,10 +104,7 @@ export const logout = () => {
   sessionStorage.removeItem("hostelId");
   sessionStorage.removeItem("hostelName");
   sessionStorage.removeItem("permissions");
-  // NEW: clear tenant-identity cache too (set by store.ts's
-  // setCachedTenantId), so a subsequent login by a different
-  // role/tenant on the same browser never sees a stale tenantId.
   sessionStorage.removeItem("tenantId");
   sessionStorage.removeItem("tenantIdToken");
-  window.location.href = "/";
+  window.location.href = "/login";
 };

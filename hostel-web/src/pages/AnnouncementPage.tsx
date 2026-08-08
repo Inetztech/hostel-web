@@ -59,12 +59,9 @@ import {
   Pencil,
   Trash2,
   Send,
-  Download,
   Search,
   RefreshCw,
 } from "lucide-react";
-
-/* ================= HELPERS ================= */
 
 function formatDate(raw: string): string {
   try {
@@ -80,17 +77,12 @@ function formatDate(raw: string): string {
   }
 }
 
-/* ================= COMPONENT ================= */
-
 const AnnouncementPage = () => {
-  /* ================= STATE ================= */
-
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(false);
   const [sharingId, setSharingId] = useState<number | null>(null);
 
-  // Add dialog
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState<AnnouncementRequest>({
     title: "",
@@ -99,7 +91,6 @@ const AnnouncementPage = () => {
     branchId: undefined,
   });
 
-  // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
   const [editAnnouncement, setEditAnnouncement] = useState<Announcement | null>(null);
 
@@ -107,8 +98,6 @@ const AnnouncementPage = () => {
   const hasAccess = role === "ADMIN" || role === "WARDEN" || role === "SUPER_ADMIN";
 
   const didLoad = useRef(false);
-
-  /* ================= RESET HELPERS ================= */
 
   const resetCreateForm = () => {
     setForm({
@@ -129,17 +118,15 @@ const AnnouncementPage = () => {
     setEditAnnouncement(null);
   };
 
-  /* ================= LOAD ================= */
-
   const reload = useCallback(async () => {
-    try {
-      const data = await fetchAnnouncements();
-      setAnnouncements(data);
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to load announcements");
-    }
-  }, []);
+  try {
+    const data = await fetchAnnouncements();
+    setAnnouncements(data.content || []); 
+  } catch (err) {
+    console.error(err);
+    toast.error("Failed to load announcements");
+  }
+}, []);
 
   const loadBranches = useCallback(async () => {
     try {
@@ -151,8 +138,6 @@ const AnnouncementPage = () => {
     }
   }, []);
 
-  /* ================= INIT ================= */
-
   useEffect(() => {
     if (didLoad.current) return;
     didLoad.current = true;
@@ -160,8 +145,6 @@ const AnnouncementPage = () => {
     reload();
     loadBranches();
   }, [reload, loadBranches]);
-
-  /* ================= CRUD ================= */
 
   const handleCreate = async () => {
     if (!form.branchId) {
@@ -232,8 +215,6 @@ const AnnouncementPage = () => {
     }
   };
 
-  /* ================= SHARE ================= */
-
   const handleShare = async (id: number) => {
     try {
       setSharingId(id);
@@ -246,12 +227,10 @@ const AnnouncementPage = () => {
     }
   };
 
-  /* ================= FILTERS / PAGINATION ================= */
-
   const [searchText, setSearchText] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("all");
   const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 7;
+  const pageSize = 10;
 
   const filteredRows = useMemo(() => {
     return announcements.filter((a) => {
@@ -268,8 +247,6 @@ const AnnouncementPage = () => {
     currentPage * pageSize,
     (currentPage + 1) * pageSize
   );
-
-  /* ================= UI ================= */
 
   return (
     <div className="min-h-full bg-[#fcfcfc] text-slate-900 font-sans pb-10">
@@ -297,10 +274,6 @@ const AnnouncementPage = () => {
           <div className="ap-panel-header">
             <div className="ap-panel-title">All Announcements</div>
             <div className="flex gap-2">
-              {/* <Button variant="outline" size="sm" className="h-8">
-                <Download size={14} className="mr-2" /> Export
-              </Button> */}
-
               {hasAccess && (
                 <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) resetCreateForm(); }}>
                   <DialogTrigger asChild>
@@ -342,7 +315,6 @@ const AnnouncementPage = () => {
             </div>
           </div>
 
-          {/* Filters */}
           <div className="flex items-center gap-3 p-5 border-b border-[#f1f5f9] bg-white flex-wrap">
             <div className="flex bg-white border border-[#e2e8f0] rounded-md h-10 px-3 w-[260px] items-center gap-2">
               <Search size={16} className="text-slate-400" />
@@ -355,22 +327,31 @@ const AnnouncementPage = () => {
               />
             </div>
 
-            <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-10 w-[180px]">
-              <Select
-                value={selectedBranch}
-                onValueChange={(v) => { setSelectedBranch(v); setCurrentPage(0); }}
-              >
-                <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
-                  <SelectValue placeholder="All Branches" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Branch filter is only meaningful (and only correct) for roles that
+                span multiple branches. TENANT/WARDEN are already scoped to a
+                single branch by the backend, so showing them an "All Branches"
+                picker listing every branch in the hostel is misleading — it
+                implies they can see/filter data outside their own branch when
+                they can't. Gated the same way FoodTimetablePage gates its
+                branch switcher. */}
+            {(role === "ADMIN" || role === "SUPER_ADMIN") && (
+              <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-10 w-[180px]">
+                <Select
+                  value={selectedBranch}
+                  onValueChange={(v) => { setSelectedBranch(v); setCurrentPage(0); }}
+                >
+                  <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                    <SelectValue placeholder="All Branches" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches</SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <button
               type="button"
@@ -419,7 +400,6 @@ const AnnouncementPage = () => {
                         <td><div className="ap-date">{row.createdAt ? formatDate(row.createdAt) : "—"}</div></td>
                         <td className="text-right whitespace-nowrap">
                           <div className="inline-flex items-center gap-2">
-                            {/* SHARE / SEND BUTTON */}
                             <button
                               type="button"
                               className="w-8 h-8 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:border-emerald-300 flex items-center justify-center transition-colors disabled:opacity-50"
@@ -430,7 +410,6 @@ const AnnouncementPage = () => {
                               <Send size={15} className="text-emerald-600 shrink-0" />
                             </button>
 
-                            {/* EDIT BUTTON */}
                             <button
                               type="button"
                               className="w-8 h-8 rounded-lg border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 flex items-center justify-center transition-colors"
@@ -440,7 +419,6 @@ const AnnouncementPage = () => {
                               <Pencil size={15} className="text-blue-600 shrink-0" />
                             </button>
 
-                            {/* DELETE BUTTON */}
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <button
@@ -532,7 +510,6 @@ const AnnouncementPage = () => {
           </div>
         </div>
 
-        {/* EDIT DIALOG */}
         <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditAnnouncement(null); }}>
           <DialogContent className="rounded-3xl max-w-lg">
             <DialogHeader>

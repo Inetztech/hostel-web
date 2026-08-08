@@ -255,40 +255,17 @@ const EBReadingsPage = () => {
   const getRoomIdByRoomNumber = (roomNumber: string) =>
     rooms.find(r => r.roomNumber === roomNumber)?.id;
 
-  /* ─── ROOM TOTALS ───────────────────────────────────────── */
-  const roomTotals = useMemo(() => {
-    const map: Record<string, { units: number; amount: number }> = {};
-    tenantRows.forEach(row => {
-      const key = row.flatId ? `flat-${row.flatId}` : `room-${row.roomId}`;
-      if (!map[key]) map[key] = { units: 0, amount: 0 };
-      map[key].amount += Number(row.tenantAmount ?? 0);
-      map[key].units = Math.round(
-        Number(row.currentReading ?? 0) - Number(row.previousReading ?? 0)
-      );
-    });
-    return map;
-  }, [tenantRows]);
-
   /* ─── FILTERED ROOMS (page-level view filter, driven by selectedBranch) ── */
   const filteredRooms = useMemo(() => {
     if (selectedBranch === "all") return rooms;
     return rooms.filter(r => Number(r.unitId) === Number(selectedBranch));
   }, [rooms, selectedBranch]);
 
-  const standaloneRooms = useMemo(
-    () => filteredRooms.filter(r => !r.flatId),
-    [filteredRooms]
-  );
-
-  const flatFilteredRooms = useMemo(() => {
-    if (!formFlatId || formFlatId === "all") return standaloneRooms;
-    return filteredRooms.filter(r => String(r.flatId) === String(formFlatId));
-  }, [filteredRooms, standaloneRooms, formFlatId]);
-
   /* ─── DIALOG-SCOPED ROOMS/FLATS (Add EB Reading dialog only) ────────────
-     Driven by `formBranchId`, NOT the page-level `selectedBranch`. This
-     matters when the page filter is "All" — without this, the dialog's
-     Flat/Room dropdowns would show rooms from every branch mixed together.
+     Driven by `formBranchId`, NOT the page-level `selectedBranch` filter.
+     This matters when the page filter is "All" — without this, the
+     dialog's Flat/Room dropdowns would show rooms from every branch mixed
+     together.
   ───────────────────────────────────────────────────────────────────────── */
   const dialogRooms = useMemo(() => {
     if (!formBranchId) return rooms;
@@ -312,12 +289,6 @@ const EBReadingsPage = () => {
     );
     return flats.filter(f => flatIdsInBranch.has(Number(f.id)));
   }, [flats, formBranchId, dialogRooms]);
-
-  const flatMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    flats.forEach(f => { map[String(f.id)] = f.flatNumber; });
-    return map;
-  }, [flats]);
 
   const roomMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -479,7 +450,16 @@ const EBReadingsPage = () => {
         if (flatHandled.has(r.flatId!)) continue;
         flatHandled.add(r.flatId!);
         try {
-          const bills = await getTenantWiseEBBill({ flatId: r.flatId });
+          // FIX: month/year are now required by getTenantWiseEBBill.
+          // Each EBReading already carries its own month/year — use
+          // those rather than the page's selMonth/selYear so the bill
+          // is always calculated for the exact period this reading
+          // belongs to.
+          const bills = await getTenantWiseEBBill({
+            flatId: r.flatId,
+            month: r.month,
+            year: r.year,
+          });
 
           const flatTenantIds = new Set(
             tenants
@@ -524,7 +504,13 @@ const EBReadingsPage = () => {
         if (roomHandled.has(r.roomId!)) continue;
         roomHandled.add(r.roomId!);
         try {
-          const bills = await getTenantWiseEBBill({ roomId: r.roomId });
+          // FIX: same as above — pass this reading's own month/year
+          // through instead of omitting them.
+          const bills = await getTenantWiseEBBill({
+            roomId: r.roomId,
+            month: r.month,
+            year: r.year,
+          });
 
           const roomTenantIds = new Set(
             tenants
@@ -862,7 +848,7 @@ const EBReadingsPage = () => {
 
   /* ─── Pagination ─── */
   const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 8;
+  const pageSize = 10;
   const paginatedRows = filteredTenantRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
   /* ══════════════════════════════════════════════════════════

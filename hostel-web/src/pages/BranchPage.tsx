@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { createBranch, updateBranch, deleteBranch } from "@/lib/store";
@@ -19,15 +19,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
-  Building2, Search, Download, Plus,
+  Building2, Search, Plus,
   Pencil, Trash2, Phone, ChevronLeft, ChevronRight,
 } from "lucide-react";
 
-/* ── Types ──
-   capacityBeds carried through the form (doc1's real feature — this
-   branch's optional share of the hostel's total bed cap). No mock
-   manager/occupancy/status fields — those don't exist in the backend
-   model, so they've been dropped rather than faked. */
 interface BranchForm {
   unitName: string;
   location: string;
@@ -45,12 +40,6 @@ const COLORS = [
   { color: '#64748b', bg: '#f1f5f9' },
 ];
 
-/* ── Entity unwrap helper ──
-   createBranch's return shape isn't guaranteed to be the raw entity —
-   it may come back as { data: {...} } or { data: { data: {...} } }
-   depending on how the backend wraps the response. This normalizes
-   any of those shapes so we can reliably read the new branch's id
-   right after creation (needed for the Rooms-page redirect). */
 const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
   if (res && res.id != null) return res as T;
   if (res?.data && res.data.id != null) return res.data as T;
@@ -73,7 +62,6 @@ const BranchPage = () => {
   const [form,       setForm]       = useState<BranchForm>(EMPTY_FORM);
   const [editBranch, setEditBranch] = useState<Branch | null>(null);
 
-  // Read the admin's own assigned hostel from session scoping
   const myHostelId   = getUserHostelId();
   const myHostelName = getUserHostelName();
 
@@ -98,7 +86,6 @@ const BranchPage = () => {
 
   const err = (e: any, fallback: string) => toast.error(e?.response?.data?.message || fallback);
 
-  /* ── CRUD ── */
   const handleAdd = async () => {
     if (!form.unitName.trim()) { toast.error("Branch name required"); return; }
     if (!myHostelId) {
@@ -118,10 +105,6 @@ const BranchPage = () => {
       setForm(EMPTY_FORM);
       setAddOpen(false);
 
-      // Pull the new branch's id out of whatever shape the API returned,
-      // then hand off to the Rooms page — pre-selecting this branch and
-      // popping the Add Room dialog open so the admin can go straight
-      // from "created a branch" to "added its first room" in one flow.
       const newBranch = unwrapEntity<Branch>(res);
       navigate("/rooms", {
         state: newBranch?.id != null
@@ -131,9 +114,6 @@ const BranchPage = () => {
 
       loadBranches();
     } catch (e: any) {
-      // Creating a branch with a capacityBeds share that would push past
-      // the hostel's overall bed cap gets the same "limit reached" toast
-      // + Add Beds navigation as room/bed creation does.
       showBedLimitToast(e, navigate, "Create failed");
     }
   };
@@ -215,27 +195,20 @@ const BranchPage = () => {
         .branch-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .branch-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .branch-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .branch-footer-info { display: flex; align-items: center; gap: 8px; padding: 16px 20px; background: #f8fafc; border-radius: 12px; font-size: 13px; color: #5200FF; margin-top: 24px; font-weight: 500; }
       `}</style>
 
       <div className="branch-wrap">
 
-        {/* Main Content Header */}
         <div className="branch-main-header">
           <div className="branch-main-title">All Branches</div>
 
           <div className="branch-controls">
-            {/* <button className="branch-btn-outline"><Download size={16} /> Export</button> */}
-
             <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setForm(EMPTY_FORM); }}>
               <DialogTrigger asChild>
                 <button className="branch-btn-primary" disabled={!myHostelId} title={!myHostelId ? "No hostel assigned to your account yet" : undefined}>
                   <Plus size={16} /> Add Branch
                 </button>
               </DialogTrigger>
-              {/* Widened to a landscape-style modal so fields can sit side-by-side,
-                  and rounded on all four corners for a softer card look */}
               <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden">
                 <DialogHeader>
                   <DialogTitle>Add Branch</DialogTitle>
@@ -253,7 +226,6 @@ const BranchPage = () => {
           </div>
         </div>
 
-        {/* Search */}
         <div className="flex gap-4 mb-4">
           <div className="branch-search">
             <Search size={16} color="#94a3b8" />
@@ -272,7 +244,6 @@ const BranchPage = () => {
           </div>
         )}
 
-        {/* Table */}
         <div className="branch-table-container">
           <div className="overflow-x-auto">
             <table className="branch-table">
@@ -366,7 +337,6 @@ const BranchPage = () => {
             </table>
           </div>
 
-          {/* Pagination */}
           <div className="branch-pagination">
             <div className="branch-page-info">
               Showing {branches.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} branches
@@ -398,17 +368,7 @@ const BranchPage = () => {
           </div>
         </div>
 
-        {/* <div className="branch-footer-info">
-          <div className="w-5 h-5 rounded-full border border-blue-200 flex items-center justify-center bg-blue-50 shrink-0">
-            <span className="text-[10px] font-bold">i</span>
-          </div>
-          You can add, edit, view or manage all branches from here.
-        </div> */}
-
-        {/* Edit Dialog */}
         <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditBranch(null); }}>
-          {/* Widened to a landscape-style modal so fields can sit side-by-side,
-              and rounded on all four corners for a softer card look */}
           <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden">
             <DialogHeader>
               <DialogTitle>Edit Branch</DialogTitle>
@@ -441,11 +401,6 @@ const BranchPage = () => {
   );
 };
 
-/* ── Shared form fields (includes the real capacityBeds field) ──
-   Landscape layout: Parent Hostel stays full-width (disabled reference
-   field), then Branch Name/Location and Phone/Bed Capacity are paired
-   into two-column rows so the modal reads wide and short instead of
-   tall and narrow. */
 const BranchFormFields = ({
   form, hostelName, onChange,
 }: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void }) => (

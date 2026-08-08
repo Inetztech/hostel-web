@@ -35,7 +35,6 @@ import {
 import { toast } from "sonner";
 import { jsPDF } from "jspdf";
 
-/* ── helpers ─────────────────────────────────────────────────────── */
 const getApiOrigin = (): string => {
   const base = api.defaults.baseURL ?? "";
   try { return new URL(base).origin; } catch { return ""; }
@@ -48,12 +47,6 @@ const MONTHS = [
 
 const fmt = (n?: number | null) => `₹${Math.round(n ?? 0).toLocaleString()}`;
 
-// jsPDF's built-in fonts (helvetica/times/courier) only support the
-// WinAnsi character set, which does NOT include ₹ (U+20B9). Passing that
-// glyph to doc.text() makes jsPDF fall back to an unmapped/garbled glyph
-// (seen as a stray "1" rendered on top of the amount). Use a plain "Rs."
-// prefix in PDF output only — the on-screen dialog can keep ₹ since
-// browsers render it fine with system Unicode fonts.
 const fmtPdf = (n?: number | null) => `Rs. ${Math.round(n ?? 0).toLocaleString()}`;
 
 const fmtDateTime = (v?: string | null) => {
@@ -84,35 +77,23 @@ const ProofThumb = ({ path }: { path?: string }) => {
   );
 };
 
-/* ═══════════════════════════════════════════════════════════════════
-   PAYMENT RECEIPT — preview modal + print/"save as PDF" for tenants
-
-   Uses the browser's native print dialog (which every browser lets you
-   target to "Save as PDF") instead of a bundling a PDF library, so no
-   new dependency is required. The printable markup is built as a
-   standalone HTML string and rendered into a blank popup window; that
-   keeps the print output isolated from the app's own stylesheet so it
-   always renders as a clean, letterhead-style receipt regardless of
-   the current page's layout.
-   ═══════════════════════════════════════════════════════════════════ */
 const downloadReceiptPdf = (p: PaymentTransaction) => {
   const receiptNo = `HMS-${String(p.id).padStart(6, "0")}`;
   const period = `${MONTHS[p.rentMonth - 1]} ${p.rentYear}`;
 
   const pageWidth = 420;
-  const pageHeight = 660; // bumped from 620 to fit the two new rows
+  const pageHeight = 660;
   const marginX = 24;
   const doc = new jsPDF({ unit: "pt", format: [pageWidth, pageHeight] });
 
   let y = 0;
 
-  // ── Header band ──
-  doc.setFillColor(15, 17, 23); // #0f1117
+  doc.setFillColor(15, 17, 23);
   doc.rect(0, 0, pageWidth, 66, "F");
 
   doc.setFillColor(30, 41, 59);
   doc.roundedRect(marginX, 16, 34, 34, 8, 8, "F");
-  doc.setTextColor(96, 165, 250); // blue-400
+  doc.setTextColor(96, 165, 250);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
   doc.text("H", marginX + 17, 38, { align: "center" });
@@ -136,16 +117,14 @@ const downloadReceiptPdf = (p: PaymentTransaction) => {
 
   y = 66;
 
-  // ── Status strip ──
-  doc.setFillColor(236, 253, 245); // emerald-50
+  doc.setFillColor(236, 253, 245);
   doc.rect(0, y, pageWidth, 26, "F");
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.setTextColor(4, 120, 87); // emerald-700
+  doc.setTextColor(4, 120, 87);
   doc.text("Payment Verified & Approved", marginX, y + 17);
   y += 26 + 26;
 
-  // ── Amount block ──
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(156, 163, 175);
@@ -160,7 +139,6 @@ const downloadReceiptPdf = (p: PaymentTransaction) => {
   doc.line(marginX, y, pageWidth - marginX, y);
   y += 30;
 
-  // ── Detail rows ──
   const row = (label: string, value: string) => {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
@@ -286,9 +264,6 @@ const ReceiptPreviewDialog = ({
   );
 };
 
-/* ═══════════════════════════════════════════════════════════════════
-   TENANT VIEW — pay pending rent + own payment history
-   ═══════════════════════════════════════════════════════════════════ */
 const TenantPayments = () => {
   const [tenantId, setTenantId] = useState<number | null>(null);
   const [rents, setRents] = useState<Rent[]>([]);
@@ -423,7 +398,7 @@ const TenantPayments = () => {
             {loading ? (
               <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
             ) : dueRents.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">You're all caught up — no dues pending 🎉</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">You're all caught up — no dues pending</TableCell></TableRow>
             ) : dueRents.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">{MONTHS[r.rentMonth - 1]} {r.rentYear}</TableCell>
@@ -496,10 +471,8 @@ const TenantPayments = () => {
         </Table>
       </Card>
 
-      {/* Receipt preview + print/download */}
       <ReceiptPreviewDialog payment={receiptTarget} onClose={() => setReceiptTarget(null)} />
 
-      {/* Pay dialog */}
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -569,9 +542,6 @@ const TenantPayments = () => {
   );
 };
 
-/* ═══════════════════════════════════════════════════════════════════
-   ADMIN / WARDEN VIEW — verify tenant-submitted payments (PAGINATED)
-   ═══════════════════════════════════════════════════════════════════ */
 const PAGE_SIZE = 10;
 
 const ApproverPayments = () => {
@@ -591,8 +561,6 @@ const ApproverPayments = () => {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [receiptTarget, setReceiptTarget] = useState<PaymentTransaction | null>(null);
 
-  /* Loads both tabs' current pages in parallel. Each tab keeps its own
-     page index so switching tabs doesn't reset the other's position. */
   const load = async (pPage = pendingPage, aPage = allPage) => {
     setLoading(true);
 
@@ -704,7 +672,7 @@ const ApproverPayments = () => {
               <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
             ) : rows.length === 0 ? (
               <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-                {tab === "pending" ? "No payments awaiting verification 🎉" : "No transactions yet"}
+                {tab === "pending" ? "No payments awaiting verification" : "No transactions yet"}
               </TableCell></TableRow>
             ) : rows.map((r) => (
               <TableRow key={r.id}>
@@ -778,7 +746,6 @@ const ApproverPayments = () => {
         )}
       </Card>
 
-      {/* Receipt preview + print/download (lets Admin/Warden reprint a tenant's receipt) */}
       <ReceiptPreviewDialog payment={receiptTarget} onClose={() => setReceiptTarget(null)} />
 
       <Dialog open={!!rejectTarget} onOpenChange={(o) => !o && setRejectTarget(null)}>
@@ -800,7 +767,6 @@ const ApproverPayments = () => {
   );
 };
 
-/* ═══════════════════════════════════════════════════════════════════ */
 const PaymentsPage = () => {
   const role = getUserRole();
   if (role === "TENANT") return <TenantPayments />;

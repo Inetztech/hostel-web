@@ -16,6 +16,7 @@ import {
   deleteMaintenanceTask,
   getMaintenanceDashboard,
   getCurrentRoomCleaningStatus,
+  fetchAllPages,
 } from "@/lib/store";
 import {
   Branch,
@@ -27,18 +28,8 @@ import {
   CleanerRequest,
 } from "@/lib/types";
 
-/* ── Helpers ──────────────────────────────────────────────────────────── */
-
-const STATUS_LABEL: Record<CleaningStatus, string> = {
-  PENDING: "Pending",
-  IN_PROGRESS: "In Progress",
-  CLEANED: "Completed",
-};
-
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-// Mirrors the backend's @Pattern(regexp = "^[6-9]\\d{9}$") check on
-// CleanerRequest.phone, so invalid numbers are caught client-side too.
 const PHONE_PATTERN = /^[6-9]\d{9}$/;
 
 const StatusBadge = ({ status }: { status: CleaningStatus }) => {
@@ -61,7 +52,7 @@ const Avatar = ({ name }: { name: string }) => {
   );
 };
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 10;
 
 export default function MaintenancePage() {
   const [search, setSearch] = useState("");
@@ -77,13 +68,9 @@ export default function MaintenancePage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // View-all / full-schedule expansion toggles for the two summary cards.
-  // These just widen the visible list in place; the paginated table below
-  // remains the source of truth for full filtering/searching.
   const [showAllCleaners, setShowAllCleaners] = useState(false);
   const [showFullSchedule, setShowFullSchedule] = useState(false);
 
-  // Add Cleaner Modal State
   const [isAddCleanerOpen, setIsAddCleanerOpen] = useState(false);
   const [newCleanerName, setNewCleanerName] = useState("");
   const [newCleanerPhone, setNewCleanerPhone] = useState("");
@@ -91,31 +78,19 @@ export default function MaintenancePage() {
   const [newCleanerActive, setNewCleanerActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Surface partial/total failures from the "assign rooms" step instead of
-  // only logging them — this is what was silently hiding the 0-rooms bug.
   const [modalError, setModalError] = useState<string | null>(null);
 
-  // Inline validation error for the phone field specifically, separate
-  // from modalError so it clears/sets independently as the user types.
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
-  // Rooms available for the branch currently selected in the Add Cleaner
-  // modal — fetched fresh whenever the branch changes, so the room list
-  // is always scoped to that branch.
   const [branchRooms, setBranchRooms] = useState<Room[]>([]);
   const [loadingBranchRooms, setLoadingBranchRooms] = useState(false);
   const [selectedRoomIds, setSelectedRoomIds] = useState<number[]>([]);
 
-  // Row-level "updating status" indicator
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
 
-  // Bulk-selection state for the main tasks table, used to mark many rooms
-  // as completed in one action instead of clicking the cycle button per row.
   const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
   const [bulkUpdating, setBulkUpdating] = useState(false);
 
-  // Lightweight in-app toast, used instead of window.alert/confirm so
-  // feedback renders inside the app UI rather than a native browser dialog.
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -123,11 +98,6 @@ export default function MaintenancePage() {
     (showToast as any)._t = window.setTimeout(() => setToast(null), 3500);
   };
 
-  // Confirmation modal state, replacing window.confirm() so it renders
-  // inline instead of a native browser dialog. `onConfirm` runs if the
-  // user clicks the modal's confirm button. `danger` switches the confirm
-  // button to red for destructive actions (delete), matching the style
-  // used elsewhere in the app (e.g. Rooms & Beds' "Delete Room?" dialog).
   const [confirmState, setConfirmState] = useState<{
     title: string;
     description?: string;
@@ -147,14 +117,11 @@ export default function MaintenancePage() {
   const loadData = async (showLoader = true) => {
     if (showLoader) setLoading(true);
 
-    // Each source is fetched independently — if one endpoint isn't ready
-    // yet or errors out, it just falls back to an empty/zeroed state
-    // instead of blanking out the rest of the page.
     const [statsRes, cleanersRes, tasksRes, branchesRes, scheduleRes] = await Promise.allSettled([
       getMaintenanceDashboard(),
-      getMaintenanceCleaners(),
-      getMaintenanceTasks(),
-      fetchBranches(0, 100),
+      fetchAllPages<Cleaner>((pg, size) => getMaintenanceCleaners(pg, size)),
+      fetchAllPages<MaintenanceTask>((pg, size) => getMaintenanceTasks(pg, size)),
+      fetchBranches(0, 10),
       getCurrentRoomCleaningStatus(),
     ]);
 
@@ -200,8 +167,6 @@ export default function MaintenancePage() {
     loadData();
   }, []);
 
-  // Whenever the branch picked in the Add Cleaner modal changes, load that
-  // branch's rooms so they can be assigned to the new cleaner.
   useEffect(() => {
     if (!newCleanerBranch) {
       setBranchRooms([]);
@@ -213,11 +178,6 @@ export default function MaintenancePage() {
     setLoadingBranchRooms(true);
     fetchRooms(0, 200)
       .then((res) => {
-        // Coerce before comparing — the backend can return unitId (or an
-        // equivalent field) as a string while branchId here is a Number.
-        // A strict `===` between "3" and 3 silently fails, leaving this
-        // list empty with no error, which is what was hiding every room
-        // from the picker even though they exist for that branch.
         const roomBranchId = (r: any): number | null => {
           const raw = r?.unitId ?? r?.unit_id ?? r?.unit?.id ?? r?.branchId ?? r?.branch_id ?? r?.branch?.id;
           const n = Number(raw);
@@ -238,9 +198,6 @@ export default function MaintenancePage() {
     );
   };
 
-  // Selects every room currently listed for the branch, or clears the
-  // selection entirely if everything is already selected. Individual rooms
-  // can still be unchecked afterwards via toggleRoomSelection as normal.
   const allBranchRoomsSelected =
     branchRooms.length > 0 && branchRooms.every((room) => selectedRoomIds.includes(room.id));
 
@@ -269,9 +226,6 @@ export default function MaintenancePage() {
     setModalError(null);
     setPhoneError(null);
 
-    // Client-side mirror of the backend's phone validation. Catches
-    // anything that slipped past the onChange sanitizer (e.g. exactly
-    // 10 digits but starting with 0-5) before we ever hit the network.
     if (!PHONE_PATTERN.test(newCleanerPhone)) {
       setPhoneError("Phone must be a 10-digit number starting with 6-9");
       return;
@@ -288,8 +242,6 @@ export default function MaintenancePage() {
       };
       const newCleaner = await addMaintenanceCleaner(payload);
 
-      // Assign the new cleaner to each room picked in the modal by
-      // creating a pending cleaning task for it, scheduled today.
       let failedRooms: { roomId: number; reason: any }[] = [];
       if (selectedRoomIds.length > 0) {
         const results = await Promise.allSettled(
@@ -313,17 +265,9 @@ export default function MaintenancePage() {
         }
       }
 
-      // Refetch from the backend rather than patching local state — the
-      // Cleaner object returned above has assignedRooms computed BEFORE
-      // the tasks were created, so it's stale. A full reload picks up
-      // the real assigned-rooms count and puts the new tasks into
-      // Today's Schedule / the main table.
       await loadData(false);
 
       if (failedRooms.length > 0) {
-        // Cleaner WAS created, but not every room assignment succeeded —
-        // keep the modal open (instead of silently closing it) so the
-        // user actually sees this instead of a false "0 rooms assigned".
         const roomLabels = failedRooms
           .map(({ roomId }) => branchRooms.find((r) => r.id === roomId)?.roomNumber ?? `#${roomId}`)
           .join(", ");
@@ -334,7 +278,6 @@ export default function MaintenancePage() {
         setModalError(
           `Cleaner "${newCleanerName}" was created, but ${failedRooms.length} of ${selectedRoomIds.length} room assignment(s) failed (rooms: ${roomLabels}). Reason: ${firstReason}. You can retry assigning these rooms from the room list below.`
         );
-        // Keep only the failed rooms selected so a retry is one click away.
         setSelectedRoomIds(failedRooms.map((f) => f.roomId));
       } else {
         closeAddCleanerModal();
@@ -374,11 +317,6 @@ export default function MaintenancePage() {
     try {
       setUpdatingTaskId(task.id);
       const updated = await updateMaintenanceTaskStatus(task.id, nextStatus);
-      // Update BOTH the main table's tasks AND the Today's Schedule card —
-      // they're populated from two different endpoints (getMaintenanceTasks
-      // vs getCurrentRoomCleaningStatus), so only patching `tasks` left the
-      // schedule card showing a stale status (e.g. "In Progress") even after
-      // the main table already showed "Completed".
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
       setTodaySchedule((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (err) {
@@ -412,15 +350,11 @@ export default function MaintenancePage() {
     );
   };
 
-  // Marks every currently-selected task as CLEANED (Completed) in one go.
-  // Uses Promise.allSettled so one failing update doesn't block the rest,
-  // and reports how many succeeded/failed instead of failing silently.
   const handleBulkMarkCompleted = () => {
     if (selectedTaskIds.length === 0) return;
     const count = selectedTaskIds.length;
 
     askConfirm(`Mark ${count} room(s) as Completed?`, async () => {
-      // (non-destructive action — keeps the default blue confirm button)
       setBulkUpdating(true);
       try {
         const idsToUpdate = selectedTaskIds;
@@ -442,8 +376,6 @@ export default function MaintenancePage() {
         setTasks((prev) => prev.map((t) => updatedById.get(t.id) ?? t));
         setTodaySchedule((prev) => prev.map((t) => updatedById.get(t.id) ?? t));
 
-        // Keep only the failed ones selected so a retry is one click away;
-        // clear the selection entirely if everything succeeded.
         setSelectedTaskIds((prev) => prev.filter((id) => !updatedById.has(id)));
 
         if (failedCount > 0) {
@@ -475,9 +407,6 @@ export default function MaintenancePage() {
         t.roomNumber?.toLowerCase().includes(search.toLowerCase()) ||
         String(t.roomId).includes(search);
       const matchesStatus = statusFilter === "ALL" || t.status === statusFilter;
-      // Coerce both sides — same string-vs-number mismatch as the room
-      // picker above can otherwise make tasks disappear from the table
-      // even though they were created successfully.
       const matchesBranch = branchFilter === "ALL" || Number(t.branchId) === Number(branchFilter);
       const matchesCleaner = cleanerFilter === "ALL" || Number(t.cleanerId) === Number(cleanerFilter);
       return matchesSearch && matchesStatus && matchesBranch && matchesCleaner;
@@ -487,10 +416,6 @@ export default function MaintenancePage() {
   const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
   const pagedTasks = filteredTasks.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  // Selects every row on the CURRENT page of the main table, or clears the
-  // selection if the whole page is already selected. Mirrors the room
-  // picker's Select All behavior in the Add Cleaner modal. Declared here,
-  // right after pagedTasks, since both depend on it.
   const allPageTasksSelected =
     pagedTasks.length > 0 && pagedTasks.every((t) => selectedTaskIds.includes(t.id));
 
@@ -510,19 +435,9 @@ export default function MaintenancePage() {
     setSelectedTaskIds([]);
   }, [search, statusFilter, branchFilter, cleanerFilter]);
 
-  // "View All" just lifts the 5-row cap on the Cleaners card; the counts
-  // and delete actions all still hit the same live `cleaners` state.
   const visibleCleaners = showAllCleaners ? cleaners : cleaners.slice(0, 5);
   const visibleSchedule = showFullSchedule ? todaySchedule : todaySchedule.slice(0, 5);
 
-  // The backend's /dashboard endpoint was returning zeroed-out counts even
-  // though the Cleaners and Today's Schedule tables (populated from their
-  // own endpoints) clearly had data. Rather than trust that endpoint for
-  // numbers we can already compute from data we've fetched, derive the top
-  // stat cards directly from `tasks` and `cleaners` so they can never
-  // diverge from what the rest of the page is showing. `totalRooms` still
-  // falls back to the dashboard stat since it may legitimately include
-  // rooms that don't have a task yet.
   const derivedStats = useMemo(() => {
     const completed = tasks.filter((t) => t.status === "CLEANED").length;
     const pending = tasks.filter((t) => t.status === "PENDING").length;
@@ -560,7 +475,6 @@ export default function MaintenancePage() {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
 
-      {/* TOP STATS */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {statsArray.map((stat, i) => (
           <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex flex-col justify-between hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)] transition-all">
@@ -581,7 +495,6 @@ export default function MaintenancePage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* CLEANERS LIST */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-[0_1px_2px_rgba(16,24,40,0.04)] overflow-hidden flex flex-col">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">Cleaners</h2>
@@ -647,7 +560,6 @@ export default function MaintenancePage() {
           </div>
         </div>
 
-        {/* TODAY'S SCHEDULE */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-[0_1px_2px_rgba(16,24,40,0.04)] overflow-hidden flex flex-col">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">Today's Cleaning Schedule</h2>
@@ -713,10 +625,8 @@ export default function MaintenancePage() {
         </div>
       </div>
 
-      {/* FILTER & MAIN TABLE */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
 
-        {/* Filters */}
         <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -776,7 +686,6 @@ export default function MaintenancePage() {
           </button>
         </div>
 
-        {/* Bulk action bar — appears once at least one row is selected */}
         {selectedTaskIds.length > 0 && (
           <div className="px-5 py-2.5 border-b border-blue-100 bg-blue-50/60 flex items-center justify-between">
             <span className="text-[12px] font-medium text-blue-700">
@@ -805,7 +714,6 @@ export default function MaintenancePage() {
           </div>
         )}
 
-        {/* Table */}
         <div className="overflow-x-hidden w-full">
           <table className="w-full text-left text-sm whitespace-normal break-words table-fixed">
             <thead className="bg-gray-50/50 text-[10px] uppercase font-semibold text-gray-400 border-b border-gray-100">
@@ -878,7 +786,6 @@ export default function MaintenancePage() {
           </table>
         </div>
 
-        {/* Pagination & Footer */}
         <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between bg-white rounded-b-2xl">
           <span className="text-[12px] text-gray-500">
             Showing {filteredTasks.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1} to{" "}
@@ -908,7 +815,6 @@ export default function MaintenancePage() {
         </div>
       </div>
 
-      {/* Bottom Info Banner */}
       <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50/50 border border-blue-100 rounded-lg text-blue-600 text-[12px]">
         <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -916,7 +822,6 @@ export default function MaintenancePage() {
         <span>Cleaning status is updated by the assigned cleaner. Please ensure rooms are inspected after cleaning.</span>
       </div>
 
-      {/* ADD CLEANER MODAL — landscape layout: wider modal, 2-column fields */}
       {isAddCleanerOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
@@ -938,7 +843,6 @@ export default function MaintenancePage() {
                 </div>
               )}
 
-              {/* Landscape field grid: Name / Phone / Branch / Active side-by-side on md+ screens */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
@@ -961,9 +865,6 @@ export default function MaintenancePage() {
                     maxLength={10}
                     value={newCleanerPhone}
                     onChange={(e) => {
-                      // Strip anything non-numeric and hard-cap at 10 digits
-                      // as the user types, so it's impossible to paste/type
-                      // long or non-numeric input into the field at all.
                       const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 10);
                       setNewCleanerPhone(digitsOnly);
                       setPhoneError(null);
@@ -1094,7 +995,6 @@ export default function MaintenancePage() {
         </div>
       )}
 
-      {/* TOAST — replaces window.alert() so feedback renders inline */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-[200] animate-in fade-in slide-in-from-bottom-2 duration-200">
           <div
@@ -1121,7 +1021,6 @@ export default function MaintenancePage() {
         </div>
       )}
 
-      {/* CONFIRM MODAL — replaces window.confirm() so it renders inline */}
       {confirmState && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">

@@ -7,15 +7,14 @@ import {
   getTenantWiseEBBill,
   generateRent,
   recordPayment,
-  deleteRent,
   getUserRole,
   getBranchId,
   fetchAllPages,
+  getPendingDamageSummary,
 } from "@/lib/store";
 
 import {
   Room,
-  Bed,
   Rent,
   Tenant,
   TenantEBBill,
@@ -24,7 +23,6 @@ import {
   PaymentMode,
 } from "@/lib/types";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -35,12 +33,8 @@ import {
 } from "@/components/ui/select";
 
 import { toast } from "sonner";
-import { CreditCard, Trash2, Wallet, CheckSquare, Clock, FileText, AlertCircle, Plus, Eye, Printer, MoreVertical, Download, Search, RefreshCw, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { Search, RefreshCw, ChevronRight } from "lucide-react";
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 type EBBillRow = TenantEBBill & {
   roomNumber: string;
@@ -56,6 +50,7 @@ type RentRow = {
   flatNumber: string;
   displayEB: number;
   rentPerBed: number;
+  damageAmount: number;
   total: number;
   paid: number;
   pending: number;
@@ -67,24 +62,11 @@ type RentRow = {
   paymentStatus?: string;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper: extract month & year from a raw TenantEBBill regardless of field name
-// ─────────────────────────────────────────────────────────────────────────────
-function extractMonthYear(bill: TenantEBBill): { month: number; year: number } {
-  const b = bill as any;
-  const month = Number(b.month ?? b.billMonth ?? b.rentMonth ?? 0);
-  const year  = Number(b.year  ?? b.billYear  ?? b.rentYear  ?? 0);
-  return { month, year };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper: resolve roomNumber from a bill — handles all backend field name variants
-// ─────────────────────────────────────────────────────────────────────────────
 function extractRoomNumber(bill: any): string {
   return (
-    bill.roomNumber    ??   // TenantEBBillDTO standard field
-    bill.room_number   ??   // snake_case variant
-    bill.roomNo        ??   // short variant
+    bill.roomNumber    ??  
+    bill.room_number   ??   
+    bill.roomNo        ??  
     ""
   );
 }
@@ -98,15 +80,11 @@ function extractFlatNumber(bill: any): string {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ActionCell
-// ─────────────────────────────────────────────────────────────────────────────
 const ActionCell = ({
   bill,
   rentRecord,
   onGenerate,
   onPayment,
-  onDelete,
 }: {
   bill: RentRow;
   rentRecord: Rent | undefined;
@@ -118,7 +96,6 @@ const ActionCell = ({
     txnId: string,
     bill: RentRow
   ) => void;
-  onDelete: (rent: Rent) => void;
 }) => {
   const [localMode,   setLocalMode]   = useState<PaymentMode | "">("");
   const [localAmount, setLocalAmount] = useState("");
@@ -152,14 +129,12 @@ const ActionCell = ({
 
   return (
     <div className="flex items-center gap-2">
-      {/* If there is no rent record generated yet, show Generate Button */}
       {!rentRecord && (
         <Button size="sm" variant="outline" className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-0" onClick={() => onGenerate(bill)}>
           Generate
         </Button>
       )}
 
-      {/* If unpaid, show quick pay controls */}
       {isUnpaid && (
         <div className="flex items-center gap-1.5 p-1 bg-slate-50 border border-slate-100 rounded-md">
           <Select
@@ -206,9 +181,6 @@ const ActionCell = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  RentPage
-// ─────────────────────────────────────────────────────────────────────────────
 const RentPage = () => {
   const role      = getUserRole()?.toUpperCase();
   const branchId  = getBranchId();
@@ -223,6 +195,13 @@ const RentPage = () => {
   const [selectedRoom, setSelectedRoom] = useState("all");
 
   const [ebBillsMap, setEbBillsMap] = useState<Map<string, EBBillRow[]>>(new Map());
+
+  // Damage shares that exist but haven't been billed into a Rent record yet
+  // (i.e. DamageTenant.rent is still null on the backend). Keyed by tenantId.
+  // Without this, the Rent page only ever read damageAmount off an already
+  // generated Rent row, so a freshly reported damage showed as ₹0 here even
+  // though it appeared correctly on the Damage/Penalty page.
+  const [pendingDamageMap, setPendingDamageMap] = useState<Map<number, number>>(new Map());
 
   const [search, setSearch] = useState("");
   const [month,  setMonth]  = useState(new Date().getMonth() + 1);
@@ -241,22 +220,11 @@ const RentPage = () => {
     (_, index) => currentYear - 5 + index
   );
 
-  const payStatusColor = (status?: string) => {
-    const s = normalizeStatus(status);
-    return s === "PAID"
-      ? "border-green-500 text-green-600"
-      : s === "PARTIAL"
-      ? "border-yellow-500 text-yellow-600"
-      : "border-red-500 text-red-600";
-  };
-
-  /* ── EB bills for current month ── */
   const ebBills: EBBillRow[] = useMemo(() => {
     const key = `${month}-${year}`;
     return ebBillsMap.get(key) ?? [];
   }, [ebBillsMap, month, year]);
 
-  /* ── tenant name map ── */
   const tenantNameMap = useMemo(() => {
     const map = new Map<number, string>();
     tenants.forEach((t) => map.set(Number(t.id), t.name));
@@ -266,47 +234,15 @@ const RentPage = () => {
   const resolveTenantName = (tenantId: number): string =>
     tenantNameMap.get(tenantId) ?? `Tenant ${tenantId}`;
 
-  /* ── scoped rents for summary ── */
-  const scopedRents = useMemo(() => {
-    const seen = new Map<string, Rent>();
-    rents.forEach((r) => {
-      const matchMonthYear =
-        Number(r.rentMonth) === month && Number(r.rentYear) === year;
-      if (!matchMonthYear) return;
-      if (role !== "ADMIN") {
-        const room = rooms.find((rm) => String(rm.id) === String(r.roomId));
-        if (!room || String(room.unitId) !== String(branchId)) return;
-      }
-      const key      = `${r.tenantId}-${r.roomId}-${r.rentMonth}-${r.rentYear}`;
-      const existing = seen.get(key);
-      if (!existing) {
-        seen.set(key, r);
-      } else {
-        const es = normalizeStatus(existing.paymentStatus);
-        const ns = normalizeStatus(r.paymentStatus);
-        if (
-          ns === "PAID" ||
-          (ns === "PARTIAL" && es === "PENDING") ||
-          (ns === "PARTIAL" &&
-            es === "PARTIAL" &&
-            Number(r.paidAmount || 0) > Number(existing.paidAmount || 0))
-        ) {
-          seen.set(key, r);
-        }
-      }
-    });
-    return Array.from(seen.values());
-  }, [rents, rooms, month, year, role, branchId]);
-
-  /* ── initial load ── */
   const reload = async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     try {
-      const [roomList, rentList, tenantList] = await Promise.all([
+      const [roomList, rentList, tenantList, pendingDamages] = await Promise.all([
         fetchAllPages<Room>(getRooms),
         fetchAllPages<Rent>(getRents),
         fetchAllPages<Tenant>(getTenants),
+        getPendingDamageSummary().catch(() => ({} as Record<number, number>)),
       ]);
 
       const filteredRooms =
@@ -317,7 +253,13 @@ const RentPage = () => {
       setRooms(filteredRooms);
       setRents(rentList);
       setTenants(tenantList);
+      setPendingDamageMap(
+        new Map(Object.entries(pendingDamages).map(([k, v]) => [Number(k), Number(v)]))
+      );
 
+      // Month/year selection didn't change here, but the underlying
+      // room/tenant data did — so any cached EB results keyed off the
+      // old room/tenant snapshot must be dropped and re-fetched.
       fetchedEBKeys.current = new Set();
       setEbBillsMap(new Map());
     } catch {
@@ -331,25 +273,6 @@ const RentPage = () => {
     reload();
   }, []);
 
-  /* ─────────────────────────────────────────────────────────────────────────
-     CORE FIX: loadEBForMonth
-     ─────────────────────────────────────────────────────────────────────────
-     ROOT CAUSE CONFIRMED VIA DB: getTenantWiseEBBill({ roomId }) does not
-     reliably scope its response to the roomId passed in — when queried for
-     a room that has no EB reading of its own, the backend can echo back
-     another room's tenant/bill data. The old code trusted the API's
-     b.roomNumber / b.tenantName blindly, which caused one real EB reading
-     (e.g. Anbarasan / Room 101) to be duplicated and mislabeled under
-     unrelated rooms (e.g. D1) in the Rent grid.
-
-     FIX:
-     1. After fetching a room's/flat's bills, VALIDATE each bill actually
-        belongs to that room/flat (via tenantId → tenant.roomId, falling
-        back to roomNumber match). Reject anything that can't be verified.
-     2. After merging all bills, DEDUPE by tenantId so the same tenant can
-        never appear twice for the same month even if a validation edge
-        case slips through.
-  ───────────────────────────────────────────────────────────────────────── */
   useEffect(() => {
     if (rooms.length === 0) return;
 
@@ -366,36 +289,43 @@ const RentPage = () => {
         ];
         const standaloneRooms = rooms.filter((r) => !r.flatId);
 
-        // Lookup: tenantId → room (via tenants array) — used to validate
-        // that a returned bill genuinely belongs to the room/flat queried.
         const tenantRoomLookup = new Map<number, Room>();
         tenants.forEach((t) => {
           const room = rooms.find((r) => String(r.id) === String(t.roomId));
           if (room) tenantRoomLookup.set(Number(t.id), room);
         });
 
-        // ── FLAT-BASED BILLS ──────────────────────────────────────────────
+        const getTenantWiseEBBillWithMonthYear = (params: any) =>
+          getTenantWiseEBBill(params);
+
         const flatBillResults = await Promise.all(
           flatIds.map(async (flatId) => {
             try {
-              const bills = await getTenantWiseEBBill({ flatId, roomId: null });
+              // IMPORTANT: month & year must be passed through so the
+              // backend can filter EB readings for the selected period.
+              // Without this the API previously returned whatever EB
+              // reading it had (in this DB, only the Aug-2026 row),
+              // which is why every month/year selection looked identical.
+              const bills = await getTenantWiseEBBillWithMonthYear({
+                flatId,
+                roomId: null,
+                month,
+                year,
+              });
               if (!bills || bills.length === 0) return [] as EBBillRow[];
 
               return bills
                 .filter((b: any) => {
-                  // Validate: bill's tenant must actually live in a room
-                  // belonging to this flat.
                   if (b.tenantId != null) {
                     const room = tenantRoomLookup.get(Number(b.tenantId));
                     if (room) return String(room.flatId) === String(flatId);
                   }
-                  // Fallback: roomNumber echoed by API must belong to this flat
                   const echoedRoomNumber = extractRoomNumber(b);
                   if (echoedRoomNumber) {
                     const room = rooms.find((r) => r.roomNumber === echoedRoomNumber);
                     if (room) return String(room.flatId) === String(flatId);
                   }
-                  return false; // can't verify → reject rather than mislabel
+                  return false;
                 })
                 .map((b): EBBillRow => {
                   const bAny = b as any;
@@ -409,7 +339,7 @@ const RentPage = () => {
                   }
 
                   if (!flatNumber) {
-                    flatNumber = String(flatId); // fallback: use flatId as identifier
+                    flatNumber = String(flatId);
                   }
 
                   return {
@@ -426,13 +356,14 @@ const RentPage = () => {
           })
         );
 
-        // ── STANDALONE ROOM BILLS ─────────────────────────────────────────
         const roomBillResults = await Promise.all(
           standaloneRooms.map(async (room) => {
             try {
-              const bills = await getTenantWiseEBBill({
+              const bills = await getTenantWiseEBBillWithMonthYear({
                 roomId: room.id,
                 flatId: null,
+                month,
+                year,
               });
               if (!bills || bills.length === 0) return [] as EBBillRow[];
 
@@ -444,10 +375,6 @@ const RentPage = () => {
 
               return bills
                 .filter((b: any) => {
-                  // Validate: only keep bills whose tenant actually lives
-                  // in THIS room. This is what prevents another room's
-                  // bill (e.g. Room 101) from being echoed and relabeled
-                  // as this room's bill (e.g. D1).
                   if (b.tenantId != null) return roomTenantIds.has(Number(b.tenantId));
                   const echoedRoomNumber = extractRoomNumber(b);
                   if (echoedRoomNumber) return echoedRoomNumber === room.roomNumber;
@@ -478,9 +405,6 @@ const RentPage = () => {
         );
 
         const rawBills = [...flatBillResults.flat(), ...roomBillResults.flat()];
-
-        // Belt-and-braces: never show the same tenant twice for the same
-        // month, even if a validation edge case above slips through.
         const seenTenants = new Set<number>();
         const bills = rawBills.filter((b: any) => {
           if (b.tenantId == null) return true;
@@ -508,14 +432,12 @@ const RentPage = () => {
     loadEBForMonth();
   }, [rooms, tenants, month, year]);
 
-  /* ── lookups ── */
   const getRoomObj = (roomNumber: string) =>
     rooms.find((r) => r.roomNumber === roomNumber);
 
   const getRoomById = (roomId: string | number) =>
     rooms.find((r) => String(r.id) === String(roomId));
 
-  // Resolve room: try roomNumber first, then roomId fallback
   const resolveRoom = (roomNumber: string, roomId?: string | number): Room | undefined =>
     getRoomObj(roomNumber) ?? (roomId ? getRoomById(roomId) : undefined);
 
@@ -549,7 +471,6 @@ const RentPage = () => {
     return matches[0];
   };
 
-  /* ── previous pending helper ── */
   const computePreviousPending = (
     tenantId: number,
     beforeMonth: number,
@@ -598,11 +519,9 @@ const RentPage = () => {
     return { previousPending, prevUnpaidRents };
   };
 
-  /* ── filtered bills (branch guard) ── */
   const filteredBills = useMemo(() => {
     return ebBills.filter((bill) => {
       if (role !== "ADMIN" && branchId) {
-        // Resolve room by roomNumber OR by tenantId → tenant → room
         const room =
           getRoomObj(bill.roomNumber) ??
           (() => {
@@ -620,13 +539,10 @@ const RentPage = () => {
     });
   }, [ebBills, role, branchId, rooms, tenants, search]);
 
-  /* ── row data ── */
   const rowData = useMemo((): RentRow[] => {
-    // Part 1: rows from EB bills for the selected month
     const ebRows: RentRow[] = filteredBills.map((bill) => {
       const b = bill as any;
 
-      // Resolve room: roomNumber first, then tenantId → tenant → room as fallback
       let room = resolveRoom(bill.roomNumber);
       if (!room && b.tenantId) {
         const tenant = tenants.find((t) => Number(t.id) === Number(b.tenantId));
@@ -640,13 +556,22 @@ const RentPage = () => {
         room?.id
       );
 
-      const recordTotal = rentRecord ? Number(rentRecord.totalAmount || 0) : 0;
-      const recordRent  = rentRecord ? Number(rentRecord.rentAmount  || 0) : rentPerBed;
-      const recordEB    = rentRecord ? Number(rentRecord.ebAmount    || 0) : b.amount ?? 0;
+      const recordTotal  = rentRecord ? Number(rentRecord.totalAmount  || 0) : 0;
+      const recordRent   = rentRecord ? Number(rentRecord.rentAmount   || 0) : rentPerBed;
+      const recordEB     = rentRecord ? Number(rentRecord.ebAmount     || 0) : b.amount ?? 0;
+      const recordDamage = rentRecord ? Number((rentRecord as any).damageAmount || 0) : 0;
 
-      const displayEB    = rentRecord ? recordEB   : (b.amount ?? 0);
-      const displayRent  = rentRecord ? recordRent : rentPerBed;
-      const displayTotal = rentRecord ? recordTotal : rentPerBed + (b.amount ?? 0);
+      const displayEB     = rentRecord ? recordEB     : (b.amount ?? 0);
+      const displayRent   = rentRecord ? recordRent   : rentPerBed;
+      // Once a Rent row exists, its damageAmount is the source of truth.
+      // Until then, fall back to unbilled DamageTenant shares for this
+      // tenant so a reported damage is visible before "Generate" is clicked.
+      const displayDamage = rentRecord
+        ? recordDamage
+        : (pendingDamageMap.get(Number(b.tenantId)) ?? 0);
+      const displayTotal  = rentRecord
+        ? recordTotal
+        : rentPerBed + (b.amount ?? 0) + displayDamage;
 
       const currentPaid   = Number(rentRecord?.paidAmount || 0);
       const currentStatus = normalizeStatus(rentRecord?.paymentStatus);
@@ -657,18 +582,16 @@ const RentPage = () => {
           : currentStatus === "PARTIAL"
           ? recordTotal - currentPaid
           : recordTotal
-        : rentPerBed + (b.amount ?? 0);
+        : rentPerBed + (b.amount ?? 0) + displayDamage;
 
       const { previousPending } = rentRecord
         ? computePreviousPending(b.tenantId, month, year, rents)
         : { previousPending: 0 };
 
-      // Resolve flatNumber: use from bill, or look up flat name via room.flatId
       const flatNumber =
         bill.flatNumber ||
         (() => {
           if (!room?.flatId) return "";
-          // Try to get flat name from any other bill that has it
           const flatBill = ebBills.find(
             (eb) => eb.flatNumber && resolveRoom(eb.roomNumber)?.flatId === room!.flatId
           );
@@ -682,6 +605,7 @@ const RentPage = () => {
         flatNumber,
         rentPerBed:    displayRent,
         displayEB,
+        damageAmount:  displayDamage,
         total:         displayTotal,
         paid:          currentPaid,
         previousPending,
@@ -696,7 +620,6 @@ const RentPage = () => {
       };
     });
 
-    // Part 2: orphan rent rows (rent record exists but no EB bill this month)
     const ebTenantRoomKeys = new Set(
       filteredBills.map((b) => {
         const bAny = b as any;
@@ -755,11 +678,12 @@ const RentPage = () => {
       })
       .map((r) => {
         const room        = getRoomById(r.roomId);
-        const recordTotal = Number(r.totalAmount || 0);
-        const recordRent  = Number(r.rentAmount  || 0);
-        const recordEB    = Number(r.ebAmount    || 0);
-        const currentPaid = Number(r.paidAmount  || 0);
-        const status      = normalizeStatus(r.paymentStatus);
+        const recordTotal  = Number(r.totalAmount || 0);
+        const recordRent   = Number(r.rentAmount  || 0);
+        const recordEB     = Number(r.ebAmount    || 0);
+        const recordDamage = Number((r as any).damageAmount || 0);
+        const currentPaid  = Number(r.paidAmount  || 0);
+        const status       = normalizeStatus(r.paymentStatus);
 
         const currentPending =
           status === "PAID"
@@ -782,6 +706,7 @@ const RentPage = () => {
           flatNumber:      (room as any)?.flatNumber ?? "-",
           displayEB:       recordEB,
           rentPerBed:      recordRent,
+          damageAmount:    recordDamage,
           total:           recordTotal,
           paid:            currentPaid,
           previousPending,
@@ -794,7 +719,56 @@ const RentPage = () => {
         };
       });
 
-    let allRows = [...ebRows, ...orphanRows];
+    // Tenants with an unbilled damage share but no EB bill row and no Rent
+    // row yet for this month (e.g. damage reported before any EB reading
+    // exists) would otherwise never show up on this page at all. Surface
+    // them as their own rows so the pending damage is still visible.
+    const coveredTenantIds = new Set<number>([
+      ...ebRows.map((r) => r.tenantId),
+      ...orphanRows.map((r) => r.tenantId),
+    ]);
+
+    const damageOnlyRows: RentRow[] = Array.from(pendingDamageMap.entries())
+      .filter(([tenantId, amount]) => amount > 0 && !coveredTenantIds.has(Number(tenantId)))
+      .map(([tenantId]) => {
+        const tenant = tenants.find((t) => Number(t.id) === Number(tenantId));
+        const room   = tenant ? getRoomById(tenant.roomId) : undefined;
+
+        if (role !== "ADMIN" && branchId && (!room || String(room.unitId) !== String(branchId))) {
+          return null;
+        }
+
+        const resolvedName = resolveTenantName(Number(tenantId));
+        const searchStr = `${resolvedName} ${room?.roomNumber ?? ""} ${
+          (room as any)?.flatNumber ?? ""
+        }`.toLowerCase();
+        if (!searchStr.includes(search.toLowerCase())) return null;
+
+        const damageAmount = pendingDamageMap.get(Number(tenantId)) ?? 0;
+        const rentPerBed   = room?.rentPerBed ?? 0;
+
+        return {
+          tenantId:      Number(tenantId),
+          tenantName:    resolvedName,
+          roomNumber:    room?.roomNumber ?? "—",
+          flatNumber:    (room as any)?.flatNumber ?? "-",
+          displayEB:     0,
+          rentPerBed,
+          damageAmount,
+          total:         rentPerBed + damageAmount,
+          paid:          0,
+          previousPending: 0,
+          currentPending:  rentPerBed + damageAmount,
+          pending:         rentPerBed + damageAmount,
+          rentRecord:      undefined,
+          unitId:          room?.unitId,
+          amount:          0,
+          paymentStatus:   undefined,
+        } as RentRow;
+      })
+      .filter((r): r is RentRow => r !== null);
+
+    let allRows = [...ebRows, ...orphanRows, ...damageOnlyRows];
 
     if (selectedBranch !== "all") {
       allRows = allRows.filter((r) => String(r.unitId) === selectedBranch);
@@ -808,9 +782,8 @@ const RentPage = () => {
     }
 
     return allRows;
-  }, [filteredBills, rooms, tenants, selectedBranch, selectedRoom, month, year, rents, search, tenantNameMap]);
+  }, [filteredBills, rooms, tenants, selectedBranch, selectedRoom, month, year, rents, search, tenantNameMap, pendingDamageMap]);
 
-  /* ── room options (scoped to selected branch) ── */
   const roomOptions = useMemo(() => {
     const scoped =
       selectedBranch === "all"
@@ -821,7 +794,6 @@ const RentPage = () => {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [rooms, selectedBranch]);
 
-  /* ── branch options ── */
   const branchOptions = useMemo(() => {
     const unique = new Map();
     rooms.forEach((r) => {
@@ -835,9 +807,7 @@ const RentPage = () => {
     return Array.from(unique.values());
   }, [rooms]);
 
-  /* ── handlers ── */
   const handleGenerate = async (bill: RentRow) => {
-    // Resolve room via roomNumber, then fallback via tenantId → tenant → room
     let room = getRoomObj(bill.roomNumber);
     if (!room) {
       const tenant = tenants.find((t) => Number(t.id) === bill.tenantId);
@@ -947,51 +917,17 @@ const RentPage = () => {
     }
   };
 
-  const handleDelete = async (rent: Rent) => {
-    if (!confirm("Delete this rent record?")) return;
-    try {
-      await deleteRent(String(rent.id));
-      toast.success("Rent deleted");
-      reload();
-    } catch {
-      toast.error("Delete failed");
-    }
-  };
-
-  /* ── Stats & Derived Values ── */
   const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 8;
+  const pageSize = 10;
   const paginatedRows = rowData.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
-  const pendingCount = rowData.filter(r => (normalizeStatus(r.paymentStatus) === 'PENDING' || normalizeStatus(r.paymentStatus) === 'PARTIAL') && r.pending > 0).length;
-  const paidCount = rowData.filter(r => normalizeStatus(r.paymentStatus) === 'PAID').length;
   const overdueCount = rowData.filter(r => (normalizeStatus(r.paymentStatus) === 'PENDING' || normalizeStatus(r.paymentStatus) === 'PARTIAL') && r.pending > 0).length;
-  const totalTenants = rowData.length;
-
-  const paidPercent = totalTenants ? (paidCount / totalTenants) * 100 : 0;
-  const pendingPercent = totalTenants ? (pendingCount / totalTenants) * 100 : 0;
-  const overduePercent = totalTenants ? (overdueCount / totalTenants) * 100 : 0;
-
-  const totalCollected = rowData.reduce((sum, r) => sum + (r.paid || 0), 0);
-  const totalPending = rowData.reduce((sum, r) => sum + (r.pending || 0), 0);
-  const totalAmount = totalCollected + totalPending;
-  const collectionPercent = totalAmount ? Math.round((totalCollected / totalAmount) * 10000) / 100 : 0;
-
-  const mockOverdueAmount = rowData.filter(r => (normalizeStatus(r.paymentStatus) === 'PENDING' || normalizeStatus(r.paymentStatus) === 'PARTIAL') && r.pending > 0).reduce((sum, r) => sum + (r.pending || 0), 0);
-
-  const pieData = [
-    { name: "Collected", value: totalCollected, color: "#22c55e" },
-    { name: "Pending", value: totalPending, color: "#f97316" }
-  ];
 
   const topOverdueTenants = [...rowData]
     .filter(r => (normalizeStatus(r.paymentStatus) === 'PENDING' || normalizeStatus(r.paymentStatus) === 'PARTIAL') && r.pending > 0)
     .sort((a, b) => b.pending - a.pending)
     .slice(0, 3);
 
-  /* ══════════════════════════════════════════════════════════
-     RENDER
-  ══════════════════════════════════════════════════════════ */
   return (
     <div className="min-h-full bg-[#fcfcfc] text-slate-900 font-sans pb-10">
       <style>{`
@@ -1009,7 +945,7 @@ const RentPage = () => {
         .rt-panel-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
         .rt-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; }
 
-        .rt-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
+        .rt-table { width: 100%; border-collapse: collapse; min-width: 1200px; }
         .rt-table th { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
         .rt-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
         .rt-table tr:hover { background: #fdfcff; }
@@ -1023,6 +959,7 @@ const RentPage = () => {
         .rt-branch { font-size: 13px; font-weight: 500; color: #0f172a; }
         .rt-branch-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
         .rt-value { font-size: 13px; font-weight: 600; color: #0f172a; }
+        .rt-value.muted { color: #94a3b8; font-weight: 500; }
         .rt-date { font-size: 13px; font-weight: 500; color: #475569; }
 
         .rt-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #fff; }
@@ -1058,9 +995,6 @@ const RentPage = () => {
               <div className="rt-panel-header">
                 <div className="rt-panel-title">Rent Collection</div>
                 <div className="flex gap-2">
-                  {/* <Button variant="outline" size="sm" className="h-8">
-                    <Download size={14} className="mr-2" /> Export
-                  </Button> */}
                   {hasAccess && (
                     <Button size="sm" className="h-8 bg-[#5200FF] hover:bg-[#4200cc] text-white" onClick={handleGenerateAll}>
                        ALL Generation
@@ -1069,7 +1003,6 @@ const RentPage = () => {
                 </div>
               </div>
 
-              {/* Filters */}
               <div className="flex items-center gap-3 p-4 border-b border-[#f1f5f9] bg-white flex-wrap">
                 <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[150px]">
                   <Select value={selectedBranch} onValueChange={(v) => { setSelectedBranch(v); setSelectedRoom("all"); }} disabled={!hasAccess || (role !== "ADMIN" && role !== "SUPER_ADMIN")}>
@@ -1161,14 +1094,17 @@ const RentPage = () => {
                       <th>ROOM & BED</th>
                       <th>BRANCH</th>
                       <th>RENT (₹)</th>
+                      <th>EB (₹)</th>
+                      <th>DAMAGE (₹)</th>
+                      <th>TOTAL (₹)</th>
                       <th>STATUS</th>
-                      <th>AMOUNT (₹)</th>
+                      <th>PENDING (₹)</th>
                       <th>ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedRows.length === 0 ? (
-                      <tr><td colSpan={7} className="text-center py-12 text-slate-400">No rent records found.</td></tr>
+                      <tr><td colSpan={10} className="text-center py-12 text-slate-400">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
                     ) : (
                       paginatedRows.map((row, i) => {
                         const sStatus = row.rentRecord?.paymentStatus ? normalizeStatus(row.rentRecord.paymentStatus) : "UNGENERATED";
@@ -1207,18 +1143,24 @@ const RentPage = () => {
                             </td>
                             <td>
                               <div className="rt-branch">{branchOptions.find(b => String(b.id) === String(row.unitId))?.name || "Main Branch"}</div>
-                              {/* <div className="rt-branch-sub">Tamil Nadu</div> */}
                             </td>
-                            {/* ROUNDED: Math.round() applied so decimal values (e.g. 7,708.5) display as whole numbers */}
+
+                            <td><span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.rentPerBed))}</span></td>
+                            <td><span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.displayEB))}</span></td>
+                            <td>
+                              <span className={`rt-value ${row.damageAmount <= 0 ? 'muted' : ''}`}>
+                                {row.damageAmount > 0
+                                  ? new Intl.NumberFormat('en-IN').format(Math.round(row.damageAmount))
+                                  : '—'}
+                              </span>
+                            </td>
                             <td><span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.total))}</span></td>
                             <td><div className={`rt-status ${statusClass}`}>{displayStatus}</div></td>
                             <td>
-                              {/* ROUNDED: Math.round() applied so decimal values (e.g. 7,708.5) display as whole numbers */}
                               <div className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.pending > 0 ? row.pending : row.total))}</div>
-                              
                             </td>
                             <td>
-                              <ActionCell bill={row} rentRecord={row.rentRecord} onGenerate={handleGenerate} onPayment={handlePayment} onDelete={handleDelete} />
+                              <ActionCell bill={row} rentRecord={row.rentRecord} onGenerate={handleGenerate} onPayment={handlePayment} />
                             </td>
                           </tr>
                         );

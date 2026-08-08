@@ -6,7 +6,7 @@ import {
   updateAdmin, getAllHostelsWithAdmins, fetchAllPages, fetchTenants,
   fetchBranches,
 } from "@/lib/store";
-import { Admin, Hostel, HostelAdmin, Tenant, Branch, Plan, SubscriptionSummary } from "@/lib/types";
+import { Admin, HostelAdmin, Tenant, Branch } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,10 +19,9 @@ import { toast } from "sonner";
 import {
   Plus, Pencil, Trash2, ShieldCheck, ShieldOff, Search, Eye,
   Building2, Users, UserCheck, IndianRupee, Crown,
-  TrendingUp, CalendarDays, ChevronRight, Zap, RefreshCw,
+  CalendarDays, ChevronRight, Zap, RefreshCw,
 } from "lucide-react";
 
-// ── Types ──────────────────────────────────────────────────────────────────
 interface ExtendedAdminRequest {
   email: string;
   password: string;
@@ -31,7 +30,6 @@ interface ExtendedAdminRequest {
   hostelId: number | null;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
 function ActivityIcon({ type }: { type: string }) {
   const base: React.CSSProperties = {
     width: 36, height: 36, borderRadius: "50%",
@@ -41,14 +39,6 @@ function ActivityIcon({ type }: { type: string }) {
   if (type === "admin")  return <div style={{ ...base, background: "#f5f3ff" }}><Users size={15} color="#8b5cf6" /></div>;
   if (type === "sub")    return <div style={{ ...base, background: "#ecfdf5" }}><Crown size={15} color="#10b981" /></div>;
   return <div style={{ ...base, background: "#fff7ed" }}><Zap size={15} color="#f97316" /></div>;
-}
-
-function SubStatusBadge({ status }: { status: string }) {
-  if (status === "Active")
-    return <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, background: "#dcfce7", color: "#16a34a" }}>Active</span>;
-  if (status === "Expiring Soon")
-    return <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, background: "#fff7ed", color: "#ea580c" }}>Expiring Soon</span>;
-  return <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, background: "#fef2f2", color: "#dc2626" }}>Expired</span>;
 }
 
 function SkeletonCard() {
@@ -62,31 +52,22 @@ function SkeletonCard() {
   );
 }
 
-// ── Rupee formatter ────────────────────────────────────────────────────────
 function formatINR(amount: number): string {
   if (amount >= 10_00_000) return `₹${(amount / 10_00_000).toFixed(1)}L`;
   if (amount >= 1_000)     return `₹${amount.toLocaleString("en-IN")}`;
   return `₹${amount}`;
 }
 
-// ── Main Component ─────────────────────────────────────────────────────────
 export default function SuperAdminPage() {
   const location = useLocation();
   const navigate  = useNavigate();
   const isAdminsView = location.pathname === "/super-admin/admins";
 
-  // ── Dashboard data ─────────────────────────────────────────────────────
-  // NOTE: typed as HostelAdmin[] (not Hostel[]) because getAllHostelsWithAdmins
-  // returns the merged hostel+admin shape — including adminPhone, which is
-  // the real source of truth for the "Phone" column below (Hostel.phone is
-  // usually empty; the phone number lives on the admin/user record).
   const [hostels, setHostels]   = useState<HostelAdmin[]>([]);
   const [tenants, setTenants]   = useState<Tenant[]>([]);
-  const [subscriptionSummary, setSubscriptionSummary] = useState<SubscriptionSummary | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
 
-  // ── Admin management state ─────────────────────────────────────────────
   const [admins,     setAdmins]     = useState<any[]>([]);
   const [adminTotal, setAdminTotal] = useState(0);
   const [adminPage,  setAdminPage]  = useState(0);
@@ -99,41 +80,23 @@ export default function SuperAdminPage() {
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewTarget, setViewTarget] = useState<any | null>(null);
 
-  // NOTE: Plan assignment (Select-based picker) is temporarily disabled.
-  // `getPlans` and `assignHostelPlan` are not wired up to the store yet, so
-  // `plans` is intentionally left as an empty array and the plan column /
-  // dialog field render as READ-ONLY text instead of an editable <Select>.
-  // This avoids calling an undefined `handleAssignPlan` handler.
-  const [plans] = useState<Plan[]>([]);
-  const [assigningPlan] = useState(false);
-
-  // ── Load all dashboard stats ───────────────────────────────────────────
-  // NOTE: Hostels are now loaded via getAllHostelsWithAdmins — the SAME
-  // endpoint the Hostels & Admins page uses. Previously this called the
-  // legacy getHostels() endpoint, which was returning a different (and
-  // incomplete) hostel list than the Hostels & Admins screen. That caused
-  // "Total Hostels" and "Monthly Revenue" here to disagree with the real
-  // totals shown on /super-admin/hostels (e.g. showing ₹50,000 instead of
-  // the correct ₹75,000 across all hostels). Using the same source keeps
-  // both screens in sync.
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const [hList, tList, sSummary] = await Promise.allSettled([
-        fetchAllPages<HostelAdmin>((pg, size) => getAllHostelsWithAdmins(pg, size), 50),
-        fetchAllPages<Tenant>((pg, size) => fetchTenants(pg, size), 100),
-        fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size), 50),
+      const [hList, tList, bList] = await Promise.allSettled([
+        fetchAllPages<HostelAdmin>((pg, size) => getAllHostelsWithAdmins(pg, size), 10),
+        fetchAllPages<Tenant>((pg, size) => fetchTenants(pg, size), 10),
+        fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size), 10),
       ]);
       if (hList.status === "fulfilled") setHostels(hList.value);
       if (tList.status === "fulfilled") setTenants(tList.value);
+      if (bList.status === "fulfilled") setBranches(bList.value);
     } catch {
-      // individual errors surfaced via allSettled above
     } finally {
       setStatsLoading(false);
     }
   }, []);
 
-  // ── Load admins (paginated) ────────────────────────────────────────────
   const loadAdmins = useCallback(async () => {
     setAdminLoading(true);
     try {
@@ -147,74 +110,17 @@ export default function SuperAdminPage() {
     }
   }, [adminPage]);
 
-  // ── Load plans (once — cheap, rarely changes, needed by the admin dialog) ──
-  // const loadPlans = useCallback(async () => {
-  //   try {
-  //     const res = await getPlans(0, 100);
-  //     setPlans(res.content);
-  //   } catch {
-  //     // silent: the plan picker just shows "No plans created yet" if this fails
-  //   }
-  // }, []);
-
   useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { loadAdmins(); }, [loadAdmins]);
-  // useEffect(() => { loadPlans(); }, [loadPlans]);
   useEffect(() => { if (!dialogOpen) setHostelSearch(""); }, [dialogOpen]);
 
-  // ── Computed stats ─────────────────────────────────────────────────────
-  const activeHostels  = hostels.filter(h => (h as any).active !== false);
-  const activeTenants  = tenants.filter(t => t.status === "Active");
+  const activeTenants = tenants.filter(t => t.status === "Active");
 
-  // Monthly Revenue is computed the same way the Hostels & Admins page
-  // computes each row's "Total Price" — capacityBeds * bedPrice, summed
-  // across every hostel — so the dashboard card and the per-hostel totals
-  // always match, now that both screens read hostels from the same
-  // getAllHostelsWithAdmins endpoint.
   const monthlyRevenue = hostels.reduce((sum, h) => {
     const capacityBeds = (h as any).capacityBeds ?? 0;
     const bedPrice = (h as any).bedPrice ?? 0;
     return sum + capacityBeds * bedPrice;
   }, 0);
-
-  // Active admins count from the already-fetched first page (total gives real count)
-  const activeAdminCount = adminTotal;
-
-  // Top hostels by occupancy — group tenants by hostelId via branch
-  // Map hostel → branches → count active tenants
-  const branchByHostelId: Record<number, Branch[]> = {};
-  branches.forEach(b => {
-    if (b.hostelId != null) {
-      (branchByHostelId[b.hostelId] ||= []).push(b);
-    }
-  });
-
-  // Need rooms data for capacity; use tenants per hostel as approximation
-  const hostelOccupancyList = hostels
-    .map(h => {
-      const hostelBranchIds = (branchByHostelId[h.id] || []).map(b => b.id);
-      const hostelActiveTenants = activeTenants.filter(t => {
-        return (t as any).hostelId === h.id || (t as any).hostelName === h.name;
-      });
-      const totalCapacity = hostelActiveTenants.length > 0
-        ? Math.max(hostelActiveTenants.length, Math.round(hostelActiveTenants.length * (100 / 80)))
-        : null;
-      return {
-        ...h,
-        activeTenantCount: hostelActiveTenants.length,
-        totalCapacity,
-      };
-    })
-    .filter(h => h.activeTenantCount > 0 || hostels.length <= 10)
-    .sort((a, b) => b.activeTenantCount - a.activeTenantCount)
-    .slice(0, 5);
-
-  const subscriptionRows = hostels.slice(0, 5).map(h => ({
-    id: h.id,
-    hostel: h.name,
-    plan: (h as any).planName || "No Plan",
-    status: (h as any).planName ? "Active" : "Unassigned",
-  }));
 
   const recentActivity = [
     ...admins.slice(0, 3).map((a, i) => ({
@@ -231,7 +137,6 @@ export default function SuperAdminPage() {
     })),
   ].slice(0, 5);
 
-  // ── Admin dialog helpers ───────────────────────────────────────────────
   const openCreate = () => {
     setEditTarget(null);
     setForm({ email: "", password: "", name: "", phone: "", hostelId: null });
@@ -273,35 +178,12 @@ export default function SuperAdminPage() {
     } catch { toast.error("Toggle failed"); }
   };
 
-  // Plan assignment is currently READ-ONLY (see `plans` state note above).
-  // The handler + its backend call (assignHostelPlan) are disabled until the
-  // store wiring is restored. Both Select-based plan pickers that used to
-  // call this have been replaced with plain read-only text elsewhere in
-  // this file, so nothing references handleAssignPlan anymore.
-  // const handleAssignPlan = async (hostelId: number, planId: number) => {
-  //   const target = plans.find(p => p.id === planId);
-  //   if (!target) return;
-  //   setAssigningPlan(true);
-  //   const prevHostels = hostels;
-  //   setHostels(hs => hs.map(h => h.id === hostelId ? { ...h, planId, planName: target.name } as HostelAdmin : h));
-  //   try {
-  //     await assignHostelPlan(hostelId, planId);
-  //     toast.success(`Plan set to ${target.name}`);
-  //   } catch (e: any) {
-  //     setHostels(prevHostels); // rollback on failure
-  //     toast.error(e?.response?.data?.message || "Failed to assign plan");
-  //   } finally {
-  //     setAssigningPlan(false);
-  //   }
-  // };
-
   const filteredHostels = hostels.filter(h => h.name.toLowerCase().includes(hostelSearch.toLowerCase()));
   const selectedHostel = hostels.find(h => h.id === form.hostelId);
 
   const viewHostel = viewTarget?.hostelId != null ? hostels.find(h => h.id === viewTarget.hostelId) : undefined;
   const viewPlanName = (viewHostel as any)?.planName ?? null;
 
-  // ══════════════════════════════════════════════════════════════════════
   return (
     <>
       <style>{`
@@ -378,7 +260,6 @@ export default function SuperAdminPage() {
 
       <div className="sa-wrap">
 
-        {/* ── Toolbar ───────────────────────────────────────────────────── */}
         <div className="sa-toolbar">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div className="sa-date">
@@ -414,16 +295,13 @@ export default function SuperAdminPage() {
           )}
         </div>
 
-        {/* ════════════════ DASHBOARD VIEW ══════════════════════════════ */}
         {!isAdminsView && (
           <>
-            {/* ── Stat Cards ─────────────────────────────────────────── */}
             <div className="sa-stats">
               {statsLoading ? (
                 Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)
               ) : (
                 <>
-                  {/* Total Hostels */}
                   <div className="sa-card">
                     <div className="sa-card-top">
                       <div>
@@ -435,13 +313,8 @@ export default function SuperAdminPage() {
                         <Building2 size={20} color="#3b82f6" />
                       </div>
                     </div>
-                    <div className="sa-card-growth">
-                      <TrendingUp size={12} />
-                      Live Data
-                    </div>
                   </div>
 
-                  {/* Total Admins */}
                   <div className="sa-card">
                     <div className="sa-card-top">
                       <div>
@@ -453,13 +326,8 @@ export default function SuperAdminPage() {
                         <Users size={20} color="#8b5cf6" />
                       </div>
                     </div>
-                    <div className="sa-card-growth">
-                      <TrendingUp size={12} />
-                      Live Data
-                    </div>
                   </div>
 
-                  {/* Total Tenants */}
                   <div className="sa-card">
                     <div className="sa-card-top">
                       <div>
@@ -471,13 +339,8 @@ export default function SuperAdminPage() {
                         <UserCheck size={20} color="#10b981" />
                       </div>
                     </div>
-                    <div className="sa-card-growth">
-                      <TrendingUp size={12} />
-                      Live Data
-                    </div>
                   </div>
 
-                  {/* Monthly Revenue */}
                   <div className="sa-card">
                     <div className="sa-card-top">
                       <div>
@@ -491,13 +354,8 @@ export default function SuperAdminPage() {
                         <IndianRupee size={20} color="#f97316" />
                       </div>
                     </div>
-                    <div className="sa-card-growth">
-                      <TrendingUp size={12} />
-                      {new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
-                    </div>
                   </div>
 
-                  {/* Active Branches */}
                   <div className="sa-card">
                     <div className="sa-card-top">
                       <div>
@@ -509,18 +367,12 @@ export default function SuperAdminPage() {
                         <Crown size={20} color="#a855f7" />
                       </div>
                     </div>
-                    <div className="sa-card-growth">
-                      <TrendingUp size={12} />
-                      Live Data
-                    </div>
                   </div>
                 </>
               )}
             </div>
 
-            {/* ── Top Hostels + Recent Activity ──────────────────────── */}
             <div className="sa-two-col">
-              {/* Top Hostels by Occupancy */}
               <div className="sa-panel">
                 <div className="sa-panel-header">
                   <span className="sa-panel-title">Hostels Overview</span>
@@ -591,7 +443,6 @@ export default function SuperAdminPage() {
                 )}
               </div>
 
-              {/* Recent Activity — derived from real admin + hostel data */}
               <div className="sa-panel">
                 <div className="sa-panel-header">
                   <span className="sa-panel-title">Recent Activity</span>
@@ -640,7 +491,6 @@ export default function SuperAdminPage() {
               </div>
             </div>
 
-            {/* ── Hostels / Subscription Status Table ──────────────────── */}
             <div className="sa-panel">
               <div className="sa-panel-header">
                 <span className="sa-panel-title">Hostel Directory</span>
@@ -676,9 +526,6 @@ export default function SuperAdminPage() {
                           <td style={{ color: "#64748b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {h.address || "—"}
                           </td>
-                          {/* Phone now comes from the admin/user record (adminPhone),
-                              since Hostel.phone is typically unset. Falls back to
-                              h.phone in case a hostel-level number is ever populated. */}
                           <td style={{ color: "#64748b" }}>{h.adminPhone || h.phone || "—"}</td>
                           <td style={{ color: "#64748b" }}>
                             {hostelBranches.length > 0 ? hostelBranches.length : (h.branchCount ?? "—")}
@@ -698,7 +545,6 @@ export default function SuperAdminPage() {
           </>
         )}
 
-        {/* ════════════════ ADMIN MANAGEMENT VIEW ══════════════════════ */}
         {isAdminsView && (
           <div className="sa-admin-panel">
             <div className="sa-admin-panel-header">
@@ -770,11 +616,6 @@ export default function SuperAdminPage() {
                             )}
                           </td>
                           <td>
-                            {/* Plan assignment is read-only for now — see note near
-                                the `plans` state declaration above. Previously this
-                                rendered an editable <Select> wired to the now-removed
-                                handleAssignPlan handler, which caused a build error
-                                (handleAssignPlan is not defined). */}
                             {adminHostelId == null ? (
                               <span style={{ fontSize: 11, color: "#cbd5e1" }}>—</span>
                             ) : hostelPlanName ? (
@@ -846,7 +687,6 @@ export default function SuperAdminPage() {
         )}
       </div>
 
-      {/* ════ View Admin Dialog (read-only) ════ */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
         <DialogContent className="sm:max-w-[400px] rounded-2xl border border-slate-200 shadow-2xl">
           <DialogHeader>
@@ -907,7 +747,6 @@ export default function SuperAdminPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ════ Create / Edit Admin Dialog ════ */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[420px] rounded-2xl border border-slate-200 shadow-2xl max-h-[85vh] flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
@@ -986,10 +825,6 @@ export default function SuperAdminPage() {
                 </div>
               ) : (
                 <>
-                  {/* Read-only plan display — plan assignment editing is disabled
-                      until getPlans / assignHostelPlan are wired up in the store.
-                      Previously this was an editable <Select> that called the now-
-                      removed handleAssignPlan, which caused a build error. */}
                   <div style={{
                     border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px",
                     fontSize: 13, fontWeight: 600,

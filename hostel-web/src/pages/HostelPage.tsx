@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { fetchAllPages, getHostels, createHostel, updateHostel, deleteHostel, fetchTenants, fetchBranches } from "@/lib/store";
 import { Hostel, HostelRequest, Tenant, Branch } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import {
   Building2, Users, Download, Filter, Plus, Pencil, Trash2, Eye, MoreVertical,
-  Search, ChevronRight, ChevronLeft, ChevronDown, CheckCircle2, XCircle, AlertCircle, BedDouble, RefreshCw
+  Search, ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BedDouble, RefreshCw
 } from "lucide-react";
 
 /* ── Types ──
@@ -100,9 +100,9 @@ const HostelPage = () => {
     setLoading(true);
     try {
       const [hList, tList, bList] = await Promise.all([
-        fetchAllPages<Hostel>((pg, size) => getHostels(pg, size), 50).catch(() => []),
-        fetchAllPages<Tenant>((pg, size) => fetchTenants(pg, size), 100).catch(() => []),
-        fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size), 50).catch(() => []),
+        fetchAllPages<Hostel>((pg, size) => getHostels(pg, size), 10).catch(() => []),
+        fetchAllPages<Tenant>((pg, size) => fetchTenants(pg, size), 10).catch(() => []),
+        fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size), 10).catch(() => []),
       ]);
       setHostels(hList);
       setTenants(tList);
@@ -118,13 +118,6 @@ const HostelPage = () => {
 
   /* ── Computed Data ── */
   const activeTenants = tenants.filter(t => t.status === "Active");
-
-  const branchByHostelId: Record<number, Branch[]> = {};
-  branches.forEach(b => {
-    if (b.hostelId != null) {
-      (branchByHostelId[b.hostelId] ||= []).push(b);
-    }
-  });
 
   const enrichedHostels = hostels.map((h, i) => {
     const hostelActiveTenants = activeTenants.filter(t => {
@@ -317,8 +310,6 @@ const HostelPage = () => {
       `}</style>
 
       <div className="h-wrap">
-        
-
         {/* ── Stat Cards ── */}
         <div className="h-stats">
           <div className="h-stat-card">

@@ -13,26 +13,22 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-    useEffect(() => {
-      const role = getUserRole();  // from auth.ts
-      if (!role) return;
+  useEffect(() => {
+    const role = getUserRole();
+    if (!role) return;
 
-      // ✅ Same role-based redirect for already-logged-in users
-      if (role === "SUPER_ADMIN") {
-        navigate("/super-admin", { replace: true });
-      } else if (role === "ADMIN") {
-        navigate("/admin", { replace: true });
-      } else {
-        navigate("/dashboard", { replace: true });
-      }
-    }, [navigate]);
+    if (role === "SUPER_ADMIN") {
+      navigate("/super-admin", { replace: true });
+    } else {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      // Login.tsx — replace the navigate call inside handleLogin
       const data = await loginUser(email, password);
       sessionStorage.setItem("token", data.token);
       sessionStorage.setItem("refreshToken", data.refreshToken);
@@ -41,14 +37,12 @@ export default function Login() {
         sessionStorage.setItem("branchId", String(data.branchId));
       }
 
-      // ✅ Route each role to its correct landing page
       if (data.role === "SUPER_ADMIN") {
         navigate("/super-admin", { replace: true });
       } else if (data.role === "ADMIN" && data.subscriptionExpired) {
-        // Subscription Expired mode: skip the dashboard entirely.
         navigate("/subscription", { replace: true });
       } else {
-        navigate("/dashboard", { replace: true });  // ADMIN, WARDEN, TENANT
+        navigate("/dashboard", { replace: true });
       }
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
@@ -75,7 +69,6 @@ export default function Login() {
           background: #f5ede4;
         }
 
-        /* ── Left Panel ── */
         .pg-left {
           flex: 1;
           position: relative;
@@ -87,7 +80,6 @@ export default function Login() {
           background: #2c1810;
         }
 
-        /* Warm architectural texture overlay */
         .pg-left::before {
           content: '';
           position: absolute;
@@ -110,7 +102,6 @@ export default function Login() {
           pointer-events: none;
         }
 
-        /* Warm gradient wash */
         .pg-left::after {
           content: '';
           position: absolute;
@@ -121,7 +112,6 @@ export default function Login() {
           pointer-events: none;
         }
 
-        /* Decorative arch shape */
         .arch-bg {
           position: absolute;
           top: 50%;
@@ -146,7 +136,6 @@ export default function Login() {
           z-index: 0;
         }
 
-        /* Horizontal rule lines */
         .h-lines {
           position: absolute;
           right: 0;
@@ -168,7 +157,6 @@ export default function Login() {
         }
         .h-lines span:nth-child(even) { width: 20px; }
 
-        /* Top badge */
         .pg-badge {
           position: relative;
           z-index: 2;
@@ -197,7 +185,6 @@ export default function Login() {
           color: rgba(245,196,147,0.7);
         }
 
-        /* Bottom brand copy */
         .pg-brand {
           position: relative;
           z-index: 2;
@@ -240,40 +227,6 @@ export default function Login() {
           max-width: 280px;
         }
 
-        /* Stats row */
-        .pg-stats {
-          position: relative;
-          z-index: 2;
-          display: flex;
-          gap: 32px;
-          margin-top: 36px;
-          padding-top: 28px;
-          border-top: 1px solid rgba(186,97,42,0.2);
-        }
-
-        .stat {
-          display: flex;
-          flex-direction: column;
-          gap: 3px;
-        }
-
-        .stat-num {
-          font-family: 'Cormorant Garamond', serif;
-          font-size: 28px;
-          font-weight: 600;
-          color: #e0905a;
-          line-height: 1;
-        }
-
-        .stat-label {
-          font-size: 10px;
-          font-weight: 400;
-          letter-spacing: 1.5px;
-          text-transform: uppercase;
-          color: rgba(245,237,228,0.35);
-        }
-
-        /* ── Right Form Panel ── */
         .pg-right {
           width: 460px;
           min-height: 100vh;
@@ -285,7 +238,6 @@ export default function Login() {
           position: relative;
         }
 
-        /* Subtle texture */
         .pg-right::before {
           content: '';
           position: absolute;
@@ -300,7 +252,6 @@ export default function Login() {
           pointer-events: none;
         }
 
-        /* Vertical accent line */
         .pg-right::after {
           content: '';
           position: absolute;
@@ -315,7 +266,6 @@ export default function Login() {
           z-index: 1;
         }
 
-        /* Eyebrow */
         .form-eyebrow {
           display: flex;
           align-items: center;
@@ -337,7 +287,6 @@ export default function Login() {
           color: #c47a45;
         }
 
-        /* Title */
         .form-title {
           font-family: 'Cormorant Garamond', serif;
           font-size: 42px;
@@ -362,7 +311,6 @@ export default function Login() {
           letter-spacing: 0.3px;
         }
 
-        /* Fields */
         .field-group {
           margin-bottom: 22px;
         }
@@ -406,7 +354,6 @@ export default function Login() {
           transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
         }
 
-        /* Room for the eye toggle button on the password field */
         .field-input.has-toggle {
           padding-right: 48px;
         }
@@ -422,7 +369,6 @@ export default function Login() {
           font-weight: 300;
         }
 
-        /* Password visibility toggle */
         .field-toggle-btn {
           position: absolute;
           right: 14px;
@@ -451,7 +397,6 @@ export default function Login() {
           border-radius: 4px;
         }
 
-        /* Error */
         .error-banner {
           display: flex;
           align-items: flex-start;
@@ -476,7 +421,6 @@ export default function Login() {
           line-height: 1.5;
         }
 
-        /* Submit */
         .submit-wrap {
           margin-top: 8px;
           position: relative;
@@ -531,7 +475,6 @@ export default function Login() {
           gap: 10px;
         }
 
-        /* Arrow decoration on button */
         .btn-arrow {
           font-size: 16px;
           transition: transform 0.2s;
@@ -541,7 +484,6 @@ export default function Login() {
           transform: translateX(3px);
         }
 
-        /* Divider */
         .form-divider {
           display: flex;
           align-items: center;
@@ -555,7 +497,6 @@ export default function Login() {
           background: #d4c5ba;
         }
 
-        /* Footer */
         .form-footer {
           margin-top: 20px;
           text-align: center;
@@ -570,7 +511,6 @@ export default function Login() {
           color: #8a6a58;
         }
 
-        /* Spinner */
         .spinner {
           display: inline-block;
           width: 15px; height: 15px;
@@ -583,7 +523,6 @@ export default function Login() {
 
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* Responsive */
         @media (max-width: 820px) {
           .pg-left { display: none; }
           .pg-right {
@@ -594,7 +533,6 @@ export default function Login() {
       `}</style>
 
       <div className="pg-root">
-        {/* Left decorative panel */}
         <div className="pg-left">
           <div className="arch-bg" />
           <div className="arch-bg-2" />
@@ -616,25 +554,9 @@ export default function Login() {
             <p>
               A home away from home — managing comfort, community, and care for every resident.
             </p>
-
-            {/* <div className="pg-stats">
-              <div className="stat">
-                <span className="stat-num">120+</span>
-                <span className="stat-label">Rooms</span>
-              </div>
-              <div className="stat">
-                <span className="stat-num">3</span>
-                <span className="stat-label">Branches</span>
-              </div>
-              <div className="stat">
-                <span className="stat-num">98%</span>
-                <span className="stat-label">Occupancy</span>
-              </div>
-            </div> */}
           </div>
         </div>
 
-        {/* Right form */}
         <div className="pg-right">
           <div className="form-container">
             <div className="form-eyebrow">

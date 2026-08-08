@@ -1,6 +1,6 @@
 export type Role = "SUPER_ADMIN" | "ADMIN" | "WARDEN" | "TENANT";
 export type HostelType = "AC" | "NON_AC";
-export type TenantStatus = "PENDING" | "Active" | "Checked_Out" | "Absconded"; 
+export type TenantStatus = "PENDING" | "Active" | "Checked_Out" | "Absconded";
 export type EBStatus = "Pending" | "Billed" | "Paid";
 export type PaymentStatus = "PENDING" | "PAID" | "PARTIAL";
 export type PaymentMode = "CASH" | "UPI";
@@ -8,6 +8,54 @@ export type IdProofType = "AADHAR" | "PAN" | "VOTER_ID" | "DRIVING_LICENSE" | "P
 export type ComplaintStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED";
 export type PaymentTxnStatus = "PENDING_VERIFICATION" | "APPROVED" | "REJECTED";
 export type CleaningStatus = "PENDING" | "IN_PROGRESS" | "CLEANED";
+
+export type DamageStatus = "PENDING" | "PAID" | "CANCELLED";
+
+export interface DamageTenantShare {
+  id: number;
+  tenantId: number;
+  tenantName: string;
+  tenantPhone?: string;
+  shareAmount: number;
+  paidAmount: number;
+  pendingAmount: number;
+  paymentStatus: PaymentStatus;
+  rentId?: number | null;
+}
+
+export interface Damage {
+  id: number;
+  hostelId: number;
+  hostelName?: string;
+  branchId: number;
+  branchName?: string;
+  roomIds: number[];
+  roomNumbers?: string[];
+  title: string;
+  description?: string;
+  damageDate: string;
+  totalAmount: number;
+  status: DamageStatus;
+  notes?: string;
+  tenantIds: number[];
+  tenants: DamageTenantShare[];
+  photoUrls: string[];
+  createdByName?: string;
+  createdAt?: string;
+}
+
+export interface DamageRequest {
+  hostelId: number;
+  branchId: number;
+  roomIds: number[];
+  title: string;
+  description?: string;
+  damageDate: string;
+  totalAmount: number;
+  tenantIds: number[];
+  notes?: string;
+  photos?: File[];
+}
 
 export interface PaymentTransaction {
   id: number;
@@ -32,8 +80,6 @@ export interface PaymentTransaction {
   remarks?: string;
 }
 
-
-// ── FRAUD DETECTION TYPES ─────────────────────────────────────────────
 export interface FraudRecord {
   tenantId: number;
   branchName: string;
@@ -50,7 +96,6 @@ export interface FraudCheckResponse {
   fraud: boolean;
   records: FraudRecord[];
 }
-// ─────────────────────────────────────────────────────────────────────
 
 export interface User {
   id: number;
@@ -62,17 +107,9 @@ export interface User {
   name?: string;
   phone?: string;
   password?: string;
-  // ─── Hierarchical RBAC: permissions currently granted to this user ──
-  // SUPER_ADMIN => full catalog (backend populates every value).
   permissions?: string[];
-  // ─────────────────────────────────────────────────────────────────
 }
 
-// ── Payload for registerUser() in lib/store.ts (CREATE only) ──────────
-// Role is required and editable here — this is the only place a new
-// account's role is ever set. Kept separate from AdminRequest, which is
-// the SUPER_ADMIN -> ADMIN-only creation payload (email/password/active
-// only, no role/branch).
 export interface RegisterUserRequest {
   name: string;
   phone: string;
@@ -80,27 +117,17 @@ export interface RegisterUserRequest {
   password?: string;
   role: "ADMIN" | "WARDEN" | "TENANT";
   branchId: number | null;
-  // Optional initial grant — must be a subset of what the creator holds;
-  // validated server-side. Omit to create with no permissions.
   permissions?: PermissionName[];
 }
 
-// ── Payload for updateUser() / updateMyProfile() in lib/store.ts ──────
-// Used for PUT /users/{id} and PUT /users/me. Deliberately has NO `role`
-// field — role can no longer be changed via these endpoints (the backend
-// stopped reading/applying it). Password is optional: omit or leave
-// blank to keep the user's current password unchanged.
 export interface UpdateUserRequest {
   name: string;
   phone: string;
   email: string;
   password?: string;
   branchId?: number | null;
-  // Optional — must be a subset of what the requester holds; validated
-  // server-side. Omitted = leave the user's current permission set untouched.
   permissions?: PermissionName[];
 }
-// ─────────────────────────────────────────────────────────────────────
 
 export interface Admin {
   id: number;
@@ -109,14 +136,11 @@ export interface Admin {
   role: Role;
   name?: string;
   phone?: string;
-  // ─── Assigned hostel (SUPER_ADMIN → ADMIN scoping) ──────────
   hostelId?: number | null;
   hostelName?: string | null;
-  // ─── Hierarchical RBAC: permissions granted by SUPER_ADMIN ──
   permissions?: string[];
 }
 
-// ── Hierarchical RBAC (permission catalog / assignment) ────────────────
 export type PermissionName =
   | "MANAGE_HOSTELS" | "MANAGE_BRANCHES" | "MANAGE_ROOMS" | "MANAGE_FLAT"
   | "MANAGE_WARDENS" | "MANAGE_TENANTS"
@@ -126,7 +150,6 @@ export type PermissionName =
   | "MANAGE_EB_READINGS" | "MANAGE_COMPLAINTS" | "MANAGE_VISITORS"
   | "VIEW_DASHBOARD" | "VIEW_REPORTS";
 
-/** One row of the permission matrix — `granted` is contextual to the endpoint that returned it. */
 export interface PermissionCatalogItem {
   name: PermissionName;
   label: string;
@@ -141,7 +164,6 @@ export interface UserPermissionsResponse {
   role: Role;
   catalog: PermissionCatalogItem[];
 }
-// ─────────────────────────────────────────────────────────────────────
 
 export interface AdminRequest {
   name?: string;
@@ -166,6 +188,7 @@ export interface FoodTimetable {
   lunch: string;
   dinner: string;
   branchId?: number;
+  branchName?: string;
 }
 
 export interface FoodTimetableRequest {
@@ -183,14 +206,14 @@ export interface Announcement {
   createdBy: string;
   createdAt: string;
   branchId?: number | null;
-  branchName?: string | null; 
+  branchName?: string | null;
 }
 
 export interface AnnouncementRequest {
   title: string;
   content: string;
   createdBy: string;
-  branchId?: number | null; 
+  branchId?: number | null;
 }
 
 export interface RuleRegulation {
@@ -213,12 +236,6 @@ export interface RuleRegulationRequest {
   published?: boolean;
   createdBy: string;
   branchId?: number | null;
-}
-
-export interface WhatsAppShare {
-  tenantName: string;
-  phone: string;
-  whatsappUrl: string;
 }
 
 export interface Complaint {
@@ -245,18 +262,9 @@ export interface LoginResponse {
   userId?: number;
   hostelId?: number | null;
   hostelName?: string | null;
-  /** ADMIN-only: true when this hostel's subscription end date has passed. */
   subscriptionExpired?: boolean | null;
-  /** ADMIN/WARDEN/TENANT: the hostel's operational status. Null for SUPER_ADMIN. */
   hostelStatus?: HostelStatus | null;
   tenantId?: number | null;
-}
-
-export interface AuthResponse {
-  token: string;
-  refreshToken: string;
-  role: string;
-  branchId?: number;
 }
 
 export type HostelStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
@@ -283,7 +291,6 @@ export interface HostelRequest {
   email?: string;
 }
 
-// ── Merged Hostel + Admin (single /super-admin/hostels screen) ─────────
 export interface HostelAdmin {
   id: number;
   name: string;
@@ -412,7 +419,7 @@ export interface Tenant {
   idProofType: IdProofType;
   idProofNumber: string;
   idProofDocument?: string | null;
-  tenantPhoto?: string | null; 
+  tenantPhoto?: string | null;
   roomId: number;
   bedId: number;
   advance: number;
@@ -438,7 +445,7 @@ export interface TenantRequest {
   idProofType: IdProofType;
   idProofNumber: string;
   idProofDocument?: File | null;
-  tenantPhoto?: string | null; 
+  tenantPhoto?: string | null;
   roomId: number;
   bedId: number;
   joinReading: number;
@@ -500,36 +507,6 @@ export interface Rent {
   paymentDate: string | null;
 }
 
-export interface RoomReport {
-  roomNumber: string;
-  hostelType: HostelType;
-  previousReading: number;
-  currentReading: number;
-  unitsConsumed: number;
-  totalEBAmount: number;
-  totalBeds: number;
-  occupiedBeds: number;
-  availableBeds: number;
-}
-
-export interface MemberReport {
-  tenantName: string;
-  roomNumber: string;
-  individualEBAmount: number;
-  month: number;
-  year: number;
-}
-
-export interface CheckoutSummary {
-  tenant: Tenant;
-  roomNumber: string;
-  pendingRents: Rent[];
-  totalRentDue: number;
-  totalEBDue: number;
-  advancePaid: number;
-  netPayable: number;
-}
-
 export const DEFAULT_EB_RATE = 13;
 
 export const MONTHS = [
@@ -543,15 +520,12 @@ export const ID_PROOF_TYPES: IdProofType[] = [
 
 export const PAYMENT_MODES: PaymentMode[] = ["CASH", "UPI"];
 
-// ── Responsible contact (for "no permissions assigned" screen) ────────
 export interface ResponsibleContact {
   name: string;
   phone: string | null;
   role: "SUPER_ADMIN" | "ADMIN" | "WARDEN";
 }
-// ─────────────────────────────────────────────────────────────────────
 
-// ── Notification / Messaging module ────────────────────────────────────
 export type NotificationType =
   | "CHECK_IN"
   | "CHECK_OUT"
@@ -594,106 +568,7 @@ export interface NotificationRequest {
   recipientRoles?: Role[];
   branchIds?: number[];
 }
-// ─────────────────────────────────────────────────────────────────────
 
-export interface Plan {
-  id: number;
-  name: string;
-  price: number;
-  billingPeriod: string;
-  durationLabel: string;
-  description?: string;
-  hostelLimit: number;
-  branchLimit: number | null;
-  bedLimit: number | null;
-  features: string[];
-  status: "Active" | "Inactive";
-  colorHex?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface PlanRequest {
-  name: string;
-  price: number;
-  billingPeriod: string;
-  durationLabel?: string;
-  description?: string;
-  hostelLimit?: number;
-  branchLimit?: number | null;
-  bedLimit: number | null;
-  features?: string[];
-  status?: "Active" | "Inactive";
-  colorHex?: string;
-}
-
-export interface PlanPageResponse {
-  content: Plan[];
-  totalElements: number;
-  totalPages: number;
-}
-
-/* ── Subscriptions (Hostel/Admin <-> Plan, with billing history) ────────── */
-
-export type SubscriptionDisplayStatus = "Active" | "Expiring Soon" | "Expired" | "Cancelled";
-export type SubscriptionPaymentStatus = "Paid" | "Pending" | "Partial";
-
-export interface Subscription {
-  id: number;
-  hostelId: number;
-  hostelName: string;
-  hostelCity?: string;
-  adminId?: number | null;
-  adminName?: string | null;
-  adminEmail?: string | null;
-  planId: number;
-  planName: string;
-  colorHex?: string;
-  startDate: string;
-  endDate: string;
-  status: SubscriptionDisplayStatus;
-  paymentStatus: SubscriptionPaymentStatus;
-  amount: number;
-  billingPeriod: string;
-  nextRenewalDate: string;
-  daysToRenewal: number;
-}
-
-export interface SubscriptionRequest {
-  hostelId?: number;
-  planId: number;
-  paymentStatus?: SubscriptionPaymentStatus;
-  transactionId?: string;
-}
-
-export interface SubscriptionSummary {
-  totalSubscriptions: number;
-  activeSubscriptions: number;
-  expiringSoon: number;
-  expired: number;
-  totalRevenueThisMonth: number;
-}
-
-export interface SubscriptionPayment {
-  id: number;
-  planName: string;
-  amount: number;
-  periodStart: string;
-  periodEnd: string;
-  type: "NEW" | "RENEWAL" | "PLAN_CHANGE";
-  paymentStatus: SubscriptionPaymentStatus;
-  transactionId?: string;
-  paidAt: string;
-  recordedBy?: string;
-}
-
-export interface SubscriptionPageResponse {
-  content: Subscription[];
-  totalElements: number;
-  totalPages: number;
-}
-
-// ── Raise Ticket module (Admin ↔ Super Admin) ──────────────────────────
 export type TicketCategory =
   | "TECHNICAL_ISSUE"
   | "SUBSCRIPTION_ISSUE"
@@ -731,28 +606,23 @@ export const TICKET_STATUS_OPTIONS: { value: TicketStatus; label: string }[] = [
   { value: "RESOLVED",    label: "Resolved" },
 ];
 
-/** Payload for ADMIN raising a new support ticket. */
 export interface TicketRequest {
 }
-
 
 export interface AddOnBedsRequest {
   additionalBedsRequested: number;
   remarks?: string;
 }
 
-/** Payload for either ADMIN or SUPER_ADMIN posting a reply on a ticket. */
 export interface TicketReplyRequest {
   message: string;
 }
 
-/** Payload for SUPER_ADMIN updating a ticket's status. */
 export interface TicketStatusUpdateRequest {
   status: TicketStatus;
   note?: string;
 }
 
-/** Payload for SUPER_ADMIN approving/rejecting a BED_LIMIT_INCREASE ticket. */
 export interface BedLimitDecisionRequest {
   decision: "APPROVED" | "REJECTED";
   approvedBedLimit?: number;
@@ -771,7 +641,6 @@ export interface TicketReply {
   createdAt: string;
 }
 
-/** Lightweight row for ticket list views. */
 export interface TicketSummary {
   id: number;
   ticketNumber: string;
@@ -792,7 +661,6 @@ export interface TicketSummary {
   updatedAt?: string | null;
 }
 
-/** Full ticket detail, including its complete reply/status-change history. */
 export interface Ticket {
   id: number;
   ticketNumber: string;

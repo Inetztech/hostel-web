@@ -289,7 +289,6 @@ const FlatPage = () => {
   const [loading,          setLoading]          = useState(false);
 
   const gridRef = useRef<AgGridReact>(null);
-  const didLoad = useRef(false);
 
   const datasource = useMemo(() => ({
     getRows: async (params: IGetRowsParams) => {
@@ -314,10 +313,6 @@ const FlatPage = () => {
 
   const refreshGrid = useCallback(() => {
     gridRef.current?.api?.refreshInfiniteCache();
-  }, []);
-
-  useEffect(() => {
-    didLoad.current = true;
   }, []);
 
   const handleAdd = async () => {

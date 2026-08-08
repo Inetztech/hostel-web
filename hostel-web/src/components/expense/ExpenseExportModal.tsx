@@ -97,7 +97,6 @@ export const ExpenseExportModal = memo(({
         </DialogHeader>
 
         <div className="space-y-3.5 pt-2">
-          {/* Active View */}
           <div className="p-3 border rounded-lg bg-card space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold">Active Filtered View</span>
@@ -111,7 +110,6 @@ export const ExpenseExportModal = memo(({
             </Button>
           </div>
 
-          {/* Date Range */}
           <div className="p-3 border rounded-lg bg-card space-y-2.5">
             <div className="flex items-center gap-1.5 text-xs font-semibold">
               <Calendar className="h-3.5 w-3.5 text-primary" /> Download Custom Date Range
@@ -131,7 +129,6 @@ export const ExpenseExportModal = memo(({
             </Button>
           </div>
 
-          {/* Full Dump */}
           <div className="p-3 border rounded-lg bg-muted/40 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold">All-Time Complete Dump</span>

@@ -49,10 +49,6 @@ import { LogOut, Search, ChevronRight } from "lucide-react";
 
 const MAINTENANCE_CHARGE = 1000;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 function splitPending(r: Rent): { rentPending: number; ebPending: number } {
   const rentAmt = r.rentAmount ?? 0;
   const ebAmt   = r.ebAmount   ?? 0;
@@ -66,17 +62,12 @@ function splitPending(r: Rent): { rentPending: number; ebPending: number } {
     return { rentPending: rentAmt, ebPending: ebAmt };
   }
 
-  // PARTIAL — paid is applied to rent first
   const rentPending = Math.max(rentAmt - paid, 0);
   const rentCovered = Math.min(paid, rentAmt);
   const ebPending   = Math.max(ebAmt - Math.max(paid - rentCovered, 0), 0);
 
   return { rentPending, ebPending };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PendingRentDialog
-// ─────────────────────────────────────────────────────────────────────────────
 
 interface PendingRentDialogProps {
   open: boolean;
@@ -123,7 +114,6 @@ const PendingRentDialog = ({
           <DialogTitle>Pending Rent Records</DialogTitle>
         </DialogHeader>
 
-        {/* Tenant Info Strip */}
         <div className="bg-muted rounded-md px-4 py-3 text-sm space-y-1 mb-2">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Name</span>
@@ -147,7 +137,6 @@ const PendingRentDialog = ({
           </div>
         </div>
 
-        {/* Per-Record Cards */}
         <div className="space-y-3">
           {pendingRents.length === 0 ? (
             <p className="text-sm text-center text-muted-foreground py-6">
@@ -226,7 +215,6 @@ const PendingRentDialog = ({
           )}
         </div>
 
-        {/* Summary Footer */}
         {pendingRents.length > 0 && (
           <>
             <Separator className="my-3" />
@@ -282,10 +270,6 @@ const PendingRentDialog = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CheckoutPage
-// ─────────────────────────────────────────────────────────────────────────────
-
 const CheckoutPage = () => {
   const [rooms,               setRooms]               = useState<Room[]>([]);
   const [tenants,             setTenants]             = useState<Tenant[]>([]);
@@ -313,18 +297,13 @@ const CheckoutPage = () => {
   const role     = getUserRole();
   const branchId = getBranchId();
 
-  // ── Load Rooms & Tenants ──
-  // fetchAllPages with pageSize=500 so large datasets resolve in 1–2 requests.
-  // getTenants returns ALL tenants (paginated); we filter Active client-side after.
-  // No dynamic import needed — getTenants is already imported above.
   const reload = async () => {
     try {
       const [roomList, allTenantList] = await Promise.all([
-        fetchAllPages<Room>(getRooms, 500),
-        fetchAllPages<Tenant>(getTenants, 500),
+        fetchAllPages<Room>(getRooms, 10),
+        fetchAllPages<Tenant>(getTenants, 10),
       ]);
 
-      // Filter active tenants client-side (avoids a separate API call)
       const activeTenants = allTenantList.filter((t) => t.status === "Active");
 
       const filteredRooms =
@@ -377,7 +356,6 @@ const CheckoutPage = () => {
       ? Number(acCurr) - Number(acPrev)
       : 0;
 
-  // ── Select Tenant ──
   const handleSelectTenant = async (tenantId: string) => {
     try {
       setSelectedTenantId(tenantId);
@@ -396,9 +374,6 @@ const CheckoutPage = () => {
       const room   = rooms.find((r) => Number(r.id) === Number(selected.roomId));
       const isAcRoom = room?.hostelType === "AC";
 
-      // pageSize=500 covers typical hostel EB history in 1 request.
-      // <EBReading> generic is required — without it allReadings is unknown[]
-      // and every property access (.roomId, .year, .currentReading) crashes.
       const allReadings = await fetchAllPages<EBReading>(getEBReadings, 500);
 
       if (isAcRoom) {
@@ -534,7 +509,6 @@ const CheckoutPage = () => {
       return room && String(room.unitId) === selectedBranch;
     });
 
-  // ── Print Receipt ──
   const printCheckoutReceipt = () => {
     if (!selectedTenant || !summary) return;
 
@@ -594,7 +568,6 @@ const CheckoutPage = () => {
     printWindow.document.close();
   };
 
-  // ── Confirm Checkout ──
   const handleConfirmCheckout = async () => {
     if (!selectedTenant) {
       toast.error("Select tenant");
@@ -700,7 +673,6 @@ const CheckoutPage = () => {
         </p>
       </div>
 
-      {/* Pending Rent Dialog */}
       <PendingRentDialog
         open={pendingRentDialogOpen}
         onClose={() => setPendingRentDialogOpen(false)}
@@ -711,7 +683,6 @@ const CheckoutPage = () => {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left — Tenant selection */}
         <div className="lg:col-span-1">
           <Card>
             <CardHeader className="pb-3">
@@ -779,7 +750,6 @@ const CheckoutPage = () => {
           </Card>
         </div>
 
-        {/* Right — Settlement */}
         <div className="lg:col-span-2">
           {!selectedTenant ? (
             <Card>
@@ -789,7 +759,6 @@ const CheckoutPage = () => {
             </Card>
           ) : (
             <div className="space-y-4">
-              {/* Tenant Info */}
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-semibold">
@@ -822,7 +791,6 @@ const CheckoutPage = () => {
                 </CardContent>
               </Card>
 
-              {/* Final EB Reading */}
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-semibold">
@@ -883,7 +851,6 @@ const CheckoutPage = () => {
                 </CardContent>
               </Card>
 
-              {/* AC Reading */}
               {isAcRoom && (
                 <Card>
                   <CardHeader className="pb-3">
@@ -937,7 +904,6 @@ const CheckoutPage = () => {
                 </Card>
               )}
 
-              {/* Settlement Summary */}
               {summary && (
                 <Card>
                   <CardHeader className="pb-3">
@@ -1069,7 +1035,6 @@ const CheckoutPage = () => {
                 </Card>
               )}
 
-              {/* Checkout Button */}
               <Card>
                 <CardContent className="pt-5">
                   <div className="grid gap-4">

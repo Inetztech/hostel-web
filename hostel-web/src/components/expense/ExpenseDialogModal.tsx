@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, memo } from "react";
 import { toast } from "sonner";
-import { FolderPlus, Tag, Sparkles, Calendar, Plus, Edit } from "lucide-react";
+import { FolderPlus, Tag, Sparkles, Calendar, Plus, Edit, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -19,12 +19,24 @@ const HARDCODED_CATEGORIES: Record<string, { label: string }> = {
   TAX: { label: "Tax & Compliance" },
 };
 
+interface BranchOption {
+  id: number | string;
+  name: string;
+}
+
 interface ExpenseDialogModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingExpense: Expense | null;
-  onSubmit: (description: string, amount: number, category: string, expenseDate: string) => void;
+  onSubmit: (
+    description: string,
+    amount: number,
+    category: string,
+    expenseDate: string,
+    branchId: number,
+  ) => void;
   currentBranch: string;
+  branchOptions: BranchOption[];
 }
 
 export const ExpenseDialogModal = memo(({
@@ -33,18 +45,23 @@ export const ExpenseDialogModal = memo(({
   editingExpense,
   onSubmit,
   currentBranch,
+  branchOptions,
 }: ExpenseDialogModalProps) => {
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [selectedMenuCat, setSelectedMenuCat] = useState("");
   const [customCategory, setCustomCategory] = useState("");
   const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedBranchId, setSelectedBranchId] = useState("");
 
   useEffect(() => {
+    if (!open) return;
+
     if (editingExpense) {
       setDescription(editingExpense.description || "");
       setAmount(String(editingExpense.amount || ""));
       setExpenseDate(editingExpense.expenseDate || new Date().toISOString().slice(0, 10));
+      setSelectedBranchId(String(editingExpense.branchId));
 
       const normalizedCat = (editingExpense.category || "").toUpperCase();
       if (HARDCODED_CATEGORIES[normalizedCat]) {
@@ -60,11 +77,13 @@ export const ExpenseDialogModal = memo(({
       setSelectedMenuCat("");
       setCustomCategory("");
       setExpenseDate(new Date().toISOString().slice(0, 10));
+      setSelectedBranchId(currentBranch !== "all" ? currentBranch : "");
     }
-  }, [editingExpense, open]);
+  }, [editingExpense, open, currentBranch]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedBranchId) return toast.error("Please select a branch.");
     if (!description.trim()) return toast.error("Please enter a valid expense description.");
     if (!selectedMenuCat) return toast.error("Please select a target category.");
 
@@ -76,17 +95,13 @@ export const ExpenseDialogModal = memo(({
 
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) return toast.error("Provide a valid numeric amount.");
     if (!expenseDate) return toast.error("Please select a valid transaction date.");
-    if (currentBranch === "all" && !editingExpense) return toast.error("Please pick a branch target location.");
 
-    onSubmit(description, Number(amount), finalCategory, expenseDate);
+    onSubmit(description, Number(amount), finalCategory, expenseDate, Number(selectedBranchId));
     onOpenChange(false);
-  }, [description, selectedMenuCat, customCategory, amount, expenseDate, currentBranch, editingExpense, onSubmit, onOpenChange]);
+  }, [description, selectedMenuCat, customCategory, amount, expenseDate, selectedBranchId, onSubmit, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* rounded-2xl + overflow-hidden ensures every corner (including any
-          header/footer background) is clipped to the rounded shape instead
-          of the default sharp/square corners */}
       <DialogContent className="sm:max-w-[540px] rounded-2xl overflow-hidden p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
@@ -99,6 +114,26 @@ export const ExpenseDialogModal = memo(({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <Building2 className="h-3 w-3" /> Branch
+            </label>
+            <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+              <SelectTrigger className="h-9 text-sm bg-background rounded-xl">
+                <SelectValue placeholder="Select Branch" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                {branchOptions.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">No branches available</div>
+                ) : (
+                  branchOptions.map((b) => (
+                    <SelectItem key={String(b.id)} value={String(b.id)}>{b.name}</SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Description</label>
             <input

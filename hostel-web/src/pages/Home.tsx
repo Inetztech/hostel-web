@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { getHostels, fetchAllPages, addTenant, publicRegisterTenant } from "@/lib/store";
+import { getHostels, fetchAllPages, publicRegisterTenant } from "@/lib/store";
 import { FraudCheckResponse } from "@/lib/types";
 import PublicRegisterForm from "@/components/PublicRegistrationForm";
 
@@ -45,23 +45,45 @@ export default function HomePage() {
   const DEFAULT_IMAGE =
     "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=800&q=80";
 
-  const loadHostels = useCallback(async () => {
-    setLoading(true);
+  // FIX: this page used to show one fewer hostel than actually existed
+  // until the server was restarted. Root cause was a cached /hostels
+  // response (see the cache-busting fix in lib/store.ts's fetchHostels).
+  // On top of that backend-facing fix, loadHostels here now:
+  //   1. Accepts a `silent` flag so background refreshes (focus/visibility)
+  //      don't flash the full-page loading spinner.
+  //   2. Is re-triggered whenever the browser tab regains focus or
+  //      becomes visible again, so a hostel added by an admin in another
+  //      tab shows up here without the visitor needing a hard refresh.
+  const loadHostels = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const hList = await fetchAllPages<Hostel>(
         (pg, size) => getHostels(pg, size),
-        50
+        10
       );
       setHostels(hList);
     } catch {
-      toast.error("Failed to load hostels");
+      if (!silent) toast.error("Failed to load hostels");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadHostels();
+
+    const onFocus = () => loadHostels(true);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") loadHostels(true);
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [loadHostels]);
 
   const handleOpenDetail = (hostel: Hostel) => {
@@ -81,32 +103,32 @@ export default function HomePage() {
   };
 
   // Pre-Registration Submission (Sets Pending State)
-    const handleRegisterSubmit = async (formData: FormData) => {
-  try {
-    // Calls POST /api/tenants/public-register (bypasses auth guard)
-    const newTenant = await publicRegisterTenant(formData);
-    const fraudCheck: FraudCheckResponse | null =
-      (newTenant as any)?.fraudCheck ?? null;
+  const handleRegisterSubmit = async (formData: FormData) => {
+    try {
+      // Calls POST /api/tenants/public-register (bypasses auth guard)
+      const newTenant = await publicRegisterTenant(formData);
+      const fraudCheck: FraudCheckResponse | null =
+        (newTenant as any)?.fraudCheck ?? null;
 
-    if (fraudCheck?.fraud) {
-      toast.warning(
-        "Application received. Our admin team will verify previous record history during document review."
+      if (fraudCheck?.fraud) {
+        toast.warning(
+          "Application received. Our admin team will verify previous record history during document review."
+        );
+      } else {
+        toast.success(
+          `Application submitted for ${selectedHostel?.name}! Your registration is now PENDING approval. Our admin will contact you shortly to assign your room.`
+        );
+      }
+      setSelectedHostel(null);
+    } catch (e: any) {
+      toast.error(
+        e?.response?.data?.message ||
+          e?.message ||
+          "Application submission failed. Please try again."
       );
-    } else {
-      toast.success(
-        `Application submitted for ${selectedHostel?.name}! Your registration is now PENDING approval. Our admin will contact you shortly to assign your room.`
-      );
+      throw e;
     }
-    setSelectedHostel(null);
-  } catch (e: any) {
-    toast.error(
-      e?.response?.data?.message ||
-        e?.message ||
-        "Application submission failed. Please try again."
-    );
-    throw e;
-  }
-};
+  };
 
   const filteredHostels = hostels.filter((h) => {
     if (selectedTypeFilter === "ALL") return true;

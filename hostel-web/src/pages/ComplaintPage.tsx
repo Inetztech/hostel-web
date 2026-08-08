@@ -102,12 +102,12 @@ const ComplaintPage = () => {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>(
-    role === "ADMIN" ? "all" : String(getBranchId() ?? "all")
+    role === "ADMIN" ? "all" : String(branchId ?? "all")
   );
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 8;
+  const pageSize = 10;
 
   const didFetch = useRef(false);
 
@@ -139,20 +139,15 @@ const ComplaintPage = () => {
       if (complaintsResult.status === "fulfilled") {
         setComplaints(toArray<Complaint>(complaintsResult.value));
       } else {
-        console.error("Complaints failed:", complaintsResult.reason);
         toast.error("Failed to load complaints");
       }
 
       if (branchResult.status === "fulfilled") {
         setBranches(toArray<Branch>(branchResult.value));
-      } else {
-        console.error("Branches failed:", branchResult.reason);
       }
 
       if (roomResult.status === "fulfilled") {
         setRooms(toArray<Room>(roomResult.value));
-      } else {
-        console.error("Rooms failed:", roomResult.reason);
       }
     } finally {
       setTableLoading(false);
@@ -182,7 +177,6 @@ const ComplaintPage = () => {
       closeComplaintDialog();
       await loadComplaints();
     } catch (err) {
-      console.error(err);
       toast.error("Failed to submit complaint");
     } finally {
       setLoading(false);
@@ -198,7 +192,6 @@ const ComplaintPage = () => {
       setComplaints((prev) => prev.map((c) => (c.id === id ? { ...c, status } : c)));
       toast.success("Status updated");
     } catch (err) {
-      console.error(err);
       toast.error("Failed to update status");
       loadComplaints();
     } finally {
@@ -534,7 +527,6 @@ const ComplaintPage = () => {
 
                     return (
                       <tr key={row.id}>
-                        {/* ID replaced with sequential order number (1, 2, 3...) */}
                         <td>
                           <div className="cp-cid">{currentPage * pageSize + i + 1}</div>
                         </td>
