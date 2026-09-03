@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/select";
 
 import { toast } from "sonner";
-import { Search, RefreshCw, ChevronRight } from "lucide-react";
+import { Search, RefreshCw, ChevronRight, MoreHorizontal } from "lucide-react";
 
 
 type EBBillRow = TenantEBBill & {
@@ -231,8 +231,34 @@ const RentPage = () => {
     return map;
   }, [tenants]);
 
+  // Tenant-specific monthly rent (what the Tenants page shows) keyed by
+  // tenantId. Different tenants in the *same* room can be on different
+  // negotiated rents (e.g. ₹7,000 vs ₹7,500), so this must never be
+  // replaced by the room's default rentPerBed unless the tenant simply
+  // doesn't have their own rent value set.
+  const tenantRentMap = useMemo(() => {
+    const map = new Map<number, number>();
+    tenants.forEach((t) => {
+      if (t.monthlyRent != null && t.monthlyRent > 0) {
+        map.set(Number(t.id), Number(t.monthlyRent));
+      }
+    });
+    return map;
+  }, [tenants]);
+
   const resolveTenantName = (tenantId: number): string =>
     tenantNameMap.get(tenantId) ?? `Tenant ${tenantId}`;
+
+  // CHANGED: this used to be `room?.rentPerBed ?? 0` everywhere, which
+  // meant every tenant sharing a room showed the room's flat default rate
+  // instead of their own agreed rent. Now it prefers the tenant's own
+  // `monthlyRent` (same field the Tenants page displays) and only falls
+  // back to the room's rentPerBed when the tenant has no rent set.
+  const resolveTenantRent = (tenantId: number, room?: Room): number => {
+    const tenantRent = tenantRentMap.get(Number(tenantId));
+    if (tenantRent != null) return tenantRent;
+    return room?.rentPerBed ?? 0;
+  };
 
   const reload = async () => {
     if (loadingRef.current) return;
@@ -549,7 +575,10 @@ const RentPage = () => {
         if (tenant) room = getRoomById(tenant.roomId);
       }
 
-      const rentPerBed = room?.rentPerBed ?? 0;
+      // CHANGED: was `room?.rentPerBed ?? 0` — now uses the tenant's own
+      // monthlyRent (falls back to the room's default only if unset), so
+      // two tenants in the same room can show different rent amounts.
+      const rentPerBed = resolveTenantRent(Number(b.tenantId), room);
       const rentRecord = getRentStatus(
         b.tenantId,
         bill.roomNumber,
@@ -745,7 +774,9 @@ const RentPage = () => {
         if (!searchStr.includes(search.toLowerCase())) return null;
 
         const damageAmount = pendingDamageMap.get(Number(tenantId)) ?? 0;
-        const rentPerBed   = room?.rentPerBed ?? 0;
+        // CHANGED: was `room?.rentPerBed ?? 0` — now uses the tenant's own
+        // monthlyRent so a damage-only row shows their actual rent too.
+        const rentPerBed   = resolveTenantRent(Number(tenantId), room);
 
         return {
           tenantId:      Number(tenantId),
@@ -782,7 +813,7 @@ const RentPage = () => {
     }
 
     return allRows;
-  }, [filteredBills, rooms, tenants, selectedBranch, selectedRoom, month, year, rents, search, tenantNameMap, pendingDamageMap]);
+  }, [filteredBills, rooms, tenants, selectedBranch, selectedRoom, month, year, rents, search, tenantNameMap, tenantRentMap, pendingDamageMap]);
 
   const roomOptions = useMemo(() => {
     const scoped =
@@ -821,7 +852,10 @@ const RentPage = () => {
         roomId:     String(room.id),
         rentMonth:  month,
         rentYear:   year,
-        rentAmount: room.rentPerBed,
+        // CHANGED: was `room.rentPerBed` — now the tenant's own monthlyRent
+        // (with room.rentPerBed only as a fallback) so the generated Rent
+        // record is billed at the tenant's actual agreed rent.
+        rentAmount: resolveTenantRent(bill.tenantId, room),
         ebAmount:   bill.amount,
       });
       toast.success(`Rent generated for ${bill.tenantName}`);
@@ -858,7 +892,8 @@ const RentPage = () => {
             roomId:     String(room.id),
             rentMonth:  month,
             rentYear:   year,
-            rentAmount: room.rentPerBed,
+            // CHANGED: was `room.rentPerBed` — see handleGenerate above.
+            rentAmount: resolveTenantRent(Number(b.tenantId), room),
             ebAmount:   b.amount ?? 0,
           });
         })
@@ -921,6 +956,34 @@ const RentPage = () => {
   const pageSize = 10;
   const paginatedRows = rowData.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
+  // CHANGED: total page count, used both to bound the "Next" button and
+  // to build the numbered page list below.
+  const totalPages = Math.max(1, Math.ceil(rowData.length / pageSize));
+
+  // CHANGED: builds a windowed list of 1-indexed page numbers with "..."
+  // collapsing for longer runs — e.g. [1, 2, 3, 4, '...', 53] near the
+  // start, or [1, '...', 5, 6, 7, '...', 53] in the middle. Replaces the
+  // old control, which only ever rendered the current page number and
+  // had no way to jump ahead past page+1.
+  const getPageNumbers = (current: number, total: number): (number | "...")[] => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    const pages: (number | "...")[] = [1];
+    if (current > 3) pages.push("...");
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (current < total - 2) pages.push("...");
+    pages.push(total);
+    return pages;
+  };
+
+  const pageNumbers = useMemo(
+    () => getPageNumbers(currentPage + 1, totalPages),
+    [currentPage, totalPages]
+  );
+
   const overdueCount = rowData.filter(r => (normalizeStatus(r.paymentStatus) === 'PENDING' || normalizeStatus(r.paymentStatus) === 'PARTIAL') && r.pending > 0).length;
 
   const topOverdueTenants = [...rowData]
@@ -979,6 +1042,23 @@ const RentPage = () => {
 
         .rt-sum-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #e2e8f0; }
         .rt-sum-item:last-child { border-bottom: none; }
+
+        /* CHANGED: pagination bar can now hold many numbered buttons
+           (1 2 3 4 … 53), so let the row wrap on narrow screens instead
+           of overflowing, and give every page button a consistent
+           min-width so single- and double-digit pages line up. The
+           "..." marker gets its own non-interactive look. */
+        .rt-page-row { flex-wrap: wrap; }
+        .rt-page-btn {
+          width: 32px; height: 32px; min-width: 32px; border-radius: 6px;
+          border: 1px solid #e2e8f0; display: flex; align-items: center;
+          justify-content: center; color: #64748b; background: #fff;
+          font-weight: 500; font-size: 14px; cursor: pointer;
+        }
+        .rt-page-btn:hover:not(:disabled) { background: #f8fafc; }
+        .rt-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .rt-page-btn.active { background: #5200FF; border-color: #5200FF; color: #fff; }
+        .rt-page-ellipsis { cursor: default; color: #94a3b8; }
       `}</style>
 
       <div className="rt-wrap">
@@ -1174,10 +1254,43 @@ const RentPage = () => {
                 <div className="text-[13px] text-[#64748b]">
                   Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to {Math.min((currentPage + 1) * pageSize, rowData.length)} of {rowData.length} records
                 </div>
-                <div className="flex gap-2">
-                  <button className="w-8 h-8 rounded border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 text-lg leading-none font-bold" disabled={currentPage === 0} onClick={() => setCurrentPage(p => p - 1)}>&#8249;</button>
-                  <button className="w-8 h-8 rounded bg-[#5200FF] text-white flex items-center justify-center font-medium text-sm">{currentPage + 1}</button>
-                  <button className="w-8 h-8 rounded border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 text-lg leading-none font-bold" disabled={(currentPage + 1) * pageSize >= rowData.length} onClick={() => setCurrentPage(p => p + 1)}>&#8250;</button>
+                {/* CHANGED: numbered pagination row (1 2 3 … n) replacing
+                    the old control, which only ever showed the current
+                    page number and could only ever jump to page+2 via
+                    the "next" arrow. Prev/Next stay on either end and
+                    disable correctly at the first/last page. */}
+                <div className="flex gap-2 rt-page-row">
+                  <button
+                    className="rt-page-btn"
+                    disabled={currentPage === 0}
+                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                  >
+                    &#8249;
+                  </button>
+
+                  {pageNumbers.map((p, idx) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${idx}`} className="rt-page-btn rt-page-ellipsis">
+                        <MoreHorizontal size={14} />
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        className={`rt-page-btn ${p === currentPage + 1 ? "active" : ""}`}
+                        onClick={() => setCurrentPage(p - 1)}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+
+                  <button
+                    className="rt-page-btn"
+                    disabled={currentPage + 1 >= totalPages}
+                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                  >
+                    &#8250;
+                  </button>
                 </div>
               </div>
             </div>

@@ -169,7 +169,7 @@ const VisitorPage = () => {
                   return (
                     <tr key={v.id}>
                       <td>
-                        <div className="text-[14px] font-semibold text-slate-900">{v.visitorName}</div>
+                        <div className="text-[14px]  text-slate-900">{v.visitorName}</div>
                       </td>
                       <td className="text-[13px] text-slate-600">{v.visitorPhone}</td>
                       <td className="text-[13px] text-slate-600">{v.relation}</td>

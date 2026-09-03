@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import {
@@ -32,7 +32,7 @@ import { toast } from "sonner";
 import {
   Plus, Pencil, Trash2,
   Search, Download, RefreshCw,
-  ChevronLeft, ChevronRight, Building2,
+  ChevronLeft, ChevronRight, ChevronDown, Check, Building2, MoreHorizontal,
 } from "lucide-react";
 
 /* ================= GENERIC HELPER — fetch every page of any paginated store fn ================= */
@@ -53,19 +53,9 @@ async function fetchAllPages<T>(
   return [...firstContent, ...rest.flat()];
 }
 
-/* ================= ID NORMALIZATION HELPER =================
-   Warden's branch id (getBranchId(), often sourced from sessionStorage
-   / a JWT claim) can come back as a string ("6") while Branch.id from
-   the API is numeric (6). Strict `===` silently fails on that mismatch
-   — always compare via String(...) on both sides. */
 const idsMatch = (a: unknown, b: unknown): boolean =>
   a != null && b != null && String(a) === String(b);
 
-/* ================= ENTITY UNWRAP HELPER =================
-   Different endpoints (createFlat, createRoom, etc.) may return the
-   entity directly, or wrapped in { data: {...} }, or double-wrapped in
-   { data: { data: {...} } }. This normalizes any of those shapes into
-   a usable object, or undefined if none of them contain a valid id. */
 const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
   if (res && res.id != null) return res as T;
   if (res?.data && res.data.id != null) return res.data as T;
@@ -73,16 +63,61 @@ const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
   return undefined;
 };
 
-/* ================= Shared Bed Count Picker (used by Add + Edit) =================
-   Plain number input for the room's bed count. One component, used by
-   both dialogs (and each bulk room entry), so the three forms can never
-   drift out of sync. */
+const getPageNumbers = (current: number, total: number): (number | "...")[] => {
+  const SIBLINGS = 1; // pages shown on each side of current
+  const totalNumbers = SIBLINGS * 2 + 5; // first, last, current, 2 ellipses buffer
+
+  if (total <= totalNumbers) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  const leftIndex = Math.max(current - SIBLINGS, 1);
+  const rightIndex = Math.min(current + SIBLINGS, total);
+
+  const showLeftEllipsis = leftIndex > 2;
+  const showRightEllipsis = rightIndex < total - 1;
+
+  const pages: (number | "...")[] = [];
+
+  pages.push(1);
+
+  if (showLeftEllipsis) pages.push("...");
+
+  for (let p = Math.max(leftIndex, 2); p <= Math.min(rightIndex, total - 1); p++) {
+    pages.push(p);
+  }
+
+  if (showRightEllipsis) pages.push("...");
+
+  if (total > 1) pages.push(total);
+
+  return pages;
+};
+
+function Field({
+  label, required, children, className,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <label style={{ fontSize: 11.5, fontWeight: 700, color: "#64748b", letterSpacing: 0.2, textTransform: "uppercase" }}>
+        {label}{required && <span style={{ color: "#ef4444" }}> *</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
 function BedCountPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Input
       type="number"
       min={1}
-      placeholder="Total Beds"
+      placeholder="e.g. 2"
       value={value}
       className="rounded-lg"
       onChange={e => onChange(e.target.value.replace(/\D/g, ""))}
@@ -90,17 +125,10 @@ function BedCountPicker({ value, onChange }: { value: string; onChange: (v: stri
   );
 }
 
-/* ================= Shared Flat Assignment Field (used by Add + Edit) =================
-   Lets the admin decide whether a room sits directly under the branch,
-   or under one of the branch's flats/floors. When "Assign to Flat" is
-   picked, they can either choose an existing flat or type a brand-new
-   flat number — the flat gets created on the fly (via createFlat) right
-   before the room itself is submitted, so there's no need to leave this
-   dialog and go create the flat first on the Flats page. */
 export interface FlatAssignmentValue {
   mode: "direct" | "flat";
-  flatId: string;        // id of an existing flat — "" if creating a new one
-  newFlatNumber: string; // used when flatId === "" and mode === "flat"
+  flatId: string;      
+  newFlatNumber: string; 
 }
 
 const EMPTY_FLAT_ASSIGNMENT: FlatAssignmentValue = { mode: "direct", flatId: "", newFlatNumber: "" };
@@ -114,7 +142,7 @@ function FlatAssignmentField({
   onChange: (v: FlatAssignmentValue) => void;
 }) {
   return (
-    <div>
+    <Field label="Room Assignment">
       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
         <button
           type="button"
@@ -169,7 +197,7 @@ function FlatAssignmentField({
           />
         </div>
       )}
-    </div>
+    </Field>
   );
 }
 
@@ -215,7 +243,7 @@ function RoomEntryRow({
   canRemove: boolean;
 }) {
   return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, position: "relative", display: "flex", flexDirection: "column", gap: 8, background: "#fafafa" }}>
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, position: "relative", display: "flex", flexDirection: "column", gap: 10, background: "#fafafa" }}>
       {canRemove && (
         <button
           type="button"
@@ -227,33 +255,41 @@ function RoomEntryRow({
         </button>
       )}
 
-      <Input
-        placeholder="Room Name (e.g. HALL, Room-1)"
-        value={entry.suffix}
-        onChange={(e) => onChange({ suffix: e.target.value })}
-        className="rounded-lg"
-        style={{ paddingRight: canRemove ? 32 : undefined }}
-      />
+      <Field label="Room Name" required>
+        <Input
+          placeholder="e.g. HALL, Room-1"
+          value={entry.suffix}
+          onChange={(e) => onChange({ suffix: e.target.value })}
+          className="rounded-lg"
+          style={{ paddingRight: canRemove ? 32 : undefined }}
+        />
+      </Field>
       {flatLabel && entry.suffix.trim() && (
-        <div style={{ fontSize: 11, color: "#94a3b8" }}>
+        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: -4 }}>
           Will be created as <strong style={{ color: "#5200FF" }}>{buildRoomNumber(flatLabel, entry.suffix)}</strong>
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 6 }}>
-        <button type="button" onClick={() => onChange({ hostelType: "AC" })} style={pillButtonStyle(entry.hostelType === "AC")}>AC</button>
-        <button type="button" onClick={() => onChange({ hostelType: "NON_AC" })} style={pillButtonStyle(entry.hostelType === "NON_AC")}>Non-AC</button>
-      </div>
+      <Field label="Room Type" required>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button type="button" onClick={() => onChange({ hostelType: "AC" })} style={pillButtonStyle(entry.hostelType === "AC")}>AC</button>
+          <button type="button" onClick={() => onChange({ hostelType: "NON_AC" })} style={pillButtonStyle(entry.hostelType === "NON_AC")}>Non-AC</button>
+        </div>
+      </Field>
 
       <div style={{ display: "flex", gap: 8 }}>
-        <BedCountPicker value={entry.totalBeds} onChange={(v) => onChange({ totalBeds: v })} />
-        <Input
-          type="number"
-          placeholder="Rent per Bed (Monthly)"
-          value={entry.rentPerBed}
-          className="rounded-lg"
-          onChange={(e) => onChange({ rentPerBed: e.target.value })}
-        />
+        <Field label="Total Beds" required className="flex-1">
+          <BedCountPicker value={entry.totalBeds} onChange={(v) => onChange({ totalBeds: v })} />
+        </Field>
+        <Field label="Rent / Bed (Monthly)" className="flex-1">
+          <Input
+            type="number"
+            placeholder="e.g. 4500"
+            value={entry.rentPerBed}
+            className="rounded-lg"
+            onChange={(e) => onChange({ rentPerBed: e.target.value })}
+          />
+        </Field>
       </div>
     </div>
   );
@@ -274,7 +310,13 @@ const RoomsPage = () => {
   const [page,       setPage]       = useState(0);
   const [pageSize]   = useState(10);
   const [loading,    setLoading]    = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
+
+  // Raw input the user types into the search box (updates instantly for a
+  // responsive field) vs. the debounced value that's actually sent to the
+  // API. Search now runs server-side across ALL rooms/pages, not just the
+  // 10 rows already loaded on the current page.
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [addOpen,        setAddOpen]        = useState(false);
   const [editOpen,       setEditOpen]       = useState(false);
@@ -303,9 +345,10 @@ const RoomsPage = () => {
   const updateRoomEntry = (key: string, patch: Partial<RoomEntryValue>) =>
     setFlatRoomEntries(prev => prev.map(e => (e.key === key ? { ...e, ...patch } : e)));
 
-  // Local search filter over the branch strip in the top bar (design-only,
-  // narrows the pills shown — does not touch the room list/API).
   const [branchSearchTerm, setBranchSearchTerm] = useState("");
+
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  const branchDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const [wardenBranchName, setWardenBranchName] = useState("");
 
@@ -322,20 +365,6 @@ const RoomsPage = () => {
     setFlatRoomEntries([blankRoomEntry()]);
   };
 
-  /* ================= LOAD BRANCHES (standalone, re-runnable) =================
-     FIX: this used to be folded into loadSupportingData and guarded by
-     `if (supporting !== "idle") return`, which meant it only ever ran
-     ONCE per page-lifetime. If that first call failed (slow network,
-     a 401 that recovered, a race with auth token attachment, etc.),
-     `branches` stayed `[]` forever and the "Select Branch" dropdown in
-     Add Room would show "No branches found" for the rest of the
-     session — even though the top bar (populated from the same array)
-     might have rendered correctly if the retry happened to succeed on
-     a later unrelated re-render.
-
-     Splitting this out lets us re-fetch branches every time the Add
-     Room dialog opens, so a stale/empty/failed load self-heals instead
-     of permanently breaking the selector. ── */
   const loadBranches = useCallback(async () => {
     setBranchesLoading(true);
     try {
@@ -391,16 +420,29 @@ const RoomsPage = () => {
 
   useEffect(() => { loadSupportingData(); }, [loadSupportingData]);
 
-  /* ── Re-fetch branches every time Add Room opens ──────────────────
-     Cheap safety net: even if the initial load above silently failed
-     or the branch list changed elsewhere (a branch created on another
-     tab/page), reopening Add Room always gets a fresh list instead of
-     trusting whatever loaded once at mount. ── */
   useEffect(() => {
     if (addOpen && isAdmin) {
       loadBranches();
     }
   }, [addOpen, isAdmin, loadBranches]);
+
+  useEffect(() => {
+    if (addOpen && isAdmin && selectedBranch !== "all" && !unitId) {
+      setUnitId(selectedBranch);
+    }
+  }, [addOpen, isAdmin, selectedBranch, unitId]);
+
+  /* ── Close the branch dropdown on outside click ── */
+  useEffect(() => {
+    if (!branchDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (branchDropdownRef.current && !branchDropdownRef.current.contains(e.target as Node)) {
+        setBranchDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [branchDropdownOpen]);
 
   /* ================= INCOMING NAVIGATION STATE ================= */
   useEffect(() => {
@@ -421,7 +463,18 @@ const RoomsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supporting, location.state, isWarden, isAdmin]);
 
-  /* ================= LOAD ROOMS (real API, page-based) ================= */
+  /* ================= DEBOUNCE SEARCH INPUT ================= */
+  // Wait 400ms after the user stops typing before hitting the API, and
+  // jump back to page 0 since the result set (and its page count) changes.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedSearch(searchInput.trim());
+      setPage(0);
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  /* ================= LOAD ROOMS (real API, page-based, server-side search) ================= */
   const loadRooms = useCallback(async () => {
     if (supporting !== "done") return;
     setLoading(true);
@@ -429,6 +482,9 @@ const RoomsPage = () => {
       const queryParams: Record<string, any> = { page, size: pageSize };
       if (selectedBranch !== "all") {
         queryParams.unitId = selectedBranch;
+      }
+      if (debouncedSearch) {
+        queryParams.search = debouncedSearch;
       }
 
       const res = await api.get(`/rooms`, { params: queryParams });
@@ -462,7 +518,7 @@ const RoomsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, selectedBranch, supporting, branches]);
+  }, [page, pageSize, selectedBranch, debouncedSearch, supporting, branches]);
 
   useEffect(() => { loadRooms(); }, [loadRooms]);
 
@@ -562,9 +618,6 @@ const RoomsPage = () => {
           },
         });
       } catch (e: any) {
-        // Hitting the plan's bed cap here shows a persistent toast with a
-        // one-click "Add Beds" action that jumps to /subscription instead
-        // of a plain generic error.
         showBedLimitToast(e, navigate, "Create failed");
       }
       return;
@@ -680,14 +733,39 @@ const RoomsPage = () => {
     setEditOpen(true);
   };
 
-  const filteredRooms = rooms.filter(r =>
-    r.roomNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (r.unitName && r.unitName.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // NOTE: `rooms` is now already the search-matched, server-paginated set —
+  // no client-side re-filtering here. Filtering only the current page's 10
+  // rows was the original bug (a room on page 7 wouldn't show up while
+  // viewing page 1).
 
   const visibleBranches = branchSearchTerm.trim()
     ? branches.filter(b => (b.unitName || "").toLowerCase().includes(branchSearchTerm.toLowerCase()))
     : branches;
+
+  // Label shown on the dropdown trigger button.
+  const selectedBranchLabel = isWarden
+    ? wardenBranchName
+    : selectedBranch === "all"
+      ? "All Branches"
+      : (branches.find(b => String(b.id) === selectedBranch)?.unitName ?? "Select Branch");
+
+  const selectBranchOption = (value: string) => {
+    setSelectedBranch(value);
+    setPage(0);
+    setBranchDropdownOpen(false);
+    setBranchSearchTerm("");
+  };
+
+  const clearFilters = () => {
+    setSearchInput("");
+    setDebouncedSearch("");
+    setSelectedBranch(isWarden ? String(getBranchId()) : "all");
+    setPage(0);
+  };
+
+  const totalPages = Math.max(Math.ceil(totalCount / pageSize), 1);
+  const currentPage1Based = page + 1;
+  const pageNumbers = getPageNumbers(currentPage1Based, totalPages);
 
   /* ================= UI ================= */
   return (
@@ -697,25 +775,46 @@ const RoomsPage = () => {
         .rm-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: 1600px; margin: 0 auto; }
 
         .rm-layout { display: flex; flex-direction: column; gap: 24px; align-items: stretch; margin-top: 12px; }
-        .rm-sidebar { width: 100%; flex-shrink: 0; background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; overflow: hidden; }
         .rm-main { flex: 1; min-width: 0; }
 
-        .rm-sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 12px; flex-wrap: wrap; gap: 12px; }
-        .rm-sidebar-title { font-size: 14px; font-weight: 700; color: #0f172a; padding: 0; }
-        .rm-sidebar-search { margin: 0; width: 300px; display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; max-width: 100%; }
-        .rm-sidebar-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
+        /* ── Branch dropdown (replaces the old horizontal branch strip) ── */
+        .rm-branch-dropdown-wrap { position: relative; display: inline-block; }
+        .rm-branch-dropdown-trigger {
+          display: flex; align-items: center; justify-content: space-between; gap: 24px;
+          min-width: 220px; padding: 0 14px; height: 40px; border-radius: 10px;
+          border: 1px solid #e2e8f0; background: #fff; cursor: pointer;
+          font-size: 13px; font-weight: 600; color: #0f172a; transition: border-color 0.15s;
+        }
+        .rm-branch-dropdown-trigger:hover { border-color: #cbd5e1; }
+        .rm-branch-dropdown-trigger.disabled { cursor: not-allowed; opacity: 0.6; }
+        .rm-branch-dropdown-trigger-left { display: flex; align-items: center; gap: 10px; }
+        .rm-branch-dropdown-chevron { transition: transform 0.15s; color: #94a3b8; }
+        .rm-branch-dropdown-chevron.open { transform: rotate(180deg); }
 
-        .rm-branch-list { display: flex; gap: 12px; overflow-x: auto; padding: 0 20px 16px; scrollbar-width: thin; }
-        .rm-branch-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-radius: 8px; cursor: pointer; transition: background 0.2s; border: 1px solid #f1f5f9; white-space: nowrap; flex-shrink: 0; }
-        .rm-branch-item:hover { background: #f8fafc; }
-        .rm-branch-item.active { background: #f3e8ff; border: 1px solid #5200FF; }
+        .rm-branch-dropdown-menu {
+          position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+          width: 300px; max-height: 340px; overflow-y: auto;
+          background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+          box-shadow: 0 8px 24px rgba(15,23,42,0.12); padding: 6px;
+        }
+        .rm-branch-dropdown-search {
+          display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0;
+          border-radius: 8px; padding: 0 10px; height: 34px; margin-bottom: 6px; background: #fafafa;
+        }
+        .rm-branch-dropdown-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
 
-        .rm-branch-item-left { display: flex; align-items: center; gap: 12px; }
-        .rm-branch-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-        .rm-branch-name { font-size: 13px; font-weight: 600; color: #0f172a; }
-        .rm-branch-item.active .rm-branch-name { color: #5200FF; }
+        .rm-branch-dropdown-item {
+          display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px;
+          font-size: 13px; font-weight: 500; color: #334155; cursor: pointer;
+        }
+        .rm-branch-dropdown-item:hover { background: #f8fafc; }
+        .rm-branch-dropdown-item.active { background: #f3e8ff; color: #5200FF; font-weight: 600; }
+        .rm-branch-dropdown-item.disabled { cursor: not-allowed; opacity: 0.5; }
+        .rm-branch-dropdown-item .check-slot { width: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .rm-branch-dropdown-empty { padding: 12px 10px; font-size: 12.5px; color: #94a3b8; text-align: center; }
 
-        .rm-main-header { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 20px; gap: 12px; }
+        .rm-main-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 12px; flex-wrap: wrap; }
+        .rm-main-header-right { display: flex; align-items: center; gap: 12px; }
         .rm-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
         .rm-btn-outline:hover { background: #f8fafc; }
         .rm-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
@@ -736,6 +835,8 @@ const RoomsPage = () => {
         .rm-col-number { font-size: 14px; font-weight: 600; color: #0f172a; }
         .rm-type-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
 
+        .rm-branch-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+
         .rm-count { font-size: 14px; font-weight: 600; color: #0f172a; text-align: center; }
 
         .rm-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
@@ -743,22 +844,49 @@ const RoomsPage = () => {
         .rm-status-badge.partially { color: #f97316; background: #fff7ed; border: 1px solid #fed7aa; }
         .rm-status-badge.available { color: #3b82f6; background: #eff6ff; border: 1px solid #bfdbfe; }
 
-        .rm-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-top: 1px solid #f1f5f9; background: #fff; }
+        .rm-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-top: 1px solid #f1f5f9; background: #fff; flex-wrap: wrap; gap: 12px; }
         .rm-page-info { font-size: 13px; color: #64748b; }
-        .rm-page-controls { display: flex; align-items: center; gap: 8px; }
-        .rm-page-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
+        .rm-page-controls { display: flex; align-items: center; gap: 6px; }
+        .rm-page-btn { min-width: 32px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
         .rm-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .rm-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .rm-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .rm-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #94a3b8; }
 
-        /* Landscape dialog layout for Add/Edit Room */
-        .rm-dialog-landscape { max-width: 760px !important; width: 96vw; }
-        .rm-dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
-        .rm-dialog-grid .rm-span-2 { grid-column: 1 / -1; }
+        /* Landscape dialog layout for Add/Edit Room — widened so a
+           3-column grid reads comfortably and fields never feel
+           squeezed against the card edges. */
+        .rm-dialog-landscape { max-width: 900px !important; width: 96vw; }
+        .rm-dialog-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 20px; }
+        .rm-dialog-grid .rm-span-2 { grid-column: span 2; }
+        .rm-dialog-grid .rm-span-3 { grid-column: 1 / -1; }
         .rm-entry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        @media (max-width: 640px) {
+        @media (max-width: 760px) {
+          .rm-dialog-grid { grid-template-columns: 1fr 1fr; }
+          .rm-dialog-grid .rm-span-2 { grid-column: 1 / -1; }
+        }
+        @media (max-width: 520px) {
           .rm-dialog-grid { grid-template-columns: 1fr; }
+          .rm-dialog-grid .rm-span-2 { grid-column: 1; }
           .rm-entry-grid { grid-template-columns: 1fr; }
+        }
+
+        /* Soften the selected/focus ring on selects & inputs inside the
+           dialog so a chosen value (e.g. a picked Branch) reads as a
+           normal filled field instead of a bright, full-width blue
+           highlight competing with the label above it. */
+        .rm-dialog-landscape button[role="combobox"],
+        .rm-dialog-landscape input {
+          border-color: #e2e8f0 !important;
+          box-shadow: none !important;
+        }
+        .rm-dialog-landscape button[role="combobox"]:focus,
+        .rm-dialog-landscape button[role="combobox"]:focus-visible,
+        .rm-dialog-landscape input:focus,
+        .rm-dialog-landscape input:focus-visible {
+          border-color: #5200FF !important;
+          box-shadow: 0 0 0 3px rgba(82,0,255,0.12) !important;
+          outline: none !important;
         }
       `}</style>
 
@@ -766,216 +894,219 @@ const RoomsPage = () => {
 
         <div className="rm-layout">
 
-          {/* Top Bar — branch filter, wired to the real selectedBranch/page state */}
-          <div className="rm-sidebar">
-            <div className="rm-sidebar-header">
-              <div className="rm-sidebar-title">Branches</div>
-              <div className="rm-sidebar-search">
-                <Search size={14} color="#94a3b8" />
-                <input
-                  type="text"
-                  placeholder="Search branches..."
-                  value={branchSearchTerm}
-                  onChange={(e) => setBranchSearchTerm(e.target.value)}
-                  disabled={isWarden}
-                />
-              </div>
-            </div>
-
-            <div className="rm-branch-list">
-              <div
-                className={`rm-branch-item ${selectedBranch === 'all' ? 'active' : ''} ${isWarden ? 'pointer-events-none opacity-50' : ''}`}
-                onClick={() => { if (!isWarden) { setSelectedBranch('all'); setPage(0); } }}
-              >
-                <div className="rm-branch-item-left">
-                  <div className="rm-branch-icon" style={{ background: '#f5f3ff' }}>
-                    <Building2 size={16} color="#8b5cf6" />
-                  </div>
-                  <span className="rm-branch-name">All Branches</span>
-                </div>
-              </div>
-
-              {visibleBranches.map(branch => {
-                const bgColors   = ['#eff6ff', '#dcfce7', '#ffedd5', '#f3e8ff', '#ffe4e6', '#f1f5f9'];
-                const textColors = ['#3b82f6', '#22c55e', '#f97316', '#8b5cf6', '#e11d48', '#64748b'];
-                const idx = branch.id % 6;
-                const disabledForWarden = isWarden && !idsMatch(branch.id, getBranchId());
-
-                return (
-                  <div
-                    key={branch.id}
-                    className={`rm-branch-item ${selectedBranch === String(branch.id) ? 'active' : ''} ${disabledForWarden ? 'pointer-events-none opacity-50' : ''}`}
-                    onClick={() => { if (!disabledForWarden) { setSelectedBranch(String(branch.id)); setPage(0); } }}
-                  >
-                    <div className="rm-branch-item-left">
-                      <div className="rm-branch-icon" style={{ background: bgColors[idx] }}>
-                        <Building2 size={16} color={textColors[idx]} />
-                      </div>
-                      <span className="rm-branch-name">{branch.unitName}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Main Content Area */}
           <div className="rm-main">
             <div className="rm-main-header">
-              <button className="rm-btn-outline"><Download size={16} /> Export</button>
+              <div className="rm-branch-dropdown-wrap" ref={branchDropdownRef}>
+                <button
+                  type="button"
+                  className={`rm-branch-dropdown-trigger ${isWarden ? "disabled" : ""}`}
+                  onClick={() => { if (!isWarden) setBranchDropdownOpen(o => !o); }}
+                >
+                  <span className="rm-branch-dropdown-trigger-left">
+                    <Building2 size={16} color="#8b5cf6" />
+                    {selectedBranchLabel}
+                  </span>
+                  {!isWarden && (
+                    <ChevronDown size={16} className={`rm-branch-dropdown-chevron ${branchDropdownOpen ? "open" : ""}`} />
+                  )}
+                </button>
 
-              {isAdmin && (
-                <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) resetAddForm(); }}>
-                  <DialogTrigger asChild>
-                    <button className="rm-btn-primary"><Plus size={16} /> Add Room</button>
-                  </DialogTrigger>
-                  {/* Landscape card — wide, 2-column grid layout instead of a
-                      tall single-column stack. Rounded on all four corners for
-                      a softer card look, matching the Branch page dialogs. */}
-                  <DialogContent className="rounded-2xl overflow-hidden rm-dialog-landscape">
-                    <DialogHeader>
-                      <DialogTitle>{flatAssign.mode === "flat" ? "Add Rooms under a Flat" : "Add Room"}</DialogTitle>
-                      <DialogDescription>
-                        {flatAssign.mode === "flat"
-                          ? "Create one or more rooms together under the same flat/floor."
-                          : "Create a new room and map it to a branch."}
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="rm-dialog-grid max-h-[65vh] overflow-y-auto pr-1">
-                      {/* Step 1 — Branch comes first: everything else
-                          (flats, room numbers) depends on which branch is
-                          picked, so it anchors the top of the form. */}
-                      <div className="rm-span-2">
-                        {isWarden ? (
-                          <Input value={wardenBranchName} disabled className="bg-slate-50 rounded-lg" />
-                        ) : (
-                          <div className="space-y-1">
-                            <Select
-                              key={branches.length}
-                              value={unitId}
-                              onValueChange={(v) => { setUnitId(v); setFlatAssign(EMPTY_FLAT_ASSIGNMENT); }}
-                            >
-                              <SelectTrigger className="rounded-lg">
-                                <SelectValue placeholder={branchesLoading ? "Loading branches..." : "Select Branch"} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {branchesLoading ? (
-                                  <div className="p-2 text-xs text-muted-foreground text-center">Loading branches…</div>
-                                ) : branches.length > 0 ? (
-                                  branches
-                                    .filter(b => b && b.id != null)
-                                    .map(b => (
-                                      <SelectItem key={String(b.id)} value={String(b.id)}>
-                                        {b.unitName || `Branch ${b.id}`}
-                                      </SelectItem>
-                                    ))
-                                ) : (
-                                  <div className="p-2 text-xs text-muted-foreground text-center">
-                                    No branches found
-                                  </div>
+                {branchDropdownOpen && !isWarden && (
+                  <div className="rm-branch-dropdown-menu">
+                    <div className="rm-branch-dropdown-search">
+                      <Search size={13} color="#94a3b8" />
+                      <input
+                        type="text"
+                        placeholder="Search branches..."
+                        value={branchSearchTerm}
+                        onChange={(e) => setBranchSearchTerm(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div
+                      className={`rm-branch-dropdown-item ${selectedBranch === "all" ? "active" : ""}`}
+                      onClick={() => selectBranchOption("all")}
+                    >
+                      <span className="check-slot">{selectedBranch === "all" && <Check size={14} />}</span>
+                      All Branches
+                    </div>
+
+                    {visibleBranches.length === 0 ? (
+                      <div className="rm-branch-dropdown-empty">No branches found.</div>
+                    ) : (
+                      visibleBranches.map(branch => (
+                        <div
+                          key={branch.id}
+                          className={`rm-branch-dropdown-item ${selectedBranch === String(branch.id) ? "active" : ""}`}
+                          onClick={() => selectBranchOption(String(branch.id))}
+                        >
+                          <span className="check-slot">{selectedBranch === String(branch.id) && <Check size={14} />}</span>
+                          {branch.unitName}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="rm-main-header-right">
+                <button className="rm-btn-outline"><Download size={16} /> Export</button>
+
+                {isAdmin && (
+                  <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) resetAddForm(); }}>
+                    <DialogTrigger asChild>
+                      <button className="rm-btn-primary"><Plus size={16} /> Add Room</button>
+                    </DialogTrigger>
+                    <DialogContent className="rounded-2xl overflow-hidden rm-dialog-landscape">
+                      <DialogHeader>
+                        <DialogTitle>{flatAssign.mode === "flat" ? "Add Rooms under a Flat" : "Add Room"}</DialogTitle>
+                        <DialogDescription>
+                          {flatAssign.mode === "flat"
+                            ? "Create one or more rooms together under the same flat/floor."
+                            : "Create a new room and map it to a branch."}
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="rm-dialog-grid max-h-[65vh] overflow-y-auto pr-1">
+                        <div className="rm-span-3">
+                          {isWarden ? (
+                            <Field label="Branch">
+                              <Input value={wardenBranchName} disabled className="bg-slate-50 rounded-lg" />
+                            </Field>
+                          ) : (
+                            <Field label="Branch" required>
+                              <div className="space-y-1">
+                                <Select
+                                  key={branches.length}
+                                  value={unitId}
+                                  onValueChange={(v) => { setUnitId(v); setFlatAssign(EMPTY_FLAT_ASSIGNMENT); }}
+                                >
+                                  <SelectTrigger className="rounded-lg">
+                                    <SelectValue placeholder={branchesLoading ? "Loading branches..." : "Select Branch"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {branchesLoading ? (
+                                      <div className="p-2 text-xs text-muted-foreground text-center">Loading branches…</div>
+                                    ) : branches.length > 0 ? (
+                                      branches
+                                        .filter(b => b && b.id != null)
+                                        .map(b => (
+                                          <SelectItem key={String(b.id)} value={String(b.id)}>
+                                            {b.unitName || `Branch ${b.id}`}
+                                          </SelectItem>
+                                        ))
+                                    ) : (
+                                      <div className="p-2 text-xs text-muted-foreground text-center">
+                                        No branches found
+                                      </div>
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                                {!branchesLoading && branches.length === 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => loadBranches()}
+                                    className="text-[11px] font-medium text-[#5200FF] hover:underline flex items-center gap-1"
+                                  >
+                                    <RefreshCw size={11} /> Retry loading branches
+                                  </button>
                                 )}
-                              </SelectContent>
-                            </Select>
-                            {!branchesLoading && branches.length === 0 && (
-                              <button
-                                type="button"
-                                onClick={() => loadBranches()}
-                                className="text-[11px] font-medium text-[#5200FF] hover:underline flex items-center gap-1"
-                              >
-                                <RefreshCw size={11} /> Retry loading branches
-                              </button>
-                            )}
+                              </div>
+                            </Field>
+                          )}
+                        </div>
+                        <div className="rm-span-3">
+                          <FlatAssignmentField
+                            unitId={effectiveUnitId}
+                            flatsForBranch={flatsByBranch}
+                            value={flatAssign}
+                            onChange={setFlatAssign}
+                          />
+                        </div>
+
+                        {flatAssign.mode === "direct" ? (
+                          <>
+                            <Field label="Room Number" required>
+                              <Input placeholder="e.g. 101" value={roomNumber} className="rounded-lg" onChange={e => setRoomNumber(e.target.value)} />
+                            </Field>
+
+                            <Field label="Room Type" required>
+                              <Select value={hostelType} onValueChange={(v) => setHostelType(v as HostelType)}>
+                                <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Type" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="AC">AC</SelectItem>
+                                  <SelectItem value="NON_AC">Non-AC</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </Field>
+
+                            {/* Bed count — plain number input, shared with Edit. */}
+                            <Field label="Total Beds" required>
+                              <BedCountPicker value={totalBeds} onChange={setTotalBeds} />
+                            </Field>
+
+                            <Field label="Rent per Bed (Monthly)" className="rm-span-2">
+                              <Input type="number" placeholder="e.g. 4500" value={rentPerBed} className="rounded-lg" onChange={e => setRentPerBed(e.target.value)} />
+                            </Field>
+                          </>
+                        ) : (
+                          <div className="rm-span-3" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            <div className="rm-entry-grid">
+                              {flatRoomEntries.map(entry => (
+                                <RoomEntryRow
+                                  key={entry.key}
+                                  entry={entry}
+                                  flatLabel={addFlatLabel}
+                                  onChange={(patch) => updateRoomEntry(entry.key, patch)}
+                                  onRemove={() => removeRoomEntry(entry.key)}
+                                  canRemove={flatRoomEntries.length > 1}
+                                />
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={addRoomEntry}
+                              style={{
+                                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                width: "100%", padding: "8px 0", borderRadius: 8,
+                                border: "1.5px dashed #cbd5e1", background: "#fff",
+                                fontSize: 12.5, fontWeight: 600, color: "#5200FF", cursor: "pointer",
+                              }}
+                            >
+                              <Plus size={14} /> Add Another Room
+                            </button>
                           </div>
                         )}
                       </div>
-
-                      {/* Step 2 — Direct Room vs Assign to Flat, plus the
-                          flat picker/new-flat input when in Flat mode —
-                          shared with the Edit dialog. */}
-                      <div className="rm-span-2">
-                        <FlatAssignmentField
-                          unitId={effectiveUnitId}
-                          flatsForBranch={flatsByBranch}
-                          value={flatAssign}
-                          onChange={setFlatAssign}
-                        />
-                      </div>
-
-                      {/* Step 3 — Room Number balanced alongside Room Type,
-                          then Beds balanced alongside Rent. */}
-                      {flatAssign.mode === "direct" ? (
-                        <>
-                          <Input placeholder="Room Number" value={roomNumber} className="rounded-lg" onChange={e => setRoomNumber(e.target.value)} />
-
-                          <Select value={hostelType} onValueChange={(v) => setHostelType(v as HostelType)}>
-                            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Room Type" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="AC">AC</SelectItem>
-                              <SelectItem value="NON_AC">Non-AC</SelectItem>
-                            </SelectContent>
-                          </Select>
-
-                          {/* Bed count — quick presets (Single/Double/Triple/
-                              Quad) or a custom number, shared with Edit. */}
-                          <BedCountPicker value={totalBeds} onChange={setTotalBeds} />
-
-                          <Input type="number" placeholder="Rent per Bed (Monthly)" value={rentPerBed} className="rounded-lg" onChange={e => setRentPerBed(e.target.value)} />
-                        </>
-                      ) : (
-                        <div className="rm-span-2" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                          {/* Bulk room builder — two cards per row, one per
-                              room that will be created under this flat. Each
-                              gets its own name suffix, AC/Non-AC type, bed
-                              count and rent. */}
-                          <div className="rm-entry-grid">
-                            {flatRoomEntries.map(entry => (
-                              <RoomEntryRow
-                                key={entry.key}
-                                entry={entry}
-                                flatLabel={addFlatLabel}
-                                onChange={(patch) => updateRoomEntry(entry.key, patch)}
-                                onRemove={() => removeRoomEntry(entry.key)}
-                                canRemove={flatRoomEntries.length > 1}
-                              />
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={addRoomEntry}
-                            style={{
-                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                              width: "100%", padding: "8px 0", borderRadius: 8,
-                              border: "1.5px dashed #cbd5e1", background: "#fff",
-                              fontSize: 12.5, fontWeight: 600, color: "#5200FF", cursor: "pointer",
-                            }}
-                          >
-                            <Plus size={14} /> Add Another Room
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <DialogFooter>
-                      <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
-                      <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">
-                        {flatAssign.mode === "flat"
-                          ? (() => {
-                              const n = flatRoomEntries.filter(e => e.suffix.trim()).length;
-                              return n > 0 ? `Save ${n} Room${n === 1 ? "" : "s"}` : "Save Rooms";
-                            })()
-                          : "Save Room"}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
+                      <DialogFooter>
+                        <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
+                        <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">
+                          {flatAssign.mode === "flat"
+                            ? (() => {
+                                const n = flatRoomEntries.filter(e => e.suffix.trim()).length;
+                                return n > 0 ? `Save ${n} Room${n === 1 ? "" : "s"}` : "Save Rooms";
+                              })()
+                            : "Save Room"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                )}
+              </div>
             </div>
 
             <div className="rm-filters-row">
               <div className="rm-search-main">
                 <Search size={16} color="#94a3b8" />
-                <input type="text" placeholder="Search rooms..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <input
+                  type="text"
+                  placeholder="Search rooms..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                />
               </div>
-              <button className="rm-clear-btn" onClick={() => { setSearchTerm(""); setSelectedBranch(isWarden ? String(getBranchId()) : "all"); setPage(0); }}>
+              <button className="rm-clear-btn" onClick={clearFilters}>
                 <RefreshCw size={14} /> Clear Filters
               </button>
             </div>
@@ -998,10 +1129,10 @@ const RoomsPage = () => {
                   <tbody>
                     {loading ? (
                       <tr><td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-slate-400">Loading rooms...</td></tr>
-                    ) : filteredRooms.length === 0 ? (
+                    ) : rooms.length === 0 ? (
                       <tr><td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-slate-400">No rooms found.</td></tr>
                     ) : (
-                      filteredRooms.map((room: any) => {
+                      rooms.map((room: any) => {
                         const typeName  = getRoomTypeName(room.totalBeds, room.hostelType);
                         const typeColor = getRoomTypeColor(typeName);
 
@@ -1072,20 +1203,34 @@ const RoomsPage = () => {
                 <div className="rm-page-info">
                   Showing {rooms.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} rooms
                 </div>
+
                 <div className="rm-page-controls">
                   <Button
                     size="icon" variant="outline" className="w-8 h-8 rounded-lg"
-                    disabled={page === 0} onClick={() => setPage(p => p - 1)}
+                    disabled={page === 0} onClick={() => setPage(p => Math.max(p - 1, 0))}
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  <button className="rm-page-btn active">{page + 1}</button>
-                  {page + 1 < Math.ceil(totalCount / pageSize) && (
-                    <button className="rm-page-btn" onClick={() => setPage(page + 1)}>{page + 2}</button>
+
+                  {pageNumbers.map((p, idx) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${idx}`} className="rm-page-ellipsis">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        className={`rm-page-btn ${p === currentPage1Based ? "active" : ""}`}
+                        onClick={() => setPage(p - 1)}
+                      >
+                        {p}
+                      </button>
+                    )
                   )}
+
                   <Button
                     size="icon" variant="outline" className="w-8 h-8 rounded-lg"
-                    disabled={(page + 1) * pageSize >= totalCount} onClick={() => setPage(p => p + 1)}
+                    disabled={currentPage1Based >= totalPages} onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))}
                   >
                     <ChevronRight className="h-4 w-4" />
                   </Button>
@@ -1095,14 +1240,9 @@ const RoomsPage = () => {
           </div>
         </div>
 
-        {/* EDIT DIALOG — admin only. Uses the same BedCountPicker and
-            FlatAssignmentField as the Add dialog above, so both forms
-            share one implementation and can't drift apart. Also laid
-            out as a wide, 2-column landscape card. */}
         {isAdmin && (
           <Dialog open={editOpen} onOpenChange={(v) => { setEditOpen(v); if (!v) { setEditRoomData(null); setEditFlatAssign(EMPTY_FLAT_ASSIGNMENT); } }}>
-            {/* Rounded on all four corners for a softer card look,
-                matching the Branch page dialogs */}
+
             <DialogContent className="rounded-2xl overflow-hidden rm-dialog-landscape">
               <DialogHeader>
                 <DialogTitle>Edit Room</DialogTitle>
@@ -1111,25 +1251,27 @@ const RoomsPage = () => {
               {editRoomData && (
                 <div className="rm-dialog-grid max-h-[65vh] overflow-y-auto pr-1">
                   {/* Step 1 — Branch first */}
-                  <div className="rm-span-2">
-                    <Select
-                      value={String(editRoomData.unitId)}
-                      onValueChange={v => {
-                        setEditRoomData({ ...editRoomData, unitId: Number(v) });
-                        setEditFlatAssign(EMPTY_FLAT_ASSIGNMENT); // branch changed — flat choice no longer valid
-                      }}
-                    >
-                      <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Branch" /></SelectTrigger>
-                      <SelectContent>
-                        {branches.map(b => (
-                          <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="rm-span-3">
+                    <Field label="Branch" required>
+                      <Select
+                        value={String(editRoomData.unitId)}
+                        onValueChange={v => {
+                          setEditRoomData({ ...editRoomData, unitId: Number(v) });
+                          setEditFlatAssign(EMPTY_FLAT_ASSIGNMENT); // branch changed — flat choice no longer valid
+                        }}
+                      >
+                        <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Branch" /></SelectTrigger>
+                        <SelectContent>
+                          {branches.map(b => (
+                            <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
                   </div>
 
                   {/* Step 2 — Direct Room vs Assign to Flat */}
-                  <div className="rm-span-2">
+                  <div className="rm-span-3">
                     <FlatAssignmentField
                       unitId={editRoomData.unitId ? String(editRoomData.unitId) : ""}
                       flatsForBranch={flatsByEditBranch}
@@ -1138,24 +1280,32 @@ const RoomsPage = () => {
                     />
                   </div>
 
-                  {/* Step 3 — Room Number balanced alongside Room Type,
-                      then Beds balanced alongside Rent. */}
-                  <Input placeholder="Room Number" value={editRoomData.roomNumber} className="rounded-lg" onChange={e => setEditRoomData({ ...editRoomData, roomNumber: e.target.value })} />
+                  {/* Step 3 — Room Number, Room Type, Beds and Rent laid
+                      out across the 3-column landscape grid. */}
+                  <Field label="Room Number" required>
+                    <Input placeholder="e.g. 101" value={editRoomData.roomNumber} className="rounded-lg" onChange={e => setEditRoomData({ ...editRoomData, roomNumber: e.target.value })} />
+                  </Field>
 
-                  <Select value={editRoomData.hostelType || ""} onValueChange={(v) => setEditRoomData({ ...editRoomData, hostelType: v as HostelType })}>
-                    <SelectTrigger className="rounded-lg"><SelectValue placeholder="Room Type" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="AC">AC</SelectItem>
-                      <SelectItem value="NON_AC">Non-AC</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Field label="Room Type" required>
+                    <Select value={editRoomData.hostelType || ""} onValueChange={(v) => setEditRoomData({ ...editRoomData, hostelType: v as HostelType })}>
+                      <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Type" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AC">AC</SelectItem>
+                        <SelectItem value="NON_AC">Non-AC</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
 
-                  <BedCountPicker
-                    value={String(editRoomData.totalBeds ?? "")}
-                    onChange={(v) => setEditRoomData({ ...editRoomData, totalBeds: Number(v) || 0 })}
-                  />
+                  <Field label="Total Beds" required>
+                    <BedCountPicker
+                      value={String(editRoomData.totalBeds ?? "")}
+                      onChange={(v) => setEditRoomData({ ...editRoomData, totalBeds: Number(v) || 0 })}
+                    />
+                  </Field>
 
-                  <Input type="number" placeholder="Rent per Bed (Monthly)" value={String(editRoomData.rentPerBed ?? 0)} className="rounded-lg" onChange={e => setEditRoomData({ ...editRoomData, rentPerBed: Number(e.target.value) })} />
+                  <Field label="Rent per Bed (Monthly)" className="rm-span-2">
+                    <Input type="number" placeholder="e.g. 4500" value={String(editRoomData.rentPerBed ?? 0)} className="rounded-lg" onChange={e => setEditRoomData({ ...editRoomData, rentPerBed: Number(e.target.value) })} />
+                  </Field>
                 </div>
               )}
               <DialogFooter>

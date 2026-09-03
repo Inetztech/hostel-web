@@ -438,16 +438,16 @@ const AdminDetailModal = ({ mode, branchId, onClose }: AdminDetailModalProps) =>
     setLoading(true); setError(null);
     (async () => {
       try {
-        let data: TenantDetail[] = [];
-        try {
-          const params: Record<string, string> = { mode };
-          if (branchId) params.branchId = String(branchId);
-          const res = await api.get("/dashboard/tenant", { params });
-          data = res.data?.data ?? res.data?.content ?? res.data ?? [];
-        } catch { /* fall through */ }
-        if (!data || data.length === 0) {
-          data = await fetchTenantDetailsFromRents(mode!, branchId);
-        }
+        // CHANGED: this used to try GET /dashboard/tenant first and only
+        // fall back to fetchTenantDetailsFromRents on failure. But that
+        // endpoint is restricted to role TENANT on the backend
+        // (@PreAuthorize("hasRole('TENANT')...") in DashboardController),
+        // so for an ADMIN/WARDEN viewing this modal it was *guaranteed*
+        // to fail every time — spamming the console with 401/403 errors
+        // on every card click, before silently falling through anyway.
+        // There is no admin-facing equivalent of that endpoint, so go
+        // straight to the working client-side computation instead.
+        const data = await fetchTenantDetailsFromRents(mode!, branchId);
         setRows(data);
       } catch {
         setError("Failed to load data. Please try again.");

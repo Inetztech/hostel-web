@@ -61,6 +61,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Eye,
 } from "lucide-react";
 
 async function fetchAllPages<T>(
@@ -71,7 +72,7 @@ async function fetchAllPages<T>(
   const firstContent: T[] = first?.content ?? first ?? [];
   const total: number = first?.totalElements ?? firstContent.length;
   if (total <= pageSize) return firstContent;
-  
+
   const totalPages = Math.ceil(total / pageSize);
   const rest = await Promise.all(
     Array.from({ length: totalPages - 1 }, (_, i) =>
@@ -100,13 +101,16 @@ const RuleRegulationPage = () => {
   const [rules, setRules] = useState<RuleRegulation[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(false);
-  
+
   const initialLoadRef = useRef(true);
   const isFetchingRef = useRef(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editRule, setEditRule] = useState<RuleRegulation | null>(null);
+
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewRule, setViewRule] = useState<RuleRegulation | null>(null);
 
   const [form, setForm] = useState<RuleRegulationRequest>({
     title: "",
@@ -145,6 +149,11 @@ const RuleRegulationPage = () => {
   const closeEditDialog = () => {
     setEditOpen(false);
     setEditRule(null);
+  };
+
+  const closeViewDialog = () => {
+    setViewOpen(false);
+    setViewRule(null);
   };
 
   const loadData = useCallback(async (force = false) => {
@@ -325,14 +334,6 @@ const RuleRegulationPage = () => {
                 </div>
               )}
 
-              {/* Branch filter was previously unconditional, so TENANT/WARDEN
-                  saw an "All Branches" picker listing every branch in the
-                  hostel even though loadData() only fetches branches when
-                  canManage is true (branches was always [] for them anyway —
-                  the dropdown just silently rendered empty options, which is
-                  its own confusing state). Gated it the same way the status
-                  filter right above it already is, so it's only shown to
-                  roles that actually manage multiple branches. */}
               {canManage && (
                 <div className="flex bg-[#ffffff] border border-slate-200 rounded-md overflow-hidden h-10 w-[160px]">
                   <Select
@@ -392,18 +393,16 @@ const RuleRegulationPage = () => {
                     <th className="text-[11px] font-semibold text-slate-400 uppercase px-6 py-4 text-left tracking-wider">
                       LAST UPDATED
                     </th>
-                    {canManage && (
-                      <th className="text-[11px] font-semibold text-slate-400 uppercase px-6 py-4 text-right tracking-wider">
-                        ACTIONS
-                      </th>
-                    )}
+                    <th className="text-[11px] font-semibold text-slate-400 uppercase px-6 py-4 text-right tracking-wider">
+                      ACTIONS
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {loading ? (
                     <tr>
                       <td
-                        colSpan={canManage ? 6 : 4}
+                        colSpan={canManage ? 6 : 5}
                         className="text-center py-20 text-slate-400"
                       >
                         <div className="flex flex-col items-center justify-center gap-2">
@@ -415,7 +414,7 @@ const RuleRegulationPage = () => {
                   ) : paginatedRules.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={canManage ? 6 : 4}
+                        colSpan={canManage ? 6 : 5}
                         className="text-center py-16 text-slate-400 text-sm font-medium"
                       >
                         No rules found matching your criteria.
@@ -435,7 +434,7 @@ const RuleRegulationPage = () => {
                             {globalIdx + 1}
                           </td>
                           <td className="px-6 py-4">
-                            <div className="text-[14px] font-bold text-slate-900 mb-1">
+                            <div className="text-[14px] text-slate-900 mb-1 font-medium">
                               {row.title}
                             </div>
                             <div
@@ -464,59 +463,73 @@ const RuleRegulationPage = () => {
                             </td>
                           )}
                           <td className="px-6 py-4">
-                            <div className="text-[13px] font-bold text-slate-800">
+                            <div className="text-[13px] text-slate-800">
                               {formatDate(row.updatedAt || row.createdAt)}
                             </div>
                           </td>
-                          {canManage && (
-                            <td className="px-6 py-4 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                className="w-8 h-8 rounded-md border border-slate-200 inline-flex items-center justify-center text-slate-600 mr-2 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
-                                title="Edit"
-                                onClick={() => {
-                                  setEditRule({ ...row });
-                                  setEditOpen(true);
-                                }}
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
+                          <td className="px-6 py-4 text-right whitespace-nowrap">
+                            <button
+                              type="button"
+                              className="w-8 h-8 rounded-md border border-slate-200 inline-flex items-center justify-center text-slate-600 mr-2 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+                              title="View"
+                              onClick={() => {
+                                setViewRule(row);
+                                setViewOpen(true);
+                              }}
+                            >
+                              <Eye className="w-4 h-4 text-slate-600" />
+                            </button>
 
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="w-8 h-8 rounded-md border border-slate-200 inline-flex items-center justify-center text-red-500 bg-white hover:bg-red-50 hover:border-red-200 transition-all shadow-sm"
-                                    title="Delete"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>
-                                      Delete "{row.title}"?
-                                    </AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      This action cannot be undone. This rule will be permanently deleted.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                      className="bg-red-600 hover:bg-red-700 focus:ring-red-600 text-white"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        handleDelete(row.id!);
-                                      }}
+                            {canManage && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="w-8 h-8 rounded-md border border-slate-200 inline-flex items-center justify-center text-slate-600 mr-2 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+                                  title="Edit"
+                                  onClick={() => {
+                                    setEditRule({ ...row });
+                                    setEditOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="w-8 h-8 rounded-md border border-slate-200 inline-flex items-center justify-center text-red-500 bg-white hover:bg-red-50 hover:border-red-200 transition-all shadow-sm"
+                                      title="Delete"
                                     >
-                                      Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </td>
-                          )}
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>
+                                        Delete "{row.title}"?
+                                      </AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This action cannot be undone. This rule will be permanently deleted.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        className="bg-red-600 hover:bg-red-700 focus:ring-red-600 text-white"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          handleDelete(row.id!);
+                                        }}
+                                      >
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </>
+                            )}
+                          </td>
                         </tr>
                       );
                     })
@@ -594,6 +607,87 @@ const RuleRegulationPage = () => {
             </div>
           </div>
         </div>
+
+        {/* VIEW DIALOG */}
+        <Dialog
+          open={viewOpen}
+          onOpenChange={(open) => {
+            setViewOpen(open);
+            if (!open) closeViewDialog();
+          }}
+        >
+          <DialogContent className="rounded-3xl max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold text-slate-900">
+                Rule & Regulation Details
+              </DialogTitle>
+            </DialogHeader>
+            {viewRule && (
+              <div className="space-y-4 my-2 text-sm text-slate-700">
+                <div>
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                    Title
+                  </label>
+                  <div className="text-base font-semibold text-slate-900">
+                    {viewRule.title}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                      Branch
+                    </label>
+                    <div className="font-medium text-slate-800">
+                      {viewRule.branchName ?? "N/A"}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                      Status
+                    </label>
+                    <div>
+                      {viewRule.published ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          Published
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                          Draft
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                    Last Updated
+                  </label>
+                  <div className="text-slate-600">
+                    {formatDate(viewRule.updatedAt || viewRule.createdAt)}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                    Description
+                  </label>
+                  <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl text-slate-800 whitespace-pre-wrap leading-relaxed">
+                    {viewRule.description}
+                  </div>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={closeViewDialog}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {canManage && (
           <Dialog

@@ -85,6 +85,24 @@ const toArray = <T,>(val: any): T[] => {
   return [];
 };
 
+/* ── Compact page-number sequence, e.g. [1,2,3,'…',9,10] ── */
+const getPageNumbers = (current: number, total: number): (number | "ellipsis")[] => {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+
+  const pages: (number | "ellipsis")[] = [1];
+
+  if (current > 3) pages.push("ellipsis");
+
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let p = start; p <= end; p++) pages.push(p);
+
+  if (current < total - 2) pages.push("ellipsis");
+
+  pages.push(total);
+  return pages;
+};
+
 const ComplaintPage = () => {
   const role = getUserRole()?.toUpperCase();
   const branchId = getBranchId();
@@ -131,7 +149,9 @@ const ComplaintPage = () => {
       setTableLoading(true);
 
       const [complaintsResult, branchResult, roomResult] = await Promise.allSettled([
-        role === "TENANT" ? getMyComplaints() : getAllComplaints(),
+        role === "TENANT"
+          ? fetchAllPages<Complaint>(getMyComplaints)
+          : fetchAllPages<Complaint>(getAllComplaints),
         fetchAllPages<Branch>(getBranches),
         fetchAllPages<Room>(getRooms),
       ]);
@@ -246,7 +266,18 @@ const ComplaintPage = () => {
     setCurrentPage(0);
   }, [selectedBranch, statusFilter, categoryFilter, searchText]);
 
+  const totalPages = Math.max(1, Math.ceil(rowData.length / pageSize));
+
+  // Clamp currentPage if filters shrink the result set below the current page
+  useEffect(() => {
+    if (currentPage > totalPages - 1) setCurrentPage(Math.max(0, totalPages - 1));
+  }, [currentPage, totalPages]);
+
   const paginatedRows = rowData.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const pageNumbers = useMemo(
+    () => getPageNumbers(currentPage + 1, totalPages),
+    [currentPage, totalPages]
+  );
 
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -302,6 +333,12 @@ const ComplaintPage = () => {
         .cp-status.open::before { background: #e11d48; }
 
         .cp-category { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+
+        .cp-page-btn { min-width: 32px; height: 32px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; border: 1px solid #e2e8f0; background: #fff; color: #64748b; }
+        .cp-page-btn:hover:not(:disabled) { background: #f8fafc; }
+        .cp-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .cp-page-btn.active { background: #5200FF; border-color: #5200FF; color: #fff; font-weight: 600; }
+        .cp-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #94a3b8; }
       `}</style>
 
       <div className="cp-wrap">
@@ -632,20 +669,34 @@ const ComplaintPage = () => {
               Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to{" "}
               {Math.min((currentPage + 1) * pageSize, rowData.length)} of {rowData.length} complaints
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <button
-                className="w-8 h-8 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
+                className="cp-page-btn"
                 disabled={currentPage === 0}
                 onClick={() => setCurrentPage((p) => p - 1)}
               >
                 &lt;
               </button>
-              <button className="w-8 h-8 rounded-xl bg-[#5200FF] text-white flex items-center justify-center font-medium text-sm">
-                {currentPage + 1}
-              </button>
+
+              {pageNumbers.map((p, idx) =>
+                p === "ellipsis" ? (
+                  <span key={`ellipsis-${idx}`} className="cp-page-ellipsis">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    className={`cp-page-btn ${p === currentPage + 1 ? "active" : ""}`}
+                    onClick={() => setCurrentPage(p - 1)}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+
               <button
-                className="w-8 h-8 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 font-medium text-xs"
-                disabled={(currentPage + 1) * pageSize >= rowData.length}
+                className="cp-page-btn"
+                disabled={currentPage + 1 >= totalPages}
                 onClick={() => setCurrentPage((p) => p + 1)}
               >
                 &gt;

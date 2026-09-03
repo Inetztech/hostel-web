@@ -13,7 +13,6 @@ import TenantsPage     from "@/pages/TenantsPage";
 import EBReadingsPage  from "@/pages/EBReadingsPage";
 import RentPage        from "@/pages/RentPage";
 import CheckoutPage    from "@/pages/CheckoutPage";
-import ReportsPage     from "@/pages/ReportsPage";
 import NotFound        from "@/pages/NotFound";
 import Unauthorized    from "@/pages/Unauthorized";
 import BranchPage      from "@/pages/BranchPage";
@@ -22,6 +21,7 @@ import UserRegisterPage from "@/pages/UserRegisterPage";
 import ComplaintsPage  from "@/pages/ComplaintPage";
 import FlatPage        from "@/pages/FlatPage";
 import FoodTimetablePage from "@/pages/FoodTimetablePage";
+import SundayMealPage from "@/pages/Sundaymealpage";
 import AnnouncementPage from "@/pages/AnnouncementPage";
 import RuleRegulationPage from "@/pages/RuleRegulationPage";
 import ProfilePage      from "@/pages/ProfilePage";
@@ -32,23 +32,24 @@ import SuperAdminTicketsPage from "@/pages/SuperAdminTicketsPage";
 import ExpensePage from "./pages/ExpenseTracker";
 import VisitorPage from "./pages/Visitor";
 import MaintenancePage from "@/pages/MaintenancePage";
-// ── NEW: subscription / renewal (ADMIN) ──
 import SubscriptionPage from "@/pages/SubscriptionPage";
+import TenantNoticePeriodPage from "@/pages/TenantNoticePeriodPage";
 
 import HomePage from "./pages/Home";
+import PropertyDetailPage from "@/pages/PropertyDetailPage";
 import DamagePage from "@/pages/DamagePage";
+
+
 
 export const router = createBrowserRouter([
 
   // ── Public ──────────────────────────────────────────────────────────────
   { path: "/",             element: <HomePage /> },
+  { path: "/property/:id",  element: <PropertyDetailPage /> },
   { path: "/login",        element: <Login /> },
   { path: "/admin",        element: <Navigate to="/dashboard" replace /> },
   { path: "/unauthorized", element: <Unauthorized /> },
 
-  // ── ONE shared layout tree — all authenticated roles ────────────────────
-  // AppLayout is wrapped in a single ProtectedRoute that accepts every role.
-  // Individual pages are then guarded by their own inner ProtectedRoute.
   {
     element: (
       <ProtectedRoute allow={["SUPER_ADMIN", "ADMIN", "WARDEN", "TENANT"]}>
@@ -66,9 +67,6 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      // ── MERGED: Hostels + Admins now live on one URL/screen. The old
-      // /hostels and /super-admin/admins routes redirect here so existing
-      // bookmarks/links keep working. ─────────────────────────────────
       {
         path: "/super-admin/hostels",
         element: (
@@ -79,7 +77,6 @@ export const router = createBrowserRouter([
       },
       { path: "/hostels", element: <Navigate to="/super-admin/hostels" replace /> },
       { path: "/super-admin/admins", element: <Navigate to="/super-admin/hostels" replace /> },
-      // ── SUPER_ADMIN: Support Tickets dashboard (Raise Ticket module) ────
       {
         path: "/super-admin/tickets",
         element: (
@@ -98,27 +95,6 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // {
-      //   path: "/super-admin/subscriptions",
-      //   element: (
-      //     <ProtectedRoute allow={["SUPER_ADMIN"]}>
-      //       <SubscriptionsPage />
-      //     </ProtectedRoute>
-      //   ),
-      // },
-      // {
-      //   path: "/super-admin/plans",
-      //   element: (
-      //     <ProtectedRoute allow={["SUPER_ADMIN"]}>
-      //       <PlansPage />
-      //     </ProtectedRoute>
-      //   ),
-      // },
-
-      // ── PERMISSION MANAGEMENT (ADMIN + WARDEN only) ─────────────────────
-      // SUPER_ADMIN manages hostels/admins/plans/status instead; Admins get
-      // full permissions automatically on creation. Tenants do not have
-      // permission routing, keeping alignment with your page spec.
       {
         path: "/permissions",
         element: (
@@ -136,8 +112,6 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      // ── ADMIN / WARDEN / TENANT — Dashboard ───────────────────────────
-      // SUPER_ADMIN who manually types /dashboard gets redirected home.
       {
         path: "/dashboard",
         element: (
@@ -158,49 +132,23 @@ export const router = createBrowserRouter([
       },
       {
         path: "/expenses",
-        element: (
-          // <ProtectedRoute allow={["ADMIN", "WARDEN",]} permission="MANAGE_EXPENSES">
-          <ExpensePage/>
-          // </ProtectedRoute>
-        ),
+        element: <ExpensePage/>,
       },
-       {
+      {
         path: "/visitor",
-        element: (
-          // <ProtectedRoute allow={["ADMIN", "WARDEN",]} permission="MANAGE_EXPENSES">
-          <VisitorPage/>
-          // </ProtectedRoute>
-        ),
+        element: <VisitorPage/>,
       },
       {
         path: "/staff-register",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
-            {/* Registering users covers both wardens (ADMIN) and tenants
-                (ADMIN/WARDEN) — either underlying permission unlocks the page. */}
             <PermissionRoute require={["MANAGE_WARDENS", "MANAGE_TENANTS"]}>
               <UserRegisterPage />
             </PermissionRoute>
           </ProtectedRoute>
         ),
       },
-      // {
-      //   path: "/reports",
-      //   element: (
-      //     <ProtectedRoute allow={["ADMIN"]} permission="VIEW_REPORTS">
-      //       <ReportsPage />
-      //     </ProtectedRoute>
-      //   ),
-      // },
 
-      // ── NEW: ADMIN — Subscription / Renewal ─────────────────────────────
-      // Deliberately NOT gated by a `permission` prop like most ADMIN-only
-      // routes above — an admin whose subscription just expired may not
-      // have any permission context loaded/valid yet, and this is the one
-      // page they must always be able to reach to pay and restore access
-      // (mirrors the server-side whitelist in SubscriptionAccessFilter,
-      // which always allows /api/subscriptions/**). Role-gating alone
-      // (ADMIN) is intentional and sufficient here.
       {
         path: "/subscription",
         element: (
@@ -235,6 +183,17 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
+
+      // ── NEW: TENANT — self-service Notice Period ────────────────────────
+      {
+        path: "/notice-period",
+        element: (
+          <ProtectedRoute allow={["TENANT"]}>
+            <TenantNoticePeriodPage />
+          </ProtectedRoute>
+        ),
+      },
+
       {
         path: "/eb-readings",
         element: (
@@ -260,12 +219,6 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // ── RULES & REGULATIONS — ADMIN full CRUD, WARDEN/TENANT view-only ──
-      // No `permission` prop on purpose: per the RBAC spec, Warden and
-      // Tenant must always be able to view rules, regardless of whether an
-      // Admin has assigned them any fine-grained PERM_x permission. The
-      // page itself hides Create/Edit/Delete controls for non-Admins, and
-      // the backend (@PreAuthorize) is the authoritative enforcement point.
       {
         path: "/rules-regulations",
         element: (
@@ -284,7 +237,6 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // ── ALL ROLES — Profile ─────────────────────────────────────────────
       {
         path: "/profile",
         element: (
@@ -294,7 +246,6 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // ── ADMIN + WARDEN + TENANT ────────────────────────────────────────
       {
         path: "/payments",
         element: (
@@ -305,7 +256,6 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      // ── ADMIN + WARDEN + TENANT ────────────────────────────────────────
       {
         path: "/complaints",
         element: (
@@ -322,7 +272,14 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      // ── ADMIN only — Raise Ticket module ────────────────────────────────
+      {
+        path: "/sunday-meal",
+        element: (
+          <ProtectedRoute allow={["ADMIN", "TENANT", "WARDEN"]} permission="VIEW_SUNDAY_MEAL">
+            <SundayMealPage />
+          </ProtectedRoute>
+        ),
+      },
       {
         path: "/tickets",
         element: (
@@ -334,7 +291,6 @@ export const router = createBrowserRouter([
     ],
   },
 
-  // ── 404 ─────────────────────────────────────────────────────────────────
   { path: "*", element: <NotFound /> },
 ], {
   future: {

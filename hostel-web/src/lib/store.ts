@@ -14,6 +14,9 @@ import {
   TicketStatusUpdateRequest, BedLimitDecisionRequest, TicketStatus, TicketCategory,
   MaintenanceDashboardStats, Cleaner, MaintenanceTask,CleanerWorkSummary,MaintenanceRequest,CleanerRequest,
   HostelStatus,AddOnBedsRequest,Damage,DamageRequest,DamageStatus,
+  CheckoutNoticeRequest,
+  SundayMealConfirmation, SundayMealResponseRequest, SundayMealCount,
+  HostelImageDTO,PublicRoomTypeSummary,
 } from "./types";
 
 const buildDamageFormData = (data: Partial<DamageRequest>): FormData => {
@@ -31,11 +34,26 @@ const buildDamageFormData = (data: Partial<DamageRequest>): FormData => {
   return fd;
 };
 
+const damagesInFlight = new Map<string, Promise<{ content: Damage[]; totalElements: number }>>();
+
 export const fetchDamages = async (
   pg = 0,
   size = 10
-): Promise<{ content: Damage[]; totalElements: number }> =>
-  page(await api.get("/damages", { params: { page: pg, size } }));
+): Promise<{ content: Damage[]; totalElements: number }> => {
+  const key = `${pg}-${size}`;
+  if (damagesInFlight.has(key)) return damagesInFlight.get(key)!;
+
+  const promise = (async () => {
+    try {
+      return page(await api.get("/damages", { params: { page: pg, size } }));
+    } finally {
+      damagesInFlight.delete(key);
+    }
+  })();
+
+  damagesInFlight.set(key, promise);
+  return promise;
+};
 
 export const getDamages = fetchDamages;
 
@@ -72,15 +90,6 @@ export const deleteDamage = async (id: number): Promise<void> => {
   await api.delete(`/damages/${id}`);
 };
 
-/**
- * Sum of unbilled damage shares per tenant (damage reported but not yet
- * folded into a Rent record). Backed by GET /damages/pending-summary.
- * Used by the Rent page to show a tenant's pending damage amount before
- * "Generate" has been clicked for that month — otherwise the Rent page
- * only ever reads damageAmount off an already-generated Rent row, and a
- * freshly reported damage would show as blank there even though it's
- * visible on the Damage/Penalty page.
- */
 export const getPendingDamageSummary = async (): Promise<Record<number, number>> =>
   d(await api.get("/damages/pending-summary"));
 
@@ -138,12 +147,55 @@ const adminGuard = () => {
     throw new Error("Only Admin users can perform this action");
 };
 
+let responsibleContactCache: {
+  data: import("./types").ResponsibleContact | null;
+  ts: number;
+  token: string | null;
+} | null = null;
+let responsibleContactInFlight: Promise<import("./types").ResponsibleContact | null> | null = null;
+let responsibleContactInFlightToken: string | null = null;
+const RESPONSIBLE_CONTACT_CACHE_MS = 60_000; // changes rarely; safe to cache longer than profile (30s)
+
 export const getResponsibleContact = async (): Promise<import("./types").ResponsibleContact | null> => {
-  try {
-    return d(await api.get("/users/me/responsible-contact"));
-  } catch {
-    return null;
+  const currentToken = sessionStorage.getItem("token");
+  const now = Date.now();
+
+  const cacheValid =
+    responsibleContactCache !== null &&
+    responsibleContactCache.token === currentToken &&
+    now - responsibleContactCache.ts < RESPONSIBLE_CONTACT_CACHE_MS;
+
+  if (cacheValid) {
+    return responsibleContactCache!.data;
   }
+
+  if (responsibleContactInFlight && responsibleContactInFlightToken === currentToken) {
+    return responsibleContactInFlight;
+  }
+
+  responsibleContactInFlightToken = currentToken;
+  responsibleContactInFlight = (async () => {
+    try {
+      const data = await d(await api.get("/users/me/responsible-contact"));
+      responsibleContactCache = { data, ts: Date.now(), token: currentToken };
+      return data;
+    } catch {
+      return null;
+    } finally {
+      responsibleContactInFlight = null;
+      responsibleContactInFlightToken = null;
+    }
+  })();
+
+  return responsibleContactInFlight;
+};
+
+/** Clears the cached responsible-contact so the next call refetches
+ *  (call this after permissions are reassigned to the current user,
+ *  if that ever becomes an in-session action rather than requiring
+ *  re-login). */
+export const invalidateResponsibleContactCache = (): void => {
+  responsibleContactCache = null;
 };
 
 export async function fetchAllPages<T>(
@@ -311,8 +363,47 @@ export interface SubscriptionRenewRequest {
   pricePerAdditionalBed?: number;
 }
 
-export const getMySubscription = async (): Promise<Subscription> =>
-  d(await api.get("/subscriptions/me"));
+let subscriptionCache: { data: Subscription; ts: number; token: string | null } | null = null;
+let subscriptionInFlight: Promise<Subscription> | null = null;
+let subscriptionInFlightToken: string | null = null;
+const SUBSCRIPTION_CACHE_MS = 30_000;
+
+export const getMySubscription = async (forceRefresh = false): Promise<Subscription> => {
+  const currentToken = sessionStorage.getItem("token");
+  const now = Date.now();
+
+  const cacheValid =
+    !forceRefresh &&
+    subscriptionCache !== null &&
+    subscriptionCache.token === currentToken &&
+    now - subscriptionCache.ts < SUBSCRIPTION_CACHE_MS;
+
+  if (cacheValid) {
+    return subscriptionCache!.data;
+  }
+
+  if (!forceRefresh && subscriptionInFlight && subscriptionInFlightToken === currentToken) {
+    return subscriptionInFlight;
+  }
+
+  subscriptionInFlightToken = currentToken;
+  subscriptionInFlight = (async () => {
+    try {
+      const data = await d(await api.get("/subscriptions/me"));
+      subscriptionCache = { data, ts: Date.now(), token: currentToken };
+      return data;
+    } finally {
+      subscriptionInFlight = null;
+      subscriptionInFlightToken = null;
+    }
+  })();
+
+  return subscriptionInFlight;
+};
+
+export const invalidateSubscriptionCache = (): void => {
+  subscriptionCache = null;
+};
 
 export const getMySubscriptionHistory = async (): Promise<SubscriptionPayment[]> =>
   d(await api.get("/subscriptions/me/history"));
@@ -322,6 +413,7 @@ export const renewMySubscription = async (
 ): Promise<Subscription> => {
   const updated = d(await api.post("/subscriptions/me/renew", data));
   sessionStorage.setItem("subscriptionExpired", "false");
+  invalidateSubscriptionCache();
   return updated;
 };
 
@@ -402,6 +494,59 @@ const pageFetch = (path: string) =>
 export const fetchRooms = pageFetch("/rooms");
 export const getRooms   = fetchRooms;
 
+export interface RoomTypeSummary {
+  sharing: string;
+  price: number;
+  availableBeds: number;
+}
+
+const bedCountLabel = (totalBeds: number): string => {
+  switch (totalBeds) {
+    case 1: return "Single";
+    case 2: return "Double";
+    case 3: return "Triple";
+    case 4: return "Quad";
+    default: return `${totalBeds} Bed`;
+  }
+};
+
+export const getRoomTypesForHostel = async (
+  hostelId: number | string
+): Promise<RoomTypeSummary[]> => {
+  const id = Number(hostelId);
+
+  const allBranches = await fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size));
+  const branchIds = new Set(
+    allBranches.filter((b) => Number(b.hostelId) === id).map((b) => b.id)
+  );
+  if (branchIds.size === 0) return [];
+
+  const allRooms = await fetchAllPages<Room>((pg, size) => fetchRooms(pg, size));
+  const hostelRooms = allRooms.filter((r) => branchIds.has(r.unitId));
+
+  const bySharing = new Map<string, { price: number; availableBeds: number }>();
+  for (const room of hostelRooms) {
+    const acLabel = room.hostelType === "AC" ? "AC" : "Non-AC";
+    const sharing = `${bedCountLabel(room.totalBeds)} ${acLabel}`;
+    const available =
+      room.availableBeds ?? Math.max(room.totalBeds - (room.occupiedBeds ?? 0), 0);
+
+    const existing = bySharing.get(sharing);
+    if (!existing) {
+      bySharing.set(sharing, { price: room.rentPerBed, availableBeds: available });
+    } else {
+      existing.price = Math.min(existing.price, room.rentPerBed);
+      existing.availableBeds += available;
+    }
+  }
+
+  return Array.from(bySharing.entries()).map(([sharing, v]) => ({
+    sharing,
+    price: v.price,
+    availableBeds: v.availableBeds,
+  }));
+};
+
 export const createRoom = async (data: {
   roomNumber: string; hostelType: string; totalBeds: number;
   rentPerBed: number; unitId: number; flatId?: number | null;
@@ -459,12 +604,14 @@ export const deleteTenant = async (tenantId: number | string): Promise<void> => 
 export const checkoutTenant = async (
   tenantId: number,
   currentReading?: number | null,
-  acFinalReading?: number | null
+  acFinalReading?: number | null,
+  overrideNoticePeriod?: boolean
 ): Promise<Tenant> => {
   guard();
   return d(await api.put(`/tenants/${tenantId}/checkout`, {
     finalReading: currentReading ?? null,
     acFinalReading: acFinalReading ?? null,
+    overrideNoticePeriod: overrideNoticePeriod ?? false,
   }));
 };
 
@@ -497,6 +644,41 @@ export const approveAndAllocateTenant = async (
   if (data.acJoinReading != null) params.acJoinReading = data.acJoinReading;
   return d(await api.put(`/tenants/${tenantId}/approve`, null, { params }));
 };
+
+export const submitCheckoutNotice = async (
+  tenantId: number,
+  data?: CheckoutNoticeRequest
+): Promise<Tenant> => {
+  guard();
+  return d(await api.post(`/tenants/${tenantId}/checkout-notice`, data ?? {}));
+};
+
+/** Tenant submits their own checkout notice (self-service, /me endpoint). */
+export const submitMyCheckoutNotice = async (
+  data?: CheckoutNoticeRequest
+): Promise<Tenant> => {
+  guard();
+  return d(await api.post("/tenants/me/checkout-notice", data ?? {}));
+};
+
+/** Withdraws a previously submitted checkout notice, before final checkout. */
+export const cancelCheckoutNotice = async (tenantId: number): Promise<Tenant> => {
+  guard();
+  return d(await api.delete(`/tenants/${tenantId}/checkout-notice`));
+};
+
+/** Paginated list of tenants currently in (or past) their notice period. */
+export const fetchTenantsInNoticePeriod = async (
+  pg = 0,
+  size = 10,
+  unitId?: string
+): Promise<{ content: Tenant[]; totalElements: number }> => {
+  const params: Record<string, any> = { page: pg, size };
+  if (unitId && unitId !== "all") params.unitId = unitId;
+  return page(await api.get("/tenants/notice-period", { params }));
+};
+
+export const getTenantsInNoticePeriod = fetchTenantsInNoticePeriod;
 
 export const fetchEBReadings = pageFetch("/eb-readings");
 export const getEBReadings   = fetchEBReadings;
@@ -623,8 +805,36 @@ export const updateHostelStatus = async (
   return d(await api.put(`/super-admin/hostels/${id}/status`, null, { params: { status } }));
 };
 
-export const getSuperAdminDashboard = async (): Promise<import("./types").SuperAdminDashboard> =>
-  (await api.get("/super-admin/dashboard")).data.data;
+let dashboardCache: { data: import("./types").SuperAdminDashboard; ts: number } | null = null;
+let dashboardInFlight: Promise<import("./types").SuperAdminDashboard> | null = null;
+const DASHBOARD_CACHE_MS = 5000; // short — this is a live "Refresh" button target, not long-lived profile data
+
+export const getSuperAdminDashboard = async (): Promise<import("./types").SuperAdminDashboard> => {
+  const now = Date.now();
+
+  if (dashboardCache && now - dashboardCache.ts < DASHBOARD_CACHE_MS) {
+    return dashboardCache.data;
+  }
+
+  if (dashboardInFlight) return dashboardInFlight;
+
+  dashboardInFlight = (async () => {
+    try {
+      const data = (await api.get("/super-admin/dashboard")).data.data;
+      dashboardCache = { data, ts: Date.now() };
+      return data;
+    } finally {
+      dashboardInFlight = null;
+    }
+  })();
+
+  return dashboardInFlight;
+};
+
+export const invalidateSuperAdminDashboardCache = (): void => {
+  dashboardCache = null;
+  dashboardInFlight = null;
+};
 
 const hostelAdminsInFlight = new Map<string, Promise<import("./types").HostelAdminPageResponse>>();
 
@@ -666,16 +876,69 @@ export const updateHostelWithAdmin = async (
 export const deleteHostelWithAdmin = async (id: number): Promise<void> =>
   { guard(); await api.delete(`/super-admin/hostels/${id}`); };
 
-const branchesInFlight = new Map<string, Promise<{ content: Branch[]; totalElements: number }>>();
 
-export const fetchBranches = async (pg = 0, size = 10): Promise<{ content: Branch[]; totalElements: number }> => {
-  const key = `${pg}-${size}`;
+export const getHostelImages = async (hostelId: number): Promise<HostelImageDTO[]> =>
+  d(await api.get(`/hostel-images/${hostelId}`));
+
+export const uploadHostelImages = async (
+  hostelId: number,
+  files: File[],
+  imageType: string = "HOSTEL"
+): Promise<HostelImageDTO[]> => {
+  const fd = new FormData();
+  files.forEach((f) => fd.append("files", f));
+  fd.append("imageType", imageType);
+  return d(await api.post(`/hostel-images/${hostelId}/upload`, fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }));
+};
+
+export const updateHostelImage = async (
+  hostelId: number,
+  imageId: number,
+  data: { imageType?: string; displayOrder?: number }
+): Promise<HostelImageDTO> =>
+  d(await api.put(`/hostel-images/${hostelId}/${imageId}`, null, { params: data }));
+
+export const setPrimaryHostelImage = async (
+  hostelId: number,
+  imageId: number
+): Promise<HostelImageDTO> =>
+  d(await api.put(`/hostel-images/${hostelId}/${imageId}/primary`));
+
+export const reorderHostelImages = async (
+  hostelId: number,
+  orderedImageIds: number[]
+): Promise<void> => {
+  await api.put(`/hostel-images/${hostelId}/reorder`, orderedImageIds);
+};
+
+export const deleteHostelImage = async (
+  hostelId: number,
+  imageId: number
+): Promise<void> => {
+  await api.delete(`/hostel-images/${hostelId}/${imageId}`);
+};
+const branchesCache = new Map<string, { data: { content: Branch[]; totalElements: number }; ts: number }>();
+const branchesInFlight = new Map<string, Promise<{ content: Branch[]; totalElements: number }>>();
+const BRANCHES_CACHE_MS = 4000;
+
+export const fetchBranches = async (
+  pg = 0,
+  size = 10,
+  keyword?: string
+): Promise<{ content: Branch[]; totalElements: number }> => {
+  const kw = keyword?.trim() || undefined;
+  const key = `${pg}-${size}-${kw ?? ""}`;
+
+  const cached = branchesCache.get(key);
+  if (cached && Date.now() - cached.ts < BRANCHES_CACHE_MS) return cached.data;
 
   if (branchesInFlight.has(key)) return branchesInFlight.get(key)!;
 
   const promise = (async () => {
     try {
-      const res = await api.get("/units", { params: { page: pg, size } });
+      const res = await api.get("/units", { params: { page: pg, size, keyword: kw } });
 
       const raw = res.data?.data;
 
@@ -725,7 +988,9 @@ export const fetchBranches = async (pg = 0, size = 10): Promise<{ content: Branc
         } as Branch;
       });
 
-      return { content, totalElements };
+      const result = { content, totalElements };
+      branchesCache.set(key, { data: result, ts: Date.now() });
+      return result;
     } finally {
       branchesInFlight.delete(key);
     }
@@ -737,6 +1002,10 @@ export const fetchBranches = async (pg = 0, size = 10): Promise<{ content: Branc
 
 export const getBranches = fetchBranches;
 
+export const invalidateBranchesCache = (): void => {
+  branchesCache.clear();
+};
+
 export const getBranchId = (): number | null => {
   const id = sessionStorage.getItem("branchId");
   return id ? Number(id) : null;
@@ -745,17 +1014,22 @@ export const getBranchId = (): number | null => {
 export const createBranch = async (data: BranchRequest): Promise<Branch> => {
   guard();
   const res = await api.post("/units", data);
+  invalidateBranchesCache();
   return res.data?.data ?? res.data;
 };
 
 export const updateBranch = async (id: number, data: BranchRequest): Promise<Branch> => {
   guard();
   const res = await api.put(`/units/${id}`, data);
+  invalidateBranchesCache();
   return res.data?.data ?? res.data;
 };
 
-export const deleteBranch = async (id: number): Promise<void> =>
-  { guard(); await api.delete(`/units/${id}`); };
+export const deleteBranch = async (id: number): Promise<void> => {
+  guard();
+  await api.delete(`/units/${id}`);
+  invalidateBranchesCache();
+};
 
 export const sendEBBillWhatsApp = async (roomNumber: string): Promise<void> => {
   guard();
@@ -820,6 +1094,26 @@ export const getFoodScheduleById   = async (id: number): Promise<FoodTimetable> 
 export const createFoodSchedule    = async (data: FoodTimetableRequest): Promise<FoodTimetable> => { guard(); return d(await api.post("/food-timetable", data)); };
 export const updateFoodSchedule    = async (id: number, data: FoodTimetableRequest): Promise<FoodTimetable> => { guard(); return d(await api.put(`/food-timetable/${id}`, data)); };
 export const deleteFoodSchedule    = async (id: number): Promise<void> => { guard(); await api.delete(`/food-timetable/${id}`); };
+
+export const getNextSunday = async (): Promise<string> =>
+  d(await api.get("/sunday-meal/next-sunday"));
+
+export const submitSundayMealResponse = async (
+  data: SundayMealResponseRequest
+): Promise<SundayMealConfirmation> => { guard(); return d(await api.post("/sunday-meal/respond", data)); };
+
+export const getMySundayMealResponse = async (
+  mealDate?: string
+): Promise<SundayMealConfirmation> =>
+  d(await api.get("/sunday-meal/my", { params: mealDate ? { mealDate } : {} }));
+
+export const getSundayMealCount = async (
+  mealDate?: string
+): Promise<SundayMealCount> =>
+  d(await api.get("/sunday-meal/count", { params: mealDate ? { mealDate } : {} }));
+
+export const getSundayMealHistory = async (): Promise<SundayMealCount[]> =>
+  d(await api.get("/sunday-meal/history"));
 
 export const fetchAnnouncements = async (
   pg = 0,
@@ -1148,14 +1442,45 @@ export const createTicket = async (data: TicketRequest): Promise<Ticket> => {
 export const getMyTickets = async (): Promise<TicketSummary[]> =>
   d(await api.get("/tickets/my")) ?? [];
 
+let ticketsInFlight: Promise<TicketSummary[]> | null = null;
+let ticketsInFlightKey: string | null = null;
+
 export const getAllTickets = async (filters?: {
   status?: TicketStatus;
   category?: TicketCategory;
-}): Promise<TicketSummary[]> =>
-  d(await api.get("/tickets", { params: filters })) ?? [];
+}): Promise<TicketSummary[]> => {
+  const key = JSON.stringify(filters ?? {});
 
-export const getTicketStats = async (): Promise<TicketStats> =>
-  d(await api.get("/tickets/stats"));
+  if (ticketsInFlight && ticketsInFlightKey === key) return ticketsInFlight;
+
+  ticketsInFlightKey = key;
+  ticketsInFlight = (async () => {
+    try {
+      return d(await api.get("/tickets", { params: filters })) ?? [];
+    } finally {
+      ticketsInFlight = null;
+      ticketsInFlightKey = null;
+    }
+  })();
+
+  return ticketsInFlight;
+};
+
+let ticketStatsInFlight: Promise<TicketStats> | null = null;
+
+export const getTicketStats = async (): Promise<TicketStats> => {
+  if (ticketStatsInFlight) return ticketStatsInFlight;
+
+  ticketStatsInFlight = (async () => {
+    try {
+      return d(await api.get("/tickets/stats"));
+    } finally {
+      ticketStatsInFlight = null;
+    }
+  })();
+
+  return ticketStatsInFlight;
+};
 
 export const getTicketById = async (id: number): Promise<Ticket> =>
   d(await api.get(`/tickets/${id}`));
@@ -1191,9 +1516,21 @@ export type Expense = {
   updatedAt?: string;
 };
 
+let expensesInFlight: Promise<Expense[]> | null = null;
+
 export const fetchExpenses = async (): Promise<Expense[]> => {
-  const res = await api.get("/expense/getAll");
-  return res.data?.data ?? res.data ?? [];
+  if (expensesInFlight) return expensesInFlight;
+
+  expensesInFlight = (async () => {
+    try {
+      const res = await api.get("/expense/getAll");
+      return res.data?.data ?? res.data ?? [];
+    } finally {
+      expensesInFlight = null;
+    }
+  })();
+
+  return expensesInFlight;
 };
 
 export const getExpenses = fetchExpenses;
@@ -1267,14 +1604,40 @@ const mapVisitorResponse = (res: any): Visitor => {
   };
 };
 
+const visitorsCache = new Map<string, { data: Visitor[]; ts: number }>();
+const visitorsInFlight = new Map<string, Promise<Visitor[]>>();
+const VISITORS_CACHE_MS = 4000;
+
 export const fetchVisitorsForCurrentUser = async (branchId?: number): Promise<Visitor[]> => {
-  const params: Record<string, any> = {};
-  if (branchId && branchId > 0) {
-    params.branchId = branchId;
-  }
-  const response = await api.get("/visitor/getAll", { params });
-  const rawList = Array.isArray(response.data) ? response.data : response.data?.content || [];
-  return rawList.map(mapVisitorResponse);
+  const key = branchId && branchId > 0 ? String(branchId) : "none";
+
+  const cached = visitorsCache.get(key);
+  if (cached && Date.now() - cached.ts < VISITORS_CACHE_MS) return cached.data;
+
+  if (visitorsInFlight.has(key)) return visitorsInFlight.get(key)!;
+
+  const promise = (async () => {
+    try {
+      const params: Record<string, any> = {};
+      if (branchId && branchId > 0) {
+        params.branchId = branchId;
+      }
+      const response = await api.get("/visitor/getAll", { params });
+      const rawList = Array.isArray(response.data) ? response.data : response.data?.content || [];
+      const result = rawList.map(mapVisitorResponse);
+      visitorsCache.set(key, { data: result, ts: Date.now() });
+      return result;
+    } finally {
+      visitorsInFlight.delete(key);
+    }
+  })();
+
+  visitorsInFlight.set(key, promise);
+  return promise;
+};
+
+export const invalidateVisitorsCache = (): void => {
+  visitorsCache.clear();
 };
 
 export const fetchBranchVisitors = async (branchId?: number): Promise<Visitor[]> => {
@@ -1289,6 +1652,7 @@ export const updateVisitorStatus = async (id: number, status: VisitorStatus): Pr
   const response = await api.put(`/visitor/status/${id}`, null, {
     params: { status },
   });
+  invalidateVisitorsCache();
   return mapVisitorResponse(response.data);
 };
 
@@ -1329,40 +1693,105 @@ export const requestVisitor = async (data: {
   };
 
   const response = await api.post("/visitor/save", payload);
+  invalidateVisitorsCache();
   return mapVisitorResponse(response.data);
 };
+
+const maintenanceCleanersCache = new Map<string, { data: { content: Cleaner[]; totalElements: number }; ts: number }>();
+const maintenanceCleanersInFlight = new Map<string, Promise<{ content: Cleaner[]; totalElements: number }>>();
+const MAINTENANCE_CLEANERS_CACHE_MS = 4000;
 
 export const fetchMaintenanceCleaners = async (
   pg = 0,
   size = 10
-): Promise<{ content: Cleaner[]; totalElements: number }> =>
-  page(await api.get("/maintenance/cleaners", { params: { page: pg, size } }));
+): Promise<{ content: Cleaner[]; totalElements: number }> => {
+  const key = `${pg}-${size}`;
+
+  const cached = maintenanceCleanersCache.get(key);
+  if (cached && Date.now() - cached.ts < MAINTENANCE_CLEANERS_CACHE_MS) return cached.data;
+
+  if (maintenanceCleanersInFlight.has(key)) return maintenanceCleanersInFlight.get(key)!;
+
+  const promise = (async () => {
+    try {
+      const result = page(await api.get("/maintenance/cleaners", { params: { page: pg, size } }));
+      maintenanceCleanersCache.set(key, { data: result, ts: Date.now() });
+      return result;
+    } finally {
+      maintenanceCleanersInFlight.delete(key);
+    }
+  })();
+
+  maintenanceCleanersInFlight.set(key, promise);
+  return promise;
+};
 
 export const getMaintenanceCleaners = fetchMaintenanceCleaners;
+
+export const invalidateMaintenanceCleanersCache = (): void => {
+  maintenanceCleanersCache.clear();
+};
 
 export const getMaintenanceCleaner = async (id: number): Promise<Cleaner> =>
   d(await api.get(`/maintenance/cleaners/${id}`));
 
 export const addMaintenanceCleaner = async (data: CleanerRequest): Promise<Cleaner> => {
   guard();
-  return d(await api.post("/maintenance/cleaners", data));
+  const result = await d(await api.post("/maintenance/cleaners", data));
+  invalidateMaintenanceCleanersCache();
+  return result;
 };
 
 export const updateMaintenanceCleaner = async (
   id: number,
   data: CleanerRequest
-): Promise<Cleaner> => { guard(); return d(await api.put(`/maintenance/cleaners/${id}`, data)); };
+): Promise<Cleaner> => {
+  guard();
+  const result = await d(await api.put(`/maintenance/cleaners/${id}`, data));
+  invalidateMaintenanceCleanersCache();
+  return result;
+};
 
-export const deleteMaintenanceCleaner = async (id: number): Promise<void> =>
-  { guard(); await api.delete(`/maintenance/cleaners/${id}`); };
+export const deleteMaintenanceCleaner = async (id: number): Promise<void> => {
+  guard();
+  await api.delete(`/maintenance/cleaners/${id}`);
+  invalidateMaintenanceCleanersCache();
+};
+
+const maintenanceTasksCache = new Map<string, { data: { content: MaintenanceTask[]; totalElements: number }; ts: number }>();
+const maintenanceTasksInFlight = new Map<string, Promise<{ content: MaintenanceTask[]; totalElements: number }>>();
+const MAINTENANCE_TASKS_CACHE_MS = 4000;
 
 export const fetchMaintenanceTasks = async (
   pg = 0,
   size = 10
-): Promise<{ content: MaintenanceTask[]; totalElements: number }> =>
-  page(await api.get("/maintenance/tasks", { params: { page: pg, size } }));
+): Promise<{ content: MaintenanceTask[]; totalElements: number }> => {
+  const key = `${pg}-${size}`;
+
+  const cached = maintenanceTasksCache.get(key);
+  if (cached && Date.now() - cached.ts < MAINTENANCE_TASKS_CACHE_MS) return cached.data;
+
+  if (maintenanceTasksInFlight.has(key)) return maintenanceTasksInFlight.get(key)!;
+
+  const promise = (async () => {
+    try {
+      const result = page(await api.get("/maintenance/tasks", { params: { page: pg, size } }));
+      maintenanceTasksCache.set(key, { data: result, ts: Date.now() });
+      return result;
+    } finally {
+      maintenanceTasksInFlight.delete(key);
+    }
+  })();
+
+  maintenanceTasksInFlight.set(key, promise);
+  return promise;
+};
 
 export const getMaintenanceTasks = fetchMaintenanceTasks;
+
+export const invalidateMaintenanceTasksCache = (): void => {
+  maintenanceTasksCache.clear();
+};
 
 export const getMaintenanceTask = async (id: number): Promise<MaintenanceTask> =>
   d(await api.get(`/maintenance/tasks/${id}`));
@@ -1399,11 +1828,53 @@ export const getMaintenanceRecordsByRange = async (
 ): Promise<MaintenanceTask[]> =>
   d(await api.get("/maintenance/records/range", { params: { from, to } }));
 
-export const getCurrentRoomCleaningStatus = async (): Promise<MaintenanceTask[]> =>
-  d(await api.get("/maintenance/rooms/status"));
 
-export const getMaintenanceDashboard = async (): Promise<MaintenanceDashboardStats> =>
-  d(await api.get("/maintenance/dashboard"));
+let currentRoomCleaningStatusCache: { data: MaintenanceTask[]; ts: number } | null = null;
+let currentRoomCleaningStatusInFlight: Promise<MaintenanceTask[]> | null = null;
+const CURRENT_ROOM_CLEANING_STATUS_CACHE_MS = 4000;
+
+export const getCurrentRoomCleaningStatus = async (): Promise<MaintenanceTask[]> => {
+  if (
+    currentRoomCleaningStatusCache &&
+    Date.now() - currentRoomCleaningStatusCache.ts < CURRENT_ROOM_CLEANING_STATUS_CACHE_MS
+  ) {
+    return currentRoomCleaningStatusCache.data;
+  }
+
+  if (currentRoomCleaningStatusInFlight) return currentRoomCleaningStatusInFlight;
+
+  currentRoomCleaningStatusInFlight = (async () => {
+    try {
+      const data = await d(await api.get("/maintenance/rooms/status"));
+      currentRoomCleaningStatusCache = { data, ts: Date.now() };
+      return data;
+    } finally {
+      currentRoomCleaningStatusInFlight = null;
+    }
+  })();
+
+  return currentRoomCleaningStatusInFlight;
+};
+
+export const invalidateCurrentRoomCleaningStatusCache = (): void => {
+  currentRoomCleaningStatusCache = null;
+};
+
+let maintenanceDashboardInFlight: Promise<MaintenanceDashboardStats> | null = null;
+
+export const getMaintenanceDashboard = async (): Promise<MaintenanceDashboardStats> => {
+  if (maintenanceDashboardInFlight) return maintenanceDashboardInFlight;
+
+  maintenanceDashboardInFlight = (async () => {
+    try {
+      return d(await api.get("/maintenance/dashboard"));
+    } finally {
+      maintenanceDashboardInFlight = null;
+    }
+  })();
+
+  return maintenanceDashboardInFlight;
+};
 
 export const getBranchWiseCleaningReport = async (): Promise<BranchCleaningSummary[]> =>
   d(await api.get("/maintenance/reports/branch-wise"));
@@ -1451,4 +1922,60 @@ export const exportCleanerPerformanceReport = (
 
 export const publicRegisterTenant = async (data: TenantRequest | FormData): Promise<Tenant> => {
   return d(await api.post("/tenants/public-register", data));
+};
+
+
+
+const hostelImagesBatchCache = new Map<string, { data: Record<number, HostelImageDTO[]>; ts: number }>();
+const hostelImagesBatchInFlight = new Map<string, Promise<Record<number, HostelImageDTO[]>>>();
+const HOSTEL_IMAGES_BATCH_CACHE_MS = 30_000;
+
+export const getHostelImagesBatch = async (
+  hostelIds: number[]
+): Promise<Record<number, HostelImageDTO[]>> => {
+  const ids = [...new Set(hostelIds)].sort((a, b) => a - b);
+  const key = ids.join(",");
+  if (!key) return {};
+
+  const cached = hostelImagesBatchCache.get(key);
+  if (cached && Date.now() - cached.ts < HOSTEL_IMAGES_BATCH_CACHE_MS) return cached.data;
+
+  if (hostelImagesBatchInFlight.has(key)) return hostelImagesBatchInFlight.get(key)!;
+
+  const promise = (async () => {
+    try {
+      const result = d(await api.get("/hostel-images/batch", { params: { hostelIds: ids } }));
+      hostelImagesBatchCache.set(key, { data: result, ts: Date.now() });
+      return result;
+    } finally {
+      hostelImagesBatchInFlight.delete(key);
+    }
+  })();
+
+  hostelImagesBatchInFlight.set(key, promise);
+  return promise;
+};
+
+export async function getPublicStartingPrices(
+  hostelIds: number[]
+): Promise<Record<number, number>> {
+  if (hostelIds.length === 0) return {};
+
+  const res = await api.get("/rooms/public/starting-prices", {
+    params: { hostelIds },
+    paramsSerializer: { indexes: null }, // -> hostelIds=1&hostelIds=2, matches @RequestParam List<Integer>
+  });
+
+  return res.data.data as Record<number, number>;
+}
+
+
+
+export const getPublicRoomTypesForHostel = async (
+  hostelId: number | string
+): Promise<PublicRoomTypeSummary[]> => {
+  const res = await api.get("/rooms/public/room-types", {
+    params: { hostelId: Number(hostelId) },
+  });
+  return res.data?.data ?? [];
 };

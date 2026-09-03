@@ -117,11 +117,16 @@ export default function MaintenancePage() {
   const loadData = async (showLoader = true) => {
     if (showLoader) setLoading(true);
 
+    // CHANGED: branches now loaded via fetchAllPages instead of a bare
+    // fetchBranches(0, 10). The old call only ever fetched the first
+    // backend page (10 branches), which capped both the "Add Cleaner"
+    // branch dropdown and the branch filter above the task table at 10
+    // branches even when many more exist.
     const [statsRes, cleanersRes, tasksRes, branchesRes, scheduleRes] = await Promise.allSettled([
       getMaintenanceDashboard(),
       fetchAllPages<Cleaner>((pg, size) => getMaintenanceCleaners(pg, size)),
       fetchAllPages<MaintenanceTask>((pg, size) => getMaintenanceTasks(pg, size)),
-      fetchBranches(0, 10),
+      fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size)),
       getCurrentRoomCleaningStatus(),
     ]);
 
@@ -147,7 +152,7 @@ export default function MaintenancePage() {
     }
 
     if (branchesRes.status === "fulfilled") {
-      setBranches(branchesRes.value.content ?? []);
+      setBranches(branchesRes.value ?? []);
     } else {
       console.error("Failed to fetch branches:", branchesRes.reason);
       setBranches([]);

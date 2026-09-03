@@ -50,7 +50,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import { toast } from "sonner";
-import { Plus, Download, RefreshCw, Send, Trash2, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Plus, Download, RefreshCw, Send, Trash2, ChevronLeft, ChevronRight, X, MoreHorizontal } from "lucide-react";
 
 /* ─── Icons ──────────────────────────────────────────────────
    Previously these action/pagination icons were hand-rolled
@@ -851,6 +851,34 @@ const EBReadingsPage = () => {
   const pageSize = 10;
   const paginatedRows = filteredTenantRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
+  // CHANGED: total page count, used both to bound the "Next" button and
+  // to build the numbered page list below.
+  const totalPages = Math.max(1, Math.ceil(filteredTenantRows.length / pageSize));
+
+  // CHANGED: builds a windowed list of 1-indexed page numbers with "..."
+  // collapsing for longer runs — e.g. [1, 2, 3, 4, '...', 53] near the
+  // start, or [1, '...', 5, 6, 7, '...', 53] in the middle. Replaces the
+  // old control, which only ever rendered the current page number and
+  // had no way to jump ahead.
+  const getPageNumbers = (current: number, total: number): (number | "...")[] => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    const pages: (number | "...")[] = [1];
+    if (current > 3) pages.push("...");
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (current < total - 2) pages.push("...");
+    pages.push(total);
+    return pages;
+  };
+
+  const pageNumbers = useMemo(
+    () => getPageNumbers(currentPage + 1, totalPages),
+    [currentPage, totalPages]
+  );
+
   /* ══════════════════════════════════════════════════════════
      RENDER
   ══════════════════════════════════════════════════════════ */
@@ -882,7 +910,7 @@ const EBReadingsPage = () => {
         .eb-status.pending { color: #f97316; background: #fff7ed; border: 1px solid #fed7aa; }
         .eb-status.not-read { color: #64748b; background: #f1f5f9; border: 1px solid #e2e8f0; }
 
-        .eb-action-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; flex-shrink: 0; padding: 0; line-height: 0; }
+        .eb-action-btn { width: 28px; height: 28px; min-width: 28px; border-radius: 6px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; flex-shrink: 0; padding: 0; line-height: 0; font-size: 12px; font-weight: 600; }
         /* !important here is deliberate: something elsewhere in the app's
            global CSS is hiding/zeroing SVGs inside these buttons specifically
            (lucide icons that render fine elsewhere on this same page were
@@ -910,6 +938,14 @@ const EBReadingsPage = () => {
         .eb-action-btn:disabled { cursor: not-allowed; background: #f8fafc; }
         .eb-action-btn:disabled svg { stroke: #94a3b8 !important; color: #94a3b8 !important; }
         .eb-action-btn.active { background: #5200FF; border-color: #5200FF; color: #fff; }
+
+        /* CHANGED: the pagination row can now hold many number buttons
+           (1 2 3 4 ... 53), so let it wrap on narrow screens instead of
+           overflowing, and give the "..." marker its own non-interactive
+           look (no hover state, no pointer). */
+        .eb-pagination-row { flex-wrap: wrap; }
+        .eb-page-ellipsis { cursor: default; background: transparent; border-color: transparent; }
+        .eb-page-ellipsis svg { stroke: #94a3b8 !important; color: #94a3b8 !important; }
 
         .eb-chart-container { padding: 20px; }
       `}</style>
@@ -1035,7 +1071,19 @@ const EBReadingsPage = () => {
                         const status = row.tenantAmount ? "Pending" : "Not Read";
 
                         return (
-                          <tr key={row.id || `${row.roomId}-${i}`}>
+                          // FIX: `row.id` is the underlying EB reading's id
+                          // (r.id), not a per-row id. A single flat/room
+                          // reading can produce several tenant-bill rows
+                          // (one per tenant), so multiple rows shared the
+                          // same `row.id` and the `|| fallback` never
+                          // kicked in because that id was truthy. That
+                          // caused React's "two children with the same
+                          // key" warning (keys like `2`, `4` repeating)
+                          // and could duplicate/drop rows on re-render.
+                          // Always fold the row index into the key so
+                          // every rendered <tr> gets a unique identity,
+                          // regardless of whether row.id repeats.
+                          <tr key={`${row.id ?? "no-id"}-${row.roomId ?? "no-room"}-${i}`}>
                             <td>
                               <div className="eb-room-name">{rName}</div>
                               <div className="eb-tenant-name">{tenantName}</div>
@@ -1073,19 +1121,38 @@ const EBReadingsPage = () => {
                 <div className="text-[13px] text-[#64748b]">
                   Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to {Math.min((currentPage + 1) * pageSize, filteredTenantRows.length)} of {filteredTenantRows.length} readings
                 </div>
-                <div className="flex gap-2">
+                {/* CHANGED: numbered pagination row (1 2 3 … n) replacing the
+                    old current-page-only control. Prev/Next chevrons stay on
+                    either end and disable correctly at the first/last page. */}
+                <div className="flex gap-2 eb-pagination-row">
                   <button
                     className="eb-action-btn w-8"
                     disabled={currentPage === 0}
-                    onClick={() => setCurrentPage(p => p - 1)}
+                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                   >
                     <ChevronLeft size={14} />
                   </button>
-                  <button className="eb-action-btn w-8 active">{currentPage + 1}</button>
+
+                  {pageNumbers.map((p, idx) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${idx}`} className="eb-action-btn w-8 eb-page-ellipsis">
+                        <MoreHorizontal size={14} />
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        className={`eb-action-btn w-8 ${p === currentPage + 1 ? "active" : ""}`}
+                        onClick={() => setCurrentPage(p - 1)}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+
                   <button
                     className="eb-action-btn w-8"
-                    disabled={(currentPage + 1) * pageSize >= filteredTenantRows.length}
-                    onClick={() => setCurrentPage(p => p + 1)}
+                    disabled={currentPage + 1 >= totalPages}
+                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                   >
                     <ChevronRight size={14} />
                   </button>

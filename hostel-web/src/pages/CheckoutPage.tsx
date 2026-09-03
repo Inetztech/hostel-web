@@ -9,6 +9,7 @@ import {
   getEBReadings,
   updateBedStatus,
   getBranchId,
+  getBranches,
   fetchAllPages,
 } from "@/lib/store";
 
@@ -27,7 +28,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { Room, Tenant, Rent, EBReading, DEFAULT_EB_RATE, MONTHS } from "@/lib/types";
+import { Room, Tenant, Rent, EBReading, Branch, DEFAULT_EB_RATE, MONTHS } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,9 +46,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { LogOut, Search, ChevronRight } from "lucide-react";
-
-const MAINTENANCE_CHARGE = 1000;
+import { LogOut, Search, ChevronRight, Building2 } from "lucide-react";
 
 function splitPending(r: Rent): { rentPending: number; ebPending: number } {
   const rentAmt = r.rentAmount ?? 0;
@@ -76,6 +75,7 @@ interface PendingRentDialogProps {
   room: Room | null;
   pendingRents: Rent[];
   advancePaid: number;
+  maintenanceCharge: number;
 }
 
 const statusMeta: Record<
@@ -94,6 +94,7 @@ const PendingRentDialog = ({
   room,
   pendingRents,
   advancePaid,
+  maintenanceCharge,
 }: PendingRentDialogProps) => {
   if (!tenant) return null;
 
@@ -234,7 +235,7 @@ const PendingRentDialog = ({
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Maintenance</span>
                 <span className="font-medium">
-                  ₹{MAINTENANCE_CHARGE.toLocaleString()}
+                  ₹{maintenanceCharge.toLocaleString()}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -246,19 +247,19 @@ const PendingRentDialog = ({
               <Separator />
               <div className="flex justify-between font-semibold text-base">
                 <span>
-                  {totalRentDue + totalEBDue + MAINTENANCE_CHARGE - advancePaid > 0
+                  {totalRentDue + totalEBDue + maintenanceCharge - advancePaid > 0
                     ? "Total Due"
                     : "Refund Due"}
                 </span>
                 <span
                   className={
-                    totalRentDue + totalEBDue + MAINTENANCE_CHARGE - advancePaid > 0
+                    totalRentDue + totalEBDue + maintenanceCharge - advancePaid > 0
                       ? "text-destructive"
                       : "text-green-600"
                   }
                 >
                   ₹{Math.round(
-                    Math.abs(totalRentDue + totalEBDue + MAINTENANCE_CHARGE - advancePaid)
+                    Math.abs(totalRentDue + totalEBDue + maintenanceCharge - advancePaid)
                   ).toLocaleString()}
                 </span>
               </div>
@@ -271,23 +272,30 @@ const PendingRentDialog = ({
 };
 
 const CheckoutPage = () => {
-  const [rooms,               setRooms]               = useState<Room[]>([]);
-  const [tenants,             setTenants]             = useState<Tenant[]>([]);
-  const [selectedTenantId,    setSelectedTenantId]    = useState<string>("");
-  const [checkOutDate,        setCheckOutDate]        = useState<string>("");
-  const [search,              setSearch]              = useState<string>("");
-  const [confirmOpen,         setConfirmOpen]         = useState<boolean>(false);
+  const [rooms, setRooms]                         = useState<Room[]>([]);
+  const [tenants, setTenants]                     = useState<Tenant[]>([]);
+  // NEW: branches now come straight from the /units endpoint (getBranches),
+  // not inferred from whatever rooms happen to be loaded. See branchOptions
+  // below for why this matters.
+  const [branches, setBranches]                   = useState<Branch[]>([]);
+  const [selectedTenantId, setSelectedTenantId]   = useState<string>("");
+  const [checkOutDate, setCheckOutDate]           = useState<string>("");
+  const [search, setSearch]                       = useState<string>("");
+  const [confirmOpen, setConfirmOpen]             = useState<boolean>(false);
   const [pendingRentDialogOpen, setPendingRentDialogOpen] = useState(false);
-  const [finalPrev,           setFinalPrev]           = useState<string>("");
-  const [finalCurr,           setFinalCurr]           = useState<string>("");
-  const [tenantEBDue,         setTenantEBDue]         = useState<number>(0);
-  const [extraDays,           setExtraDays]           = useState<string>("");
-  const [selectedBranch,      setSelectedBranch]      = useState("all");
-  const [acPrev,              setAcPrev]              = useState<string>("");
-  const [acCurr,              setAcCurr]              = useState<string>("");
-  const [useManualRent,       setUseManualRent]       = useState(false);
-  const [rentPerDay,          setRentPerDay]          = useState<string>("");
-  const [ebRate,              setEbRate]              = useState<string>(String(DEFAULT_EB_RATE || 13));
+  const [finalPrev, setFinalPrev]                 = useState<string>("");
+  const [finalCurr, setFinalCurr]                 = useState<string>("");
+  const [tenantEBDue, setTenantEBDue]             = useState<number>(0);
+  const [extraDays, setExtraDays]                 = useState<string>("");
+  const [selectedBranch, setSelectedBranch]       = useState(
+    getUserRole() === "ADMIN" ? "all" : String(getBranchId() ?? "all")
+  );
+  const [acPrev, setAcPrev]                       = useState<string>("");
+  const [acCurr, setAcCurr]                       = useState<string>("");
+  const [useManualRent, setUseManualRent]         = useState(false);
+  const [rentPerDay, setRentPerDay]               = useState<string>("");
+  const [ebRate, setEbRate]                       = useState<string>(String(DEFAULT_EB_RATE || 13));
+  const [maintenanceCharge, setMaintenanceCharge] = useState<number>(1000);
   const [summary, setSummary] = useState<{
     pendingRents: Rent[];
     totalRentDue: number;
@@ -296,12 +304,21 @@ const CheckoutPage = () => {
 
   const role     = getUserRole();
   const branchId = getBranchId();
+  const isAdmin  = role === "ADMIN";
 
   const reload = async () => {
     try {
-      const [roomList, allTenantList] = await Promise.all([
+      // FIX: branches are now fetched from their own endpoint (GET /units
+      // via getBranches) instead of being derived from the rooms list.
+      // Deriving from rooms meant any branch with zero rooms currently
+      // provisioned (a newly created branch, or one that's been fully
+      // vacated) would silently disappear from the "Select Branch"
+      // dropdown, which is why only a handful of branches were showing
+      // up even though more existed.
+      const [roomList, allTenantList, allBranches] = await Promise.all([
         fetchAllPages<Room>(getRooms, 10),
         fetchAllPages<Tenant>(getTenants, 10),
+        fetchAllPages<Branch>(getBranches, 10),
       ]);
 
       const activeTenants = allTenantList.filter((t) => t.status === "Active");
@@ -322,8 +339,14 @@ const CheckoutPage = () => {
               )
             );
 
+      const filteredBranches =
+        role === "ADMIN"
+          ? allBranches
+          : allBranches.filter((b) => String(b.id) === String(branchId));
+
       setRooms(filteredRooms);
       setTenants(filteredTenants);
+      setBranches(filteredBranches);
     } catch (err) {
       console.error("Reload error:", err);
       toast.error("Failed to load rooms or tenants");
@@ -338,28 +361,32 @@ const CheckoutPage = () => {
     reload();
   }, []);
 
-  const branchOptions = useMemo(() => {
-    const unique = new Map();
-    rooms.forEach((r) => {
-      if (!unique.has(r.unitId)) {
-        unique.set(r.unitId, {
-          id:   r.unitId,
-          name: r.unitName || `Branch ${r.unitId}`,
-        });
-      }
-    });
-    return Array.from(unique.values());
-  }, [rooms]);
+  // FIX: branchOptions now comes straight from the branches state (loaded
+  // via getBranches/GET /units), not from `rooms`. This is the actual fix
+  // for "only 5 branches showing" — every branch that exists shows up
+  // here regardless of whether it currently has any rooms assigned.
+  const branchOptions = useMemo(
+    () =>
+      branches.map((b) => ({
+        id: b.id,
+        name: b.unitName || `Branch ${b.id}`,
+      })),
+    [branches]
+  );
 
-  const acUnits =
-    acPrev && acCurr && Number(acCurr) >= Number(acPrev)
-      ? Number(acCurr) - Number(acPrev)
-      : 0;
+  // Warden/Tenant's own branch name, for the locked read-only label.
+  const ownBranchName = useMemo(() => {
+    if (isAdmin) return null;
+    return (
+      branchOptions.find((b) => String(b.id) === String(branchId))?.name ??
+      (branchId ? `Branch ${branchId}` : "—")
+    );
+  }, [isAdmin, branchOptions, branchId]);
 
   const handleSelectTenant = async (tenantId: string) => {
     try {
       setSelectedTenantId(tenantId);
-      setSummary(null);
+      setSummary({ pendingRents: [], totalRentDue: 0, advancePaid: 0 });
       setTenantEBDue(0);
       setAcPrev("");
       setAcCurr("");
@@ -406,30 +433,35 @@ const CheckoutPage = () => {
 
       const checkout = await getCheckoutSummary(numericTenantId);
 
-      if (checkout) {
-        const rents       = checkout.pendingRents ?? [];
-        const unpaidRents = rents.filter((r) => r.paymentStatus !== "PAID");
+      const rents       = checkout?.pendingRents ?? [];
+      const unpaidRents = rents.filter((r) => r.paymentStatus !== "PAID");
 
-        const totalRentDue = unpaidRents.reduce(
-          (sum, r) => sum + splitPending(r).rentPending,
-          0
-        );
-        const totalEBDue = unpaidRents.reduce(
-          (sum, r) => sum + splitPending(r).ebPending,
-          0
-        );
+      const totalRentDue = unpaidRents.reduce(
+        (sum, r) => sum + splitPending(r).rentPending,
+        0
+      );
+      const totalEBDue = unpaidRents.reduce(
+        (sum, r) => sum + splitPending(r).ebPending,
+        0
+      );
 
-        setSummary({
-          pendingRents: unpaidRents,
-          totalRentDue,
-          advancePaid: checkout.advancePaid ?? 0,
-        });
+      setSummary({
+        pendingRents: unpaidRents,
+        totalRentDue,
+        advancePaid: checkout?.advancePaid ?? selected.advance ?? 0,
+      });
 
-        setTenantEBDue(totalEBDue);
-      }
+      setTenantEBDue(totalEBDue);
     } catch (error) {
       console.error("Checkout fetch error:", error);
       toast.error("Failed to fetch checkout data");
+      // Fallback summary initialized so panel doesn't stay hidden
+      const selected = tenants.find((t) => Number(t.id) === Number(tenantId));
+      setSummary({
+        pendingRents: [],
+        totalRentDue: 0,
+        advancePaid: selected?.advance ?? 0,
+      });
     }
   };
 
@@ -493,80 +525,9 @@ const CheckoutPage = () => {
       tenantEBDue +
       extraRent +
       finalEBAmount +
-      MAINTENANCE_CHARGE -
+      maintenanceCharge -
       summary.advancePaid
-    : 0;
-
-  const filteredTenants = tenants
-    .filter(
-      (t) =>
-        (t.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
-        (t.phone ?? "").includes(search)
-    )
-    .filter((t) => {
-      if (selectedBranch === "all") return true;
-      const room = rooms.find((r) => String(r.id) === String(t.roomId));
-      return room && String(room.unitId) === selectedBranch;
-    });
-
-  const printCheckoutReceipt = () => {
-    if (!selectedTenant || !summary) return;
-
-    const roomNumber  = selectedRoom?.roomNumber ?? "-";
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Checkout Receipt</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #000; }
-            h2 { text-align: center; margin-bottom: 5px; }
-            .section { margin-top: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            td, th { border: 1px solid #000; padding: 8px; text-align: left; }
-            .right { text-align: right; }
-            .total { font-weight: bold; font-size: 16px; }
-          </style>
-        </head>
-        <body>
-          <h2>Tenant Check-Out Receipt</h2>
-          <p style="text-align:center">Date: ${new Date().toLocaleDateString()}</p>
-          <div class="section">
-            <h3>Tenant Details</h3>
-            <table>
-              <tr><td>Name</td><td>${selectedTenant.name}</td></tr>
-              <tr><td>Flat</td><td>${selectedRoom?.flatId ?? "-"}</td></tr>
-              <tr><td>Room</td><td>${roomNumber}</td></tr>
-              <tr><td>Phone</td><td>${selectedTenant.phone}</td></tr>
-              <tr><td>Check-in Date</td><td>${selectedTenant.checkInDate}</td></tr>
-            </table>
-          </div>
-          <div class="section">
-            <h3>Settlement Summary</h3>
-            <table>
-              <tr><td>Pending Rent</td><td class="right">₹${Math.round(summary.totalRentDue).toLocaleString()}</td></tr>
-              <tr><td>Pending EB</td><td class="right">₹${Math.round(tenantEBDue).toLocaleString()}</td></tr>
-              <tr><td>Extra Rent</td><td class="right">₹${Math.round(extraRent).toLocaleString()}</td></tr>
-              <tr><td>Extra EB</td><td class="right">₹${Math.round(finalEBAmount).toLocaleString()}</td></tr>
-              <tr><td>Maintenance</td><td class="right">₹${MAINTENANCE_CHARGE.toLocaleString()}</td></tr>
-              <tr><td>Advance Paid</td><td class="right">₹${summary.advancePaid.toLocaleString()}</td></tr>
-              <tr class="total">
-                <td>${calculatedNetPayable > 0 ? "Balance to Pay" : "Refund Due"}</td>
-                <td class="right">₹${Math.round(Math.abs(calculatedNetPayable)).toLocaleString()}</td>
-              </tr>
-            </table>
-          </div>
-          <br/><br/>
-          <p>Signature: ________________________</p>
-          <script>window.onload = function () { window.print(); window.close(); };</script>
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-  };
+    : maintenanceCharge;
 
   const handleConfirmCheckout = async () => {
     if (!selectedTenant) {
@@ -594,30 +555,30 @@ const CheckoutPage = () => {
           );
           for (const flatRoom of flatRooms) {
             await addEBReading({
-              roomId:            flatRoom.id,
-              flatId:            Number(room.flatId),
-              month:             new Date().getMonth() + 1,
-              year:              new Date().getFullYear(),
-              previousReading:   Number(finalPrev) || 0,
-              currentReading:    Number(finalCurr),
+              roomId:             flatRoom.id,
+              flatId:             Number(room.flatId),
+              month:              new Date().getMonth() + 1,
+              year:               new Date().getFullYear(),
+              previousReading:    Number(finalPrev) || 0,
+              currentReading:     Number(finalCurr),
               acPreviousReading: isAcRoom && acPrev ? Number(acPrev) : 0,
               acCurrentReading:  isAcRoom && acCurr ? Number(acCurr) : 0,
-              ebRate:            appliedEBRate,
-              isCheckout:        true,
+              ebRate:             appliedEBRate,
+              isCheckout:         true,
             });
           }
         } else {
           await addEBReading({
-            roomId:            selectedTenant.roomId,
-            flatId:            undefined,
-            month:             new Date().getMonth() + 1,
-            year:              new Date().getFullYear(),
-            previousReading:   Number(finalPrev) || 0,
-            currentReading:    Number(finalCurr),
+            roomId:             selectedTenant.roomId,
+            flatId:             undefined,
+            month:              new Date().getMonth() + 1,
+            year:               new Date().getFullYear(),
+            previousReading:    Number(finalPrev) || 0,
+            currentReading:     Number(finalCurr),
             acPreviousReading: isAcRoom && acPrev ? Number(acPrev) : 0,
             acCurrentReading:  isAcRoom && acCurr ? Number(acCurr) : 0,
-            ebRate:            appliedEBRate,
-            isCheckout:        true,
+            ebRate:             appliedEBRate,
+            isCheckout:         true,
           });
         }
 
@@ -643,7 +604,6 @@ const CheckoutPage = () => {
       }
 
       toast.success(`${selectedTenant.name} checked out successfully`);
-      printCheckoutReceipt();
 
       setSelectedTenantId("");
       setCheckOutDate("");
@@ -664,6 +624,18 @@ const CheckoutPage = () => {
     }
   };
 
+  const filteredTenants = tenants
+    .filter(
+      (t) =>
+        (t.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+        (t.phone ?? "").includes(search)
+    )
+    .filter((t) => {
+      if (selectedBranch === "all") return true;
+      const room = rooms.find((r) => String(r.id) === String(t.roomId));
+      return room && String(room.unitId) === selectedBranch;
+    });
+
   return (
     <div>
       <div className="mb-6">
@@ -680,6 +652,7 @@ const CheckoutPage = () => {
         room={selectedRoom ?? null}
         pendingRents={summary?.pendingRents ?? []}
         advancePaid={summary?.advancePaid ?? 0}
+        maintenanceCharge={maintenanceCharge}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -691,22 +664,31 @@ const CheckoutPage = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Select
-                value={selectedBranch}
-                onValueChange={(v) => setSelectedBranch(v)}
-              >
-                <SelectTrigger className="mb-3">
-                  <SelectValue placeholder="Select Branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {branchOptions.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {isAdmin ? (
+                <Select
+                  value={selectedBranch}
+                  onValueChange={(v) => setSelectedBranch(v)}
+                >
+                  <SelectTrigger className="mb-3">
+                    <SelectValue placeholder="Select Branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches</SelectItem>
+                    {branchOptions.map((b) => (
+                      <SelectItem key={b.id} value={String(b.id)}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                // Warden/Tenant are always scoped to their own branch —
+                // no dropdown, no "All Branches" option, just a locked label.
+                <div className="mb-3 flex items-center gap-2 rounded-md border bg-muted px-3 py-2 text-sm font-medium text-foreground">
+                  <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                  {ownBranchName}
+                </div>
+              )}
 
               <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -851,189 +833,139 @@ const CheckoutPage = () => {
                 </CardContent>
               </Card>
 
-              {isAcRoom && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-semibold">
-                      AC Reading
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Previous Reading</Label>
-                        <Input
-                          type="number"
-                          value={acPrev}
-                          onChange={(e) => setAcPrev(e.target.value)}
-                          placeholder="0"
-                        />
-                      </div>
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Current Reading</Label>
-                        <Input
-                          type="number"
-                          value={acCurr}
-                          onChange={(e) => setAcCurr(e.target.value)}
-                          placeholder="0"
-                        />
-                      </div>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">
+                    Settlement Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2.5 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">
+                      Pending Rent Records
+                    </span>
+                    <Badge
+                      onClick={() => setPendingRentDialogOpen(true)}
+                      className="cursor-pointer bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 transition-colors rounded-md px-2 py-1 flex items-center gap-1"
+                    >
+                      {summary?.pendingRents?.length ?? 0}
+                      <ChevronRight className="h-3 w-3" />
+                    </Badge>
+                  </div>
 
-                      <div className="grid gap-1.5 mt-4">
-                        <Label className="text-xs">EB Rate Per Unit</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={ebRate}
-                          onChange={(e) => setEbRate(e.target.value)}
-                          placeholder="Enter EB Rate"
-                        />
-                        <p className="text-[11px] text-muted-foreground">
-                          Default Rate: ₹13 per unit
-                        </p>
-                      </div>
-                    </div>
-                    {acPrev && acCurr && Number(acCurr) >= Number(acPrev) && (
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Units: {acUnits} · Amount: ₹
-                        {(acUnits * appliedEBRate).toLocaleString()} (
-                        {roomTenants.length} tenants)
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">
+                      Total Pending Rent Due
+                    </span>
+                    <span className="font-medium">
+                      ₹{Math.round(summary?.totalRentDue ?? 0).toLocaleString()}
+                    </span>
+                  </div>
 
-              {summary && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-semibold">
-                      Settlement Summary
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2.5 text-sm">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">
-                        Pending Rent Records
-                      </span>
-                      <Badge
-                        onClick={() => setPendingRentDialogOpen(true)}
-                        className="cursor-pointer bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 transition-colors rounded-md px-2 py-1 flex items-center gap-1"
-                      >
-                        {summary.pendingRents?.length ?? 0}
-                        <ChevronRight className="h-3 w-3" />
-                      </Badge>
-                    </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">
+                      Total Pending EB Due
+                    </span>
+                    <span className="font-medium">
+                      ₹{Math.round(tenantEBDue).toLocaleString()}
+                    </span>
+                  </div>
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Total Pending Rent Due
-                      </span>
-                      <span className="font-medium">
-                        ₹{Math.round(summary.totalRentDue).toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Total Pending EB Due
-                      </span>
-                      <span className="font-medium">
-                        ₹{Math.round(tenantEBDue).toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Maintenance</span>
-                      <span className="font-medium">
-                        ₹{MAINTENANCE_CHARGE.toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label className="text-xs">Extra Rent Days</Label>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Maintenance</span>
+                    <div className="w-32">
                       <Input
                         type="number"
-                        placeholder="Enter extra days"
-                        value={extraDays}
-                        onChange={(e) => setExtraDays(e.target.value)}
+                        value={maintenanceCharge}
+                        onChange={(e) => setMaintenanceCharge(Number(e.target.value) || 0)}
+                        className="h-8 text-right"
                       />
+                    </div>
+                  </div>
 
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          checked={!useManualRent}
-                          onChange={() => setUseManualRent(false)}
+                  <div className="grid gap-2">
+                    <Label className="text-xs">Extra Rent Days</Label>
+                    <Input
+                      type="number"
+                      placeholder="Enter extra days"
+                      value={extraDays}
+                      onChange={(e) => setExtraDays(e.target.value)}
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        checked={!useManualRent}
+                        onChange={() => setUseManualRent(false)}
+                      />
+                      <span className="text-xs">Auto Calculate</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        checked={useManualRent}
+                        onChange={() => setUseManualRent(true)}
+                      />
+                      <span className="text-xs">Manual Rent Per Day</span>
+                    </div>
+
+                    {useManualRent && (
+                      <div className="grid gap-1">
+                        <Label className="text-xs">Rent Per Day</Label>
+                        <Input
+                          type="number"
+                          placeholder="Enter rent per day"
+                          value={rentPerDay}
+                          onChange={(e) => setRentPerDay(e.target.value)}
                         />
-                        <span className="text-xs">Auto Calculate</span>
                       </div>
+                    )}
 
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          checked={useManualRent}
-                          onChange={() => setUseManualRent(true)}
-                        />
-                        <span className="text-xs">Manual Rent Per Day</span>
+                    {extraDays && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Extra Rent</span>
+                        <span className="font-medium">
+                          ₹{Math.round(extraRent).toLocaleString()}
+                        </span>
                       </div>
+                    )}
+                  </div>
 
-                      {useManualRent && (
-                        <div className="grid gap-1">
-                          <Label className="text-xs">Rent Per Day</Label>
-                          <Input
-                            type="number"
-                            placeholder="Enter rent per day"
-                            value={rentPerDay}
-                            onChange={(e) => setRentPerDay(e.target.value)}
-                          />
-                        </div>
-                      )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Extra EB Value</span>
+                    <span className="font-medium">
+                      ₹{Math.round(finalEBAmount).toLocaleString()}
+                    </span>
+                  </div>
 
-                      {extraDays && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Extra Rent</span>
-                          <span className="font-medium">
-                            ₹{Math.round(extraRent).toLocaleString()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                  <Separator />
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Extra EB Value</span>
-                      <span className="font-medium">
-                        ₹{Math.round(finalEBAmount).toLocaleString()}
-                      </span>
-                    </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Advance Paid</span>
+                    <span className="font-medium text-success">
+                      ₹{(summary?.advancePaid ?? selectedTenant.advance ?? 0).toLocaleString()}
+                    </span>
+                  </div>
 
-                    <Separator />
+                  <Separator />
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Advance Paid</span>
-                      <span className="font-medium text-success">
-                        ₹{summary.advancePaid.toLocaleString()}
-                      </span>
-                    </div>
-
-                    <Separator />
-
-                    <div className="flex justify-between text-base">
-                      <span className="font-semibold">
-                        {calculatedNetPayable > 0 ? "Balance to Pay" : "Refund Due"}
-                      </span>
-                      <span
-                        className={`font-bold ${
-                          calculatedNetPayable > 0
-                            ? "text-destructive"
-                            : "text-success"
-                        }`}
-                      >
-                        ₹{Math.round(Math.abs(calculatedNetPayable)).toLocaleString()}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                  <div className="flex justify-between text-base">
+                    <span className="font-semibold">
+                      {calculatedNetPayable > 0 ? "Balance to Pay" : "Refund Due"}
+                    </span>
+                    <span
+                      className={`font-bold ${
+                        calculatedNetPayable > 0
+                          ? "text-destructive"
+                          : "text-success"
+                      }`}
+                    >
+                      ₹{Math.round(Math.abs(calculatedNetPayable)).toLocaleString()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
 
               <Card>
                 <CardContent className="pt-5">

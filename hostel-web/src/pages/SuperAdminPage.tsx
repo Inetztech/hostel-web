@@ -3,10 +3,10 @@ import { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   createAdmin, getAllAdmins, deleteAdmin, activateAdmin, deactivateAdmin,
-  updateAdmin, getAllHostelsWithAdmins, fetchAllPages, fetchTenants,
-  fetchBranches,
+  updateAdmin, getAllHostelsWithAdmins, fetchAllPages, fetchBranches,
+  getSuperAdminDashboard,
 } from "@/lib/store";
-import { Admin, HostelAdmin, Tenant, Branch } from "@/lib/types";
+import { Admin, HostelAdmin, Branch, SuperAdminDashboard } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -63,9 +63,9 @@ export default function SuperAdminPage() {
   const navigate  = useNavigate();
   const isAdminsView = location.pathname === "/super-admin/admins";
 
-  const [hostels, setHostels]   = useState<HostelAdmin[]>([]);
-  const [tenants, setTenants]   = useState<Tenant[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [hostels, setHostels]     = useState<HostelAdmin[]>([]);
+  const [branches, setBranches]   = useState<Branch[]>([]);
+  const [dashboard, setDashboard] = useState<SuperAdminDashboard | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
 
   const [admins,     setAdmins]     = useState<any[]>([]);
@@ -83,13 +83,16 @@ export default function SuperAdminPage() {
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const [hList, tList, bList] = await Promise.allSettled([
+      // CHANGED: fetchAllPages<Tenant>(fetchTenants) -> getSuperAdminDashboard()
+      // Was 11 sequential page requests (page=0..10) just to count tenants.
+      // Now 1 request backed by 4 COUNT/GROUP BY queries server-side.
+      const [hList, dashRes, bList] = await Promise.allSettled([
         fetchAllPages<HostelAdmin>((pg, size) => getAllHostelsWithAdmins(pg, size), 10),
-        fetchAllPages<Tenant>((pg, size) => fetchTenants(pg, size), 10),
+        getSuperAdminDashboard(),
         fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size), 10),
       ]);
       if (hList.status === "fulfilled") setHostels(hList.value);
-      if (tList.status === "fulfilled") setTenants(tList.value);
+      if (dashRes.status === "fulfilled") setDashboard(dashRes.value);
       if (bList.status === "fulfilled") setBranches(bList.value);
     } catch {
     } finally {
@@ -110,11 +113,18 @@ export default function SuperAdminPage() {
     }
   }, [adminPage]);
 
-  useEffect(() => { loadStats(); }, [loadStats]);
-  useEffect(() => { loadAdmins(); }, [loadAdmins]);
+useEffect(() => {
+  (async () => {
+    await loadStats();   // 3 parallel requests finish first
+    await loadAdmins();  // then this 4th one starts
+  })();
+}, [loadStats, loadAdmins]);
   useEffect(() => { if (!dialogOpen) setHostelSearch(""); }, [dialogOpen]);
 
-  const activeTenants = tenants.filter(t => t.status === "Active");
+  const totalActiveTenants = dashboard?.totalTenants ?? 0;
+  const hostelSummaryById = new Map(
+    (dashboard?.hostelsOverview ?? []).map(h => [h.id, h])
+  );
 
   const monthlyRevenue = hostels.reduce((sum, h) => {
     const capacityBeds = (h as any).capacityBeds ?? 0;
@@ -332,7 +342,7 @@ export default function SuperAdminPage() {
                     <div className="sa-card-top">
                       <div>
                         <div className="sa-card-label">Total Tenants</div>
-                        <div className="sa-card-value">{activeTenants.length.toLocaleString()}</div>
+                        <div className="sa-card-value">{totalActiveTenants.toLocaleString()}</div>
                         <div className="sa-card-sub">Across All Hostels</div>
                       </div>
                       <div className="sa-card-icon" style={{ background: "#f0fdf4" }}>
@@ -402,7 +412,7 @@ export default function SuperAdminPage() {
                       <tbody>
                         {hostels.slice(0, 5).map(h => {
                           const hostelBranches = branches.filter(b => b.hostelId === h.id);
-                          const hostelTenants  = activeTenants.filter(t => (t as any).hostelId === h.id || (t as any).hostelName === h.name);
+                          const hostelSummary = hostelSummaryById.get(h.id);
                           return (
                             <tr key={h.id}>
                               <td>
@@ -417,9 +427,9 @@ export default function SuperAdminPage() {
                                 </div>
                               </td>
                               <td>
-                                {hostelTenants.length > 0 ? (
-                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>
-                                    {hostelTenants.length}
+                                {hostelSummary && hostelSummary.tenantCount > 0 ? (
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#64748b" }}>
+                                    {hostelSummary.tenantCount}
                                   </span>
                                 ) : (
                                   <span style={{ fontSize: 12, color: "#94a3b8" }}>—</span>

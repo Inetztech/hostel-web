@@ -1,13 +1,18 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "@/lib/api";
-import { createBranch, updateBranch, deleteBranch } from "@/lib/store";
+import { createBranch, updateBranch, deleteBranch, fetchBranches } from "@/lib/store";
 import { getUserHostelId, getUserHostelName } from "@/lib/auth";
 import { showBedLimitToast } from "@/lib/limitError";
 import { Branch, BranchRequest } from "@/lib/types";
+import { STATES, TN_DISTRICTS } from "@/lib/tnLocations";
+import { LocationAreaSelect } from "@/components/LocationAreaSelect";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter, DialogClose, DialogTrigger,
@@ -20,16 +25,21 @@ import {
 import { toast } from "sonner";
 import {
   Building2, Search, Plus,
-  Pencil, Trash2, Phone, ChevronLeft, ChevronRight,
+  Pencil, Trash2, Phone, ChevronLeft, ChevronRight, MoreHorizontal, X,
 } from "lucide-react";
 
 interface BranchForm {
   unitName: string;
+  state: string;
+  district: string;
+  area: string;
   location: string;
   phone: string;
   capacityBeds: string;
 }
-const EMPTY_FORM: BranchForm = { unitName: "", location: "", phone: "", capacityBeds: "" };
+const EMPTY_FORM: BranchForm = {
+  unitName: "", state: "", district: "", area: "", location: "", phone: "", capacityBeds: "",
+};
 
 const COLORS = [
   { color: '#8b5cf6', bg: '#f3e8ff' },
@@ -47,6 +57,31 @@ const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
   return undefined;
 };
 
+const getPageNumbers = (current: number, total: number): (number | "...")[] => {
+  const SIBLINGS = 1;
+  const totalNumbers = SIBLINGS * 2 + 5;
+
+  if (total <= totalNumbers) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  const leftIndex = Math.max(current - SIBLINGS, 1);
+  const rightIndex = Math.min(current + SIBLINGS, total);
+
+  const showLeftEllipsis = leftIndex > 2;
+  const showRightEllipsis = rightIndex < total - 1;
+
+  const pages: (number | "...")[] = [];
+  pages.push(1);
+  if (showLeftEllipsis) pages.push("...");
+  for (let p = Math.max(leftIndex, 2); p <= Math.min(rightIndex, total - 1); p++) {
+    pages.push(p);
+  }
+  if (showRightEllipsis) pages.push("...");
+  if (total > 1) pages.push(total);
+  return pages;
+};
+
 const BranchPage = () => {
   const navigate = useNavigate();
 
@@ -55,7 +90,10 @@ const BranchPage = () => {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [pageSize] = useState(10);
+
+  // Raw text the user is typing, and the debounced value actually sent to the API.
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [addOpen,    setAddOpen]    = useState(false);
   const [editOpen,   setEditOpen]   = useState(false);
@@ -65,14 +103,21 @@ const BranchPage = () => {
   const myHostelId   = getUserHostelId();
   const myHostelName = getUserHostelName();
 
+  // Debounce the search box so we don't fire a request on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // Whenever the debounced search term changes, go back to page 0.
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch]);
+
   const loadBranches = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/units", {
-        params: { page, size: pageSize },
-      });
-      const content       = res.data?.data?.content ?? res.data?.content ?? [];
-      const totalElements = res.data?.data?.totalElements ?? res.data?.totalElements ?? 0;
+      const { content, totalElements } = await fetchBranches(page, pageSize, debouncedSearch);
       setBranches(content);
       setTotalCount(totalElements);
     } catch {
@@ -80,7 +125,7 @@ const BranchPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [page, pageSize, debouncedSearch]);
 
   useEffect(() => { loadBranches(); }, [loadBranches]);
 
@@ -96,6 +141,8 @@ const BranchPage = () => {
       const res = await createBranch({
         unitName: form.unitName,
         location: form.location,
+        state:    form.state || undefined,
+        district: form.district || undefined,
         phone:    form.phone,
         hostelId: myHostelId,
         capacityBeds: form.capacityBeds === "" ? null : Number(form.capacityBeds),
@@ -124,6 +171,8 @@ const BranchPage = () => {
       await updateBranch(editBranch.id, {
         unitName: editBranch.unitName,
         location: editBranch.location,
+        state:    editBranch.state || undefined,
+        district: editBranch.district || undefined,
         phone:    editBranch.phone ?? "",
         hostelId: editBranch.hostelId ?? myHostelId,
         capacityBeds: editBranch.capacityBeds ?? null,
@@ -145,10 +194,9 @@ const BranchPage = () => {
     } catch (e: any) { err(e, "Delete failed"); }
   };
 
-  const filteredBranches = branches.filter(b =>
-    b.unitName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (b.location && b.location.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const totalPages = Math.max(Math.ceil(totalCount / pageSize), 1);
+  const currentPage1Based = page + 1;
+  const pageNumbers = getPageNumbers(currentPage1Based, totalPages);
 
   return (
     <div className="min-h-full bg-[#fcfcfc] text-gray-900 font-sans pb-10">
@@ -160,11 +208,8 @@ const BranchPage = () => {
         .branch-main-title { font-size: 18px; font-weight: 700; color: #0f172a; }
 
         .branch-controls { display: flex; align-items: center; gap: 12px; }
-        .branch-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 240px; }
+        .branch-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 280px; }
         .branch-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
-
-        .branch-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
-        .branch-btn-outline:hover { background: #f8fafc; }
 
         .branch-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
         .branch-btn-primary:hover { background: #4200cc; }
@@ -185,16 +230,14 @@ const BranchPage = () => {
         .branch-beds { font-size: 14px; font-weight: 600; color: #0f172a; }
         .branch-beds-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
 
-        .branch-action-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; }
-        .branch-action-btn:hover { background: #f8fafc; color: #0f172a; }
-
-        .branch-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #f1f5f9; background: #fff; }
+        .branch-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #f1f5f9; background: #fff; flex-wrap: wrap; gap: 12px; }
         .branch-page-info { font-size: 13px; color: #64748b; }
-        .branch-page-controls { display: flex; align-items: center; gap: 8px; }
-        .branch-page-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
+        .branch-page-controls { display: flex; align-items: center; gap: 6px; }
+        .branch-page-btn { min-width: 32px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
         .branch-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .branch-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .branch-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .branch-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #94a3b8; }
       `}</style>
 
       <div className="branch-wrap">
@@ -235,6 +278,11 @@ const BranchPage = () => {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm("")} className="text-gray-400 hover:text-gray-600">
+                <X size={14} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -261,12 +309,12 @@ const BranchPage = () => {
                   <tr>
                     <td colSpan={5} className="text-center py-12 text-slate-400">Loading branches...</td>
                   </tr>
-                ) : filteredBranches.length === 0 ? (
+                ) : branches.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="text-center py-12 text-slate-400">No branches found.</td>
                   </tr>
                 ) : (
-                  filteredBranches.map(branch => {
+                  branches.map(branch => {
                     const color = COLORS[branch.id % COLORS.length];
                     return (
                       <tr key={branch.id}>
@@ -302,7 +350,10 @@ const BranchPage = () => {
                               size="icon"
                               variant="outline"
                               className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
-                              onClick={() => { setEditBranch({ ...branch }); setEditOpen(true); }}
+                              onClick={() => {
+                                setEditBranch({ ...branch });
+                                setEditOpen(true);
+                              }}
                             >
                               <Pencil className="h-3.5 w-3.5 text-slate-500" />
                             </Button>
@@ -341,26 +392,40 @@ const BranchPage = () => {
             <div className="branch-page-info">
               Showing {branches.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} branches
             </div>
+
             <div className="branch-page-controls">
               <Button
                 size="icon"
                 variant="outline"
                 className="w-8 h-8 rounded-lg"
                 disabled={page === 0}
-                onClick={() => setPage(p => p - 1)}
+                onClick={() => setPage(p => Math.max(p - 1, 0))}
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <button className="branch-page-btn active">{page + 1}</button>
-              {page + 1 < Math.ceil(totalCount / pageSize) && (
-                <button className="branch-page-btn" onClick={() => setPage(page + 1)}>{page + 2}</button>
+
+              {pageNumbers.map((p, idx) =>
+                p === "..." ? (
+                  <span key={`ellipsis-${idx}`} className="branch-page-ellipsis">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    className={`branch-page-btn ${p === currentPage1Based ? "active" : ""}`}
+                    onClick={() => setPage(p - 1)}
+                  >
+                    {p}
+                  </button>
+                )
               )}
+
               <Button
                 size="icon"
                 variant="outline"
                 className="w-8 h-8 rounded-lg"
-                disabled={(page + 1) * pageSize >= totalCount}
-                onClick={() => setPage(p => p + 1)}
+                disabled={currentPage1Based >= totalPages}
+                onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))}
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
@@ -378,16 +443,25 @@ const BranchPage = () => {
               <BranchFormFields
                 form={{
                   unitName: editBranch.unitName,
+                  state: editBranch.state ?? "",
+                  district: editBranch.district ?? "",
+                  area: editBranch.location?.split(",")[0]?.trim() ?? "",
                   location: editBranch.location ?? "",
-                  phone:    editBranch.phone    ?? "",
+                  phone: editBranch.phone ?? "",
                   capacityBeds: editBranch.capacityBeds != null ? String(editBranch.capacityBeds) : "",
                 }}
                 hostelName={editBranch.hostelName ?? myHostelName ?? "Assigned Hostel"}
-                onChange={(f) => setEditBranch({
-                  ...editBranch,
-                  ...f,
-                  capacityBeds: f.capacityBeds === "" ? null : Number(f.capacityBeds),
-                })}
+                onChange={(f) => {
+                  setEditBranch({
+                    ...editBranch,
+                    unitName: f.unitName,
+                    location: f.location,
+                    state: f.state,
+                    district: f.district,
+                    phone: f.phone,
+                    capacityBeds: f.capacityBeds === "" ? null : Number(f.capacityBeds),
+                  });
+                }}
               />
             )}
             <DialogFooter>
@@ -403,14 +477,28 @@ const BranchPage = () => {
 
 const BranchFormFields = ({
   form, hostelName, onChange,
-}: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void }) => (
-  <div className="space-y-4">
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
-      <Input value={hostelName} disabled className="bg-slate-50 cursor-not-allowed rounded-lg" />
-    </div>
+}: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void }) => {
+  const handleStateChange = (value: string) => {
+    onChange({ ...form, state: value, district: "", area: "", location: "" });
+  };
 
-    <div className="grid grid-cols-2 gap-4">
+  const handleDistrictChange = (value: string) => {
+    onChange({ ...form, district: value, area: "", location: "" });
+  };
+
+  const handleAreaChange = (value: string) => {
+    const stateLabel = STATES.find(s => s.value === form.state)?.label ?? form.state;
+    const composed = [value, form.district, stateLabel].filter(Boolean).join(", ");
+    onChange({ ...form, area: value, location: composed });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
+        <Input value={hostelName} disabled className="bg-slate-50 cursor-not-allowed rounded-lg" />
+      </div>
+
       <div className="space-y-1.5">
         <Label>Branch Name</Label>
         <Input
@@ -421,49 +509,78 @@ const BranchFormFields = ({
         />
       </div>
 
-      <div className="space-y-1.5">
-        <Label>Location</Label>
-        <Input
-          placeholder="e.g. 1st Floor, Main Campus"
-          value={form.location}
-          className="rounded-lg"
-          onChange={(e) => onChange({ ...form, location: e.target.value })}
-        />
+      <div className="grid grid-cols-3 gap-4">
+        <div className="space-y-1.5">
+          <Label>State</Label>
+          <Select value={form.state} onValueChange={handleStateChange}>
+            <SelectTrigger className="rounded-lg">
+              <SelectValue placeholder="Select state" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATES.map((s) => (
+                <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>District</Label>
+          <SearchableSelect
+            value={form.district}
+            options={TN_DISTRICTS}
+            disabled={!form.state}
+            placeholder={!form.state ? "Select state first" : "Search district..."}
+            onChange={handleDistrictChange}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Location</Label>
+          <LocationAreaSelect
+            value={form.area}
+            district={form.district}
+            stateLabel={STATES.find(s => s.value === form.state)?.label ?? "Tamil Nadu"}
+            disabled={!form.district}
+            placeholder={!form.district ? "Select district first" : "Select location"}
+            onChange={handleAreaChange}
+          />
+        </div>
       </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>Contact Phone</Label>
+          <Input
+            placeholder="Contact Phone (10 digits)"
+            value={form.phone}
+            maxLength={10}
+            className="rounded-lg"
+            onChange={(e) => {
+              const val = e.target.value.replace(/\D/g, "");
+              onChange({ ...form, phone: val });
+            }}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Bed Capacity (optional)</Label>
+          <Input
+            type="number"
+            min={0}
+            placeholder="e.g. 20"
+            value={form.capacityBeds}
+            className="rounded-lg"
+            onChange={(e) => onChange({ ...form, capacityBeds: e.target.value.replace(/\D/g, "") })}
+          />
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground -mt-2">
+        Leave Bed Capacity blank if this branch doesn't need its own cap — it will still be limited by the hostel's overall bed capacity.
+      </p>
     </div>
-
-    <div className="grid grid-cols-2 gap-4">
-      <div className="space-y-1.5">
-        <Label>Contact Phone</Label>
-        <Input
-          placeholder="Contact Phone (10 digits)"
-          value={form.phone}
-          maxLength={10}
-          className="rounded-lg"
-          onChange={(e) => {
-            const val = e.target.value.replace(/\D/g, "");
-            onChange({ ...form, phone: val });
-          }}
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <Label>Bed Capacity (optional)</Label>
-        <Input
-          type="number"
-          min={0}
-          placeholder="e.g. 20"
-          value={form.capacityBeds}
-          className="rounded-lg"
-          onChange={(e) => onChange({ ...form, capacityBeds: e.target.value.replace(/\D/g, "") })}
-        />
-      </div>
-    </div>
-
-    <p className="text-xs text-muted-foreground -mt-2">
-      Leave Bed Capacity blank if this branch doesn't need its own cap — it will still be limited by the hostel's overall bed capacity.
-    </p>
-  </div>
-);
+  );
+};
 
 export default BranchPage;

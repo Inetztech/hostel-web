@@ -148,6 +148,7 @@ export type PermissionName =
   | "MANAGE_MAINTENANCE" | "VIEW_MAINTENANCE"
   | "MANAGE_ANNOUNCEMENTS" | "MANAGE_FOOD_TIMETABLE" | "MANAGE_RULES_REGULATIONS"
   | "MANAGE_EB_READINGS" | "MANAGE_COMPLAINTS" | "MANAGE_VISITORS"
+  | "MANAGE_SUNDAY_MEAL" | "VIEW_SUNDAY_MEAL"
   | "VIEW_DASHBOARD" | "VIEW_REPORTS";
 
 export interface PermissionCatalogItem {
@@ -197,6 +198,45 @@ export interface FoodTimetableRequest {
   lunch: string;
   dinner: string;
   branchId?: number;
+}
+
+/* NEW: Sunday Chicken Count / Meal Confirmation */
+export type MealResponseValue = "PENDING" | "YES" | "NO";
+
+export interface SundayMealConfirmation {
+  id?: number;
+  tenantId?: number;
+  tenantName?: string;
+  branchId?: number;
+  branchName?: string;
+  mealDate: string; // ISO date, e.g. "2026-08-23"
+  response: MealResponseValue;
+  respondedAt?: string | null;
+}
+
+export interface SundayMealResponseRequest {
+  mealDate: string;
+  response: "YES" | "NO";
+}
+
+export interface SundayMealBranchCount {
+  branchId: number;
+  branchName: string;
+  totalActiveTenants: number;
+  yesCount: number;
+  noCount: number;
+  pendingCount: number;
+  chickenCount: number;
+}
+
+export interface SundayMealCount {
+  mealDate: string;
+  totalActiveTenants: number;
+  yesCount: number;
+  noCount: number;
+  pendingCount: number;
+  chickenCount: number;
+  branchBreakdown: SundayMealBranchCount[];
 }
 
 export interface Announcement {
@@ -291,6 +331,19 @@ export interface HostelRequest {
   email?: string;
 }
 
+// NEW: one uploaded hostel gallery image — mirrors the backend's
+// HostelImageDTO (com.hostel.dto.HostelImageDTO) field-for-field.
+export interface HostelImageDTO {
+  id: number;
+  hostelId: number;
+  imageUrl: string;
+  imageType: string;
+  displayOrder: number;
+  isPrimary: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface HostelAdmin {
   id: number;
   name: string;
@@ -315,6 +368,12 @@ export interface HostelAdmin {
   adminEmail?: string | null;
   adminActive?: boolean;
   permissions?: string[];
+  // NEW: gallery fields, populated server-side by
+  // SuperAdminServiceImpl.applyImages() on every hostel-with-admin
+  // response (list, single-fetch, create, update, status-change).
+  image?: string | null;
+  gallery?: string[];
+  images?: HostelImageDTO[];
 }
 
 export interface HostelAdminRequest {
@@ -360,6 +419,8 @@ export interface Branch {
   id: number;
   unitName: string;
   location: string;
+  district?: string;
+  state?: string;
   phone?:   string;
   hostelId?:   number;
   hostelName?: string;
@@ -373,6 +434,8 @@ export interface BranchRequest {
   unitName: string;
   location: string;
   phone?:   string;
+  district?: string;
+  state?: string;
   hostelId: number;
   capacityBeds?: number | null;
 }
@@ -411,6 +474,8 @@ export interface FlatRequest {
   branchId: number;
 }
 
+export type CheckoutStatus = "NOTICE_ACTIVE" | "NOTICE_COMPLETED" | "CHECKED_OUT";
+
 export interface Tenant {
   id: number;
   name: string;
@@ -436,6 +501,20 @@ export interface Tenant {
   hostelName?: string | null;
   branchId?: number | null;
   branchName?: string | null;
+
+  // NEW: room/bed number for display without a second lookup
+  roomNumber?: string | null;
+  bedNumber?: number | null;
+
+  // NEW: NOTICE PERIOD / CHECKOUT NOTICE fields
+  checkoutRequestDate?: string | null;
+  noticePeriodStartDate?: string | null;
+  noticePeriodEndDate?: string | null;
+  noticePeriodMonths?: number | null;
+  checkoutStatus?: CheckoutStatus | null;
+  checkoutStatusLabel?: string | null;
+  remainingNoticeDays?: number | null;
+  noticeNote?: string | null;
 }
 
 export interface TenantRequest {
@@ -453,6 +532,12 @@ export interface TenantRequest {
   advance: number;
   monthlyRent: number;
   checkInDate: string;
+}
+
+// NEW: body for submitting a tenant checkout notice
+export interface CheckoutNoticeRequest {
+  noticePeriodMonths?: number;
+  note?: string;
 }
 
 export interface EBReading {
@@ -544,7 +629,10 @@ export type NotificationType =
   | "TICKET_CREATED"
   | "TICKET_REPLY"
   | "TICKET_STATUS_UPDATE"
-  | "BED_LIMIT_DECISION";
+  | "BED_LIMIT_DECISION"
+  | "CHECKOUT_NOTICE_SUBMITTED"
+  | "CHECKOUT_NOTICE_COMPLETED"
+  | "SUNDAY_MEAL_CONFIRMATION";
 
 export interface AppNotification {
   id: number;
@@ -769,4 +857,12 @@ export interface CleanerWorkSummary {
   roomsCleanedThisWeek: number;
   roomsCleanedThisMonth: number;
   totalAssignedActive: number;
+}
+
+
+export interface PublicRoomTypeSummary {
+  label: string;
+  sharing: string;
+  price: number;
+  availableBeds: number;
 }

@@ -154,6 +154,28 @@ const FoodTimetablePage = () => {
     [branchSchedules]
   );
 
+  /* ── PAGINATION ──
+     orderedSchedules can span every branch's full week, which grows
+     quickly once there are several branches. Paginate client-side the
+     same way AnnouncementPage does — prev/numbered/next control, 10
+     rows per page. Reset to page 0 whenever the branch filter changes
+     so you never land on a now-empty page after switching branches. */
+  const [currentPage, setCurrentPage] = useState(0);
+  const pageSize = 10;
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [selectedBranch]);
+
+  const paginatedSchedules = useMemo(
+    () =>
+      orderedSchedules.slice(
+        currentPage * pageSize,
+        (currentPage + 1) * pageSize
+      ),
+    [orderedSchedules, currentPage]
+  );
+
   /* Compute available days specifically for the branch selected inside the Add Modal */
   const modalAvailableDays = useMemo(() => {
     const activeBranchId = modalBranch ? Number(modalBranch) : form.branchId;
@@ -420,12 +442,12 @@ const FoodTimetablePage = () => {
                 <tbody>
                   {loading ? (
                     <tr><td colSpan={hasAccess ? 7 : 6} className="text-center py-12 text-slate-400">Loading…</td></tr>
-                  ) : orderedSchedules.length === 0 ? (
+                  ) : paginatedSchedules.length === 0 ? (
                     <tr><td colSpan={hasAccess ? 7 : 6} className="text-center py-12 text-slate-400">No schedules found.</td></tr>
                   ) : (
-                    orderedSchedules.map((row, i) => (
+                    paginatedSchedules.map((row, i) => (
                       <tr key={row.id}>
-                        <td className="text-[13px] font-semibold text-slate-500 w-12">{i + 1}</td>
+                        <td className="text-[13px] font-semibold text-slate-500 w-12">{currentPage * pageSize + i + 1}</td>
                         {/* BRANCH NAME COLUMN */}
                         <td>
                           <div className="ft-branch-badge">
@@ -482,6 +504,63 @@ const FoodTimetablePage = () => {
                 </tbody>
               </table>
             </div>
+
+            {/* PAGINATION */}
+            {!loading && orderedSchedules.length > 0 && (
+              <div className="flex items-center justify-between px-6 py-5 border-t border-[#f1f5f9] bg-white rounded-b-2xl">
+                <div className="text-[14px] text-[#64748b] font-medium">
+                  Showing {paginatedSchedules.length === 0 ? 0 : currentPage * pageSize + 1} to {Math.min((currentPage + 1) * pageSize, orderedSchedules.length)} of {orderedSchedules.length} schedules
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className="w-9 h-9 rounded-md border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm text-lg leading-none font-bold"
+                    disabled={currentPage === 0}
+                    onClick={() => setCurrentPage(p => p - 1)}
+                  >
+                    &#8249;
+                  </button>
+
+                  {(() => {
+                    const totalPages = Math.ceil(orderedSchedules.length / pageSize) || 1;
+                    const pages: (number | string)[] = [];
+                    for (let i = 0; i < totalPages; i++) {
+                      if (i === 0 || i === totalPages - 1 || Math.abs(i - currentPage) <= 1) {
+                        pages.push(i);
+                      } else if (pages[pages.length - 1] !== '...') {
+                        pages.push('...');
+                      }
+                    }
+
+                    return pages.map((p, idx) => {
+                      if (p === '...') {
+                        return <span key={`dots-${idx}`} className="w-9 h-9 flex items-center justify-center text-slate-400 text-sm font-medium">...</span>;
+                      }
+                      const isCurrent = p === currentPage;
+                      return (
+                        <button
+                          type="button"
+                          key={p}
+                          className={`w-9 h-9 rounded-md flex items-center justify-center font-medium text-[14px] transition-colors shadow-sm ${isCurrent ? 'bg-[#5200FF] text-white border border-[#5200FF]' : 'border border-slate-200 text-slate-600 bg-white hover:bg-slate-50'}`}
+                          onClick={() => setCurrentPage(p as number)}
+                        >
+                          {(p as number) + 1}
+                        </button>
+                      );
+                    });
+                  })()}
+
+                  <button
+                    type="button"
+                    className="w-9 h-9 rounded-md border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm text-lg leading-none font-bold"
+                    disabled={(currentPage + 1) * pageSize >= orderedSchedules.length}
+                    onClick={() => setCurrentPage(p => p + 1)}
+                  >
+                    &#8250;
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

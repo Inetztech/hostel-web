@@ -14,6 +14,7 @@ import {
   shareAnnouncementWhatsApp,
   getUserRole,
   fetchBranches,
+  fetchAllPages,
 } from "@/lib/store";
 
 import { Announcement, AnnouncementRequest, Branch } from "@/lib/types";
@@ -118,20 +119,30 @@ const AnnouncementPage = () => {
     setEditAnnouncement(null);
   };
 
+  // CHANGED: previously called fetchAnnouncements() with no args, which
+  // silently returned only the first backend page (page=0, size=10).
+  // Since this page does its own client-side search/filter/pagination
+  // over the full `announcements` array, it needs every row, not one
+  // page. fetchAllPages() loops through every backend page and
+  // concatenates the results.
   const reload = useCallback(async () => {
-  try {
-    const data = await fetchAnnouncements();
-    setAnnouncements(data.content || []); 
-  } catch (err) {
-    console.error(err);
-    toast.error("Failed to load announcements");
-  }
-}, []);
+    try {
+      const data = await fetchAllPages<Announcement>(fetchAnnouncements, 10);
+      setAnnouncements(data);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load announcements");
+    }
+  }, []);
 
+  // CHANGED: same issue and same fix as reload() above — fetchBranches()
+  // with no args only returned the first 10 branches, which capped the
+  // "Select Branch" dropdown and the branch filter at 10 entries even
+  // though many more exist.
   const loadBranches = useCallback(async () => {
     try {
-      const res = await fetchBranches();
-      setBranches(res.content || []);
+      const data = await fetchAllPages<Branch>(fetchBranches, 10);
+      setBranches(data);
     } catch (err) {
       console.error(err);
       toast.error("Failed to load branches");
@@ -263,7 +274,7 @@ const AnnouncementPage = () => {
         .ap-table td { padding: 16px 24px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
         .ap-table tr:hover { background: #fdfcff; }
 
-        .ap-row-title { font-size: 14px; font-weight: 600; color: #0f172a; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ap-row-title { font-size: 13px; font-weight: 500; color: #334155; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .ap-msg { font-size: 13px; color: #64748b; max-width: 320px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
         .ap-branch { font-size: 13px; font-weight: 500; color: #334155; }
         .ap-date { font-size: 13px; font-weight: 500; color: #334155; }
@@ -327,13 +338,6 @@ const AnnouncementPage = () => {
               />
             </div>
 
-            {/* Branch filter is only meaningful (and only correct) for roles that
-                span multiple branches. TENANT/WARDEN are already scoped to a
-                single branch by the backend, so showing them an "All Branches"
-                picker listing every branch in the hostel is misleading — it
-                implies they can see/filter data outside their own branch when
-                they can't. Gated the same way FoodTimetablePage gates its
-                branch switcher. */}
             {(role === "ADMIN" || role === "SUPER_ADMIN") && (
               <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-10 w-[180px]">
                 <Select

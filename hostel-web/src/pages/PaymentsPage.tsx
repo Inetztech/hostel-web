@@ -57,10 +57,10 @@ const fmtDateTime = (v?: string | null) => {
 
 const StatusPill = ({ status }: { status: string }) => {
   if (status === "APPROVED")
-    return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 gap-1"><CheckCircle2 className="h-3 w-3" /> Approved</Badge>;
+    return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 gap-1 rounded-full"><CheckCircle2 className="h-3 w-3" /> Approved</Badge>;
   if (status === "REJECTED")
-    return <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 gap-1"><XCircle className="h-3 w-3" /> Rejected</Badge>;
-  return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 gap-1"><Clock className="h-3 w-3" /> Pending Review</Badge>;
+    return <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 gap-1 rounded-full"><XCircle className="h-3 w-3" /> Rejected</Badge>;
+  return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 gap-1 rounded-full"><Clock className="h-3 w-3" /> Pending Review</Badge>;
 };
 
 const ProofThumb = ({ path }: { path?: string }) => {
@@ -70,7 +70,7 @@ const ProofThumb = ({ path }: { path?: string }) => {
   return (
     <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
       {isPdf ? <ImageIcon className="h-3.5 w-3.5" /> : (
-        <img src={url} alt="proof" className="h-9 w-9 rounded object-cover border" />
+        <img src={url} alt="proof" className="h-9 w-9 rounded-lg object-cover border" />
       )}
       View proof
     </a>
@@ -184,7 +184,7 @@ const ReceiptPreviewDialog = ({
 
   return (
     <Dialog open={!!payment} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md rounded-[28px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ReceiptIcon className="h-4 w-4 text-primary" /> Payment Receipt
@@ -192,7 +192,7 @@ const ReceiptPreviewDialog = ({
           <DialogDescription>Receipt {receiptNo} · {MONTHS[payment.rentMonth - 1]} {payment.rentYear}</DialogDescription>
         </DialogHeader>
 
-        <div className="rounded-xl border overflow-hidden">
+        <div className="rounded-2xl border overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 bg-[#0f1117] text-white">
             <div className="flex items-center gap-2">
               <div className="h-8 w-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
@@ -254,8 +254,8 @@ const ReceiptPreviewDialog = ({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="outline" onClick={onClose}>Close</Button>
-          <Button onClick={() => downloadReceiptPdf(payment)} className="gap-2">
+          <Button variant="outline" className="rounded-xl" onClick={onClose}>Close</Button>
+          <Button onClick={() => downloadReceiptPdf(payment)} className="gap-2 rounded-xl">
             <Download className="h-4 w-4" /> Save as PDF
           </Button>
         </DialogFooter>
@@ -365,13 +365,13 @@ const TenantPayments = () => {
           <h1 className="text-xl font-semibold">Payments</h1>
           <p className="text-sm text-muted-foreground">Pay your rent &amp; EB dues and track your payment history</p>
         </div>
-        <Button onClick={() => openPay()} disabled={dueRents.length === 0} className="gap-2">
+        <Button onClick={() => openPay()} disabled={dueRents.length === 0} className="gap-2 rounded-xl">
           <CreditCard className="h-4 w-4" /> Pay Now
         </Button>
       </div>
 
       {!loading && dueRents.length > 0 && (
-        <Card className="p-4 mb-6 border-amber-200 bg-amber-50/50 dark:bg-amber-950/10">
+        <Card className="p-4 mb-6 border-amber-200 bg-amber-50/50 dark:bg-amber-950/10 rounded-2xl">
           <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
             You have {dueRents.length} month{dueRents.length > 1 ? "s" : ""} with dues pending —{" "}
             {fmt(dueRents.reduce((s, r) => s + (r.pendingAmount ?? 0), 0))} total.
@@ -379,7 +379,7 @@ const TenantPayments = () => {
         </Card>
       )}
 
-      <Card className="p-0 overflow-hidden mb-8">
+      <Card className="p-0 overflow-hidden mb-8 rounded-[24px]">
         <div className="px-5 py-3 border-b flex items-center gap-2">
           <IndianRupee className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">Pending Dues</h2>
@@ -406,7 +406,7 @@ const TenantPayments = () => {
                 <TableCell className="text-emerald-600">{fmt(r.paidAmount)}</TableCell>
                 <TableCell className="text-rose-600 font-semibold">{fmt(r.pendingAmount)}</TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="outline" onClick={() => openPay(r.id)}>Pay</Button>
+                  <Button size="sm" variant="outline" className="rounded-lg" onClick={() => openPay(r.id)}>Pay</Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -414,7 +414,7 @@ const TenantPayments = () => {
         </Table>
       </Card>
 
-      <Card className="p-0 overflow-hidden">
+      <Card className="p-0 overflow-hidden rounded-[24px]">
         <div className="px-5 py-3 border-b flex items-center gap-2">
           <History className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">My Payment History</h2>
@@ -456,7 +456,7 @@ const TenantPayments = () => {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="gap-1.5"
+                      className="gap-1.5 rounded-lg"
                       onClick={() => setReceiptTarget(h)}
                     >
                       <ReceiptIcon className="h-3.5 w-3.5" /> Receipt
@@ -474,9 +474,9 @@ const TenantPayments = () => {
       <ReceiptPreviewDialog payment={receiptTarget} onClose={() => setReceiptTarget(null)} />
 
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md rounded-[28px]">
           <DialogHeader>
-            <DialogTitle>Submit a Payment</DialogTitle>
+            <DialogTitle className="text-xl">Submit a Payment</DialogTitle>
             <DialogDescription>Attach a screenshot or receipt as proof — your warden/admin will verify it.</DialogDescription>
           </DialogHeader>
 
@@ -488,8 +488,8 @@ const TenantPayments = () => {
                 const target = dueRents.find((r) => String(r.id) === v);
                 setAmount(target ? String(Math.round(target.pendingAmount ?? 0)) : "");
               }}>
-                <SelectTrigger><SelectValue placeholder="Select month" /></SelectTrigger>
-                <SelectContent>
+                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select month" /></SelectTrigger>
+                <SelectContent className="rounded-xl">
                   {dueRents.map((r) => (
                     <SelectItem key={r.id} value={String(r.id)}>
                       {MONTHS[r.rentMonth - 1]} {r.rentYear} — due {fmt(r.pendingAmount)}
@@ -502,13 +502,13 @@ const TenantPayments = () => {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Amount (₹)</Label>
-                <Input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} />
+                <Input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} className="rounded-xl" />
               </div>
               <div className="space-y-1.5">
                 <Label>Payment Mode</Label>
                 <Select value={mode} onValueChange={(v) => setMode(v as "CASH" | "UPI")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent className="rounded-xl">
                     <SelectItem value="UPI">UPI</SelectItem>
                     <SelectItem value="CASH">Cash</SelectItem>
                   </SelectContent>
@@ -518,12 +518,12 @@ const TenantPayments = () => {
 
             <div className="space-y-1.5">
               <Label>Transaction / UTR ID (optional)</Label>
-              <Input value={txnId} onChange={(e) => setTxnId(e.target.value)} placeholder="e.g. UPI reference number" />
+              <Input value={txnId} onChange={(e) => setTxnId(e.target.value)} placeholder="e.g. UPI reference number" className="rounded-xl" />
             </div>
 
             <div className="space-y-1.5">
               <Label>Payment Proof (screenshot / receipt)</Label>
-              <label className="flex items-center gap-2 border border-dashed rounded-md px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors text-sm text-muted-foreground">
+              <label className="flex items-center gap-2 border border-dashed rounded-xl px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors text-sm text-muted-foreground">
                 <Upload className="h-4 w-4" />
                 {file ? file.name : "Click to upload JPG, PNG or PDF (max 10MB)"}
                 <input type="file" accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf" className="hidden"
@@ -532,9 +532,9 @@ const TenantPayments = () => {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPayOpen(false)}>Cancel</Button>
-            <Button onClick={submitPayment} disabled={submitting}>{submitting ? "Submitting…" : "Submit Payment"}</Button>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" className="rounded-xl" onClick={() => setPayOpen(false)}>Cancel</Button>
+            <Button className="rounded-xl" onClick={submitPayment} disabled={submitting}>{submitting ? "Submitting…" : "Submit Payment"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -643,16 +643,16 @@ const ApproverPayments = () => {
           <p className="text-sm text-muted-foreground">Review tenant-submitted payments and proof documents</p>
         </div>
         <div className="flex gap-2">
-          <Button variant={tab === "pending" ? "default" : "outline"} size="sm" onClick={() => setTab("pending")}>
+          <Button variant={tab === "pending" ? "default" : "outline"} size="sm" className="rounded-xl" onClick={() => setTab("pending")}>
             Pending ({pendingTotal})
           </Button>
-          <Button variant={tab === "all" ? "default" : "outline"} size="sm" onClick={() => setTab("all")}>
+          <Button variant={tab === "all" ? "default" : "outline"} size="sm" className="rounded-xl" onClick={() => setTab("all")}>
             All Transactions ({allTotal})
           </Button>
         </div>
       </div>
 
-      <Card className="p-0 overflow-hidden">
+      <Card className="p-0 overflow-hidden rounded-[24px]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -695,17 +695,17 @@ const ApproverPayments = () => {
                 <TableCell className="text-right space-x-2">
                   {tab === "pending" ? (
                     <>
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busyId === r.id}
+                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 rounded-lg" disabled={busyId === r.id}
                         onClick={() => approve(r.id)}>
                         <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
                       </Button>
-                      <Button size="sm" variant="destructive" disabled={busyId === r.id}
+                      <Button size="sm" variant="destructive" className="rounded-lg" disabled={busyId === r.id}
                         onClick={() => { setRejectTarget(r); setRemarks(""); }}>
                         <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
                       </Button>
                     </>
                   ) : r.status === "APPROVED" ? (
-                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setReceiptTarget(r)}>
+                    <Button size="sm" variant="outline" className="gap-1.5 rounded-lg" onClick={() => setReceiptTarget(r)}>
                       <ReceiptIcon className="h-3.5 w-3.5" /> Receipt
                     </Button>
                   ) : (
@@ -728,7 +728,7 @@ const ApproverPayments = () => {
                 variant="outline"
                 disabled={currentPage === 0}
                 onClick={() => goToPage(currentPage - 1)}
-                className="gap-1"
+                className="gap-1 rounded-lg"
               >
                 <ChevronLeft className="h-3.5 w-3.5" /> Previous
               </Button>
@@ -737,7 +737,7 @@ const ApproverPayments = () => {
                 variant="outline"
                 disabled={currentPage >= totalPages - 1}
                 onClick={() => goToPage(currentPage + 1)}
-                className="gap-1"
+                className="gap-1 rounded-lg"
               >
                 Next <ChevronRight className="h-3.5 w-3.5" />
               </Button>
@@ -749,17 +749,17 @@ const ApproverPayments = () => {
       <ReceiptPreviewDialog payment={receiptTarget} onClose={() => setReceiptTarget(null)} />
 
       <Dialog open={!!rejectTarget} onOpenChange={(o) => !o && setRejectTarget(null)}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm rounded-[28px]">
           <DialogHeader>
             <DialogTitle>Reject Payment</DialogTitle>
             <DialogDescription>
               Let {rejectTarget?.tenantName} know why this payment couldn't be verified.
             </DialogDescription>
           </DialogHeader>
-          <Textarea placeholder="Reason (e.g. amount mismatch, unreadable screenshot)…" value={remarks} onChange={(e) => setRemarks(e.target.value)} />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRejectTarget(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmReject} disabled={busyId === rejectTarget?.id}>Reject Payment</Button>
+          <Textarea placeholder="Reason (e.g. amount mismatch, unreadable screenshot)…" value={remarks} onChange={(e) => setRemarks(e.target.value)} className="rounded-xl" />
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" className="rounded-xl" onClick={() => setRejectTarget(null)}>Cancel</Button>
+            <Button variant="destructive" className="rounded-xl" onClick={confirmReject} disabled={busyId === rejectTarget?.id}>Reject Payment</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
