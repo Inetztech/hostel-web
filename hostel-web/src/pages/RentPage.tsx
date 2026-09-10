@@ -46,6 +46,7 @@ type EBBillRow = TenantEBBill & {
 type RentRow = {
   tenantId: number;
   tenantName: string;
+  tenantPhone: string;
   roomNumber: string;
   flatNumber: string;
   displayEB: number;
@@ -228,6 +229,12 @@ const RentPage = () => {
   const tenantNameMap = useMemo(() => {
     const map = new Map<number, string>();
     tenants.forEach((t) => map.set(Number(t.id), t.name));
+    return map;
+  }, [tenants]);
+
+  const tenantPhoneMap = useMemo(() => {
+    const map = new Map<number, string>();
+    tenants.forEach((t) => map.set(Number(t.id), t.phone ?? ""));
     return map;
   }, [tenants]);
 
@@ -590,7 +597,21 @@ const RentPage = () => {
       const recordEB     = rentRecord ? Number(rentRecord.ebAmount     || 0) : b.amount ?? 0;
       const recordDamage = rentRecord ? Number((rentRecord as any).damageAmount || 0) : 0;
 
-      const displayEB     = rentRecord ? recordEB     : (b.amount ?? 0);
+      const isPaid = normalizeStatus(rentRecord?.paymentStatus) === "PAID";
+
+      // CHANGED: once a Rent row is generated, rentRecord.ebAmount is
+      // frozen at whatever the EB reading was at that moment. If the EB
+      // reading is later corrected/edited (e.g. units or amount fixed on
+      // the EB Readings page), an already-generated but still-unpaid Rent
+      // row kept showing the old, stale ebAmount instead of the corrected
+      // one — that's why ASKING showed ₹195 here while EB Readings showed
+      // ₹325. For any rent that hasn't been fully paid yet, prefer the
+      // *current* EB reading (bill.amount) over the frozen recordEB, and
+      // recompute total/pending off that live number. A PAID rent still
+      // shows exactly what was actually billed and collected.
+      const liveEB = b.amount ?? 0;
+
+      const displayEB     = rentRecord ? (isPaid ? recordEB : liveEB) : liveEB;
       const displayRent   = rentRecord ? recordRent   : rentPerBed;
       // Once a Rent row exists, its damageAmount is the source of truth.
       // Until then, fall back to unbilled DamageTenant shares for this
@@ -599,8 +620,8 @@ const RentPage = () => {
         ? recordDamage
         : (pendingDamageMap.get(Number(b.tenantId)) ?? 0);
       const displayTotal  = rentRecord
-        ? recordTotal
-        : rentPerBed + (b.amount ?? 0) + displayDamage;
+        ? (isPaid ? recordTotal : displayRent + displayEB + displayDamage)
+        : rentPerBed + liveEB + displayDamage;
 
       const currentPaid   = Number(rentRecord?.paidAmount || 0);
       const currentStatus = normalizeStatus(rentRecord?.paymentStatus);
@@ -609,9 +630,9 @@ const RentPage = () => {
         ? currentStatus === "PAID"
           ? 0
           : currentStatus === "PARTIAL"
-          ? recordTotal - currentPaid
-          : recordTotal
-        : rentPerBed + (b.amount ?? 0) + displayDamage;
+          ? displayTotal - currentPaid
+          : displayTotal
+        : rentPerBed + liveEB + displayDamage;
 
       const { previousPending } = rentRecord
         ? computePreviousPending(b.tenantId, month, year, rents)
@@ -630,6 +651,7 @@ const RentPage = () => {
       return {
         tenantId:      b.tenantId,
         tenantName:    b.tenantName ?? resolveTenantName(Number(b.tenantId)),
+        tenantPhone:   tenantPhoneMap.get(Number(b.tenantId)) ?? "",
         roomNumber:    room?.roomNumber ?? bill.roomNumber,
         flatNumber,
         rentPerBed:    displayRent,
@@ -731,6 +753,7 @@ const RentPage = () => {
         return {
           tenantId:        Number(r.tenantId),
           tenantName:      resolveTenantName(Number(r.tenantId)),
+          tenantPhone:     tenantPhoneMap.get(Number(r.tenantId)) ?? "",
           roomNumber:      room?.roomNumber ?? String(r.roomId),
           flatNumber:      (room as any)?.flatNumber ?? "-",
           displayEB:       recordEB,
@@ -1171,7 +1194,7 @@ const RentPage = () => {
                   <thead>
                     <tr>
                       <th>TENANT</th>
-                      <th>ROOM & BED</th>
+                      <th>ROOM</th>
                       <th>BRANCH</th>
                       <th>RENT (₹)</th>
                       <th>EB (₹)</th>
@@ -1211,12 +1234,12 @@ const RentPage = () => {
                                 <div className={`rt-avatar ${avatarClass}`}>{initials}</div>
                                 <div>
                                   <div className="rt-tenant-name">{row.tenantName}</div>
-                                  <div className="rt-tenant-phone">{row.tenantId + 9876543200}</div>
+                                  <div className="rt-tenant-phone">{row.tenantPhone}</div>
                                 </div>
                               </div>
                             </td>
                             <td>
-                              <div className="rt-room">{row.roomNumber} - Bed {(i % 4) + 1}</div>
+                              <div className="rt-room">{row.roomNumber}</div>
                               <div className={`rt-room-type ${isAc ? 'bg-green-100 text-green-700' : 'bg-indigo-100 text-indigo-700'}`}>
                                 {isAc ? 'AC' : 'Non-AC'}
                               </div>
@@ -1293,37 +1316,6 @@ const RentPage = () => {
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div>
-            <div className="rt-panel p-5">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="rt-panel-title">Overdue Tenants</h2>
-                <a href="#" className="text-xs font-semibold text-indigo-600 hover:underline">View All</a>
-              </div>
-              <div className="space-y-4">
-                {topOverdueTenants.map((t, i) => (
-                  <div key={i} className="flex justify-between items-start pb-4 border-b border-dashed border-slate-100 last:border-0 last:pb-0">
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">{t.tenantName}</div>
-                      <div className="text-xs font-medium text-slate-500 mt-0.5">{t.roomNumber} - Bed 1</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-bold text-slate-900">₹{new Intl.NumberFormat('en-IN').format(Math.round(t.pending))}</div>
-                      <div className="text-[10px] font-semibold text-rose-500 mt-0.5">{(i % 5) + 3} days overdue</div>
-                    </div>
-                  </div>
-                ))}
-                {topOverdueTenants.length === 0 && (
-                  <div className="text-sm text-slate-400 text-center py-4">No overdue tenants found.</div>
-                )}
-              </div>
-              {overdueCount > 3 && (
-                <div className="text-center mt-4">
-                  <a href="#" className="text-xs font-semibold text-indigo-600 hover:underline">+{overdueCount - 3} more tenants</a>
-                </div>
-              )}
             </div>
           </div>
         </div>

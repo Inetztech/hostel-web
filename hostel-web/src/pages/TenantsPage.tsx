@@ -31,24 +31,10 @@ import api from "@/lib/api";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const PAGE_SIZE     = 10;
 
-/* Reference-data (rooms/beds) fan-out page size.
-   ── CHANGED: bumped from 10 -> 200. At size=10, a branch with (say)
-   120 beds needed 12 requests (beds?page=0..11) to load — visible in
-   the Network tab as a long staggered waterfall, since the browser
-   caps concurrent connections per host and each request also pays
-   the per-request JWT-filter overhead. Fetching in pages of 200
-   collapses that down to 1 (or occasionally 2) requests per dataset
-   instead. If a branch legitimately has 200+ beds, this still
-   degrades gracefully — fetchAllPages() below still fans out the
-   remaining pages, just far fewer of them. ── */
 const REF_DATA_PAGE_SIZE = 200;
 
-/* How long refreshed rooms/beds/branches data is considered "fresh"
-   before a dialog-open will trigger another full refetch. */
 const REF_DATA_CACHE_MS = 20_000;
 
-/* Phone numbers everywhere in this file are stored/validated as
-   exactly 10 digits, digits-only (no spaces, +91, dashes, etc). */
 const PHONE_LENGTH = 10;
 const sanitizePhoneInput = (raw: string) => raw.replace(/\D/g, "").slice(0, PHONE_LENGTH);
 const isValidPhone = (phone: string) => /^\d{10}$/.test(phone);
@@ -58,21 +44,11 @@ const getApiOrigin = (): string => {
   try { return new URL(base).origin; } catch { return ""; }
 };
 
-/* ── Bed occupancy check, tolerant of Jackson's Lombok-generated
-   serialization. A boolean field literally named `isOccupied` gets
-   a Lombok getter of isOccupied(), which Jackson then serializes as
-   "occupied" (stripping the is- prefix) rather than "isOccupied".
-   store.ts's updateBedStatus() already sends `{ occupied }` for the
-   same reason. Checking both keys here means this works regardless
-   of which shape a given backend/DTO version actually returns. ── */
 const isBedOccupied = (b: any): boolean => {
   const raw = b?.isOccupied ?? b?.occupied ?? b?.is_occupied;
   return raw === true || raw === 1 || String(raw).toLowerCase() === "true";
 };
 
-/* ── Generic paginated fetcher (still used for rooms/beds, which are
-   genuinely small reference sets we want fully in memory for lookups
-   like roomNo()/bedNo()/branchName() below) ──────────────────────── */
 async function fetchAllPages<T>(
   fetchFn: (page: number, size: number) => Promise<any>,
   pageSize = REF_DATA_PAGE_SIZE
@@ -89,20 +65,14 @@ async function fetchAllPages<T>(
   return [...content, ...rest.flat()];
 }
 
-/* ── CHANGED: fetchTenantsPage now also accepts an optional `search`
-   term AND an optional `status` term, both forwarded as query params
-   so the backend can filter server-side. If your /tenants endpoint
-   doesn't yet support these params, they're simply ignored server-side
-   and have no effect — safe to ship either way. See the accompanying
-   backend notes for the matching Spring controller/service/repository
-   changes needed to make `status` actually filter. ── */
 const fetchTenantsPage = async (
-  page: number, size: number, unitId?: string, search?: string, status?: string
+  page: number, size: number, unitId?: string, search?: string, status?: string, roomId?: string
 ): Promise<{ content: Tenant[]; totalElements: number }> => {
   const params: Record<string, any> = { page, size };
   if (unitId && unitId !== "all") params.unitId = unitId;
   if (search && search.trim()) params.search = search.trim();
   if (status && status !== "all") params.status = status;
+  if (roomId && roomId !== "all") params.roomId = roomId;
   const res = await api.get("/tenants", { params });
   return {
     content:       res.data?.data?.content ?? [],
@@ -131,21 +101,6 @@ const fetchBedsFresh = async (pg = 0, size = REF_DATA_PAGE_SIZE, forceFresh = fa
   };
 };
 
-/* ══════════════════════════════════════════════════════════════════
-   BRANCH RESOLUTION HELPERS
-   ══════════════════════════════════════════════════════════════════ */
-
-/* ── FIX: single-page fetcher for /units, returned in the same
-   { content, totalElements } shape fetchAllPages() expects, so branch
-   loading can fan out across every page instead of stopping at the
-   first one.
-
-   The backend response for /units has been seen in several different
-   shapes depending on environment/version (a bare array, an array
-   under res.data.data, or a Spring Page object under res.data.data
-   with .content/.totalElements, or under res.data directly) — this
-   normalizes all of them into one consistent { content, totalElements }
-   result per page. ── */
 const fetchUnitsPage = async (
   page: number,
   size: number
@@ -171,16 +126,6 @@ const fetchUnitsPage = async (
   return { content, totalElements: totalElements ?? content.length };
 };
 
-/* ── FIX: this used to call /units with a hard-coded { page: 0, size: 10 }
-   and return only that first page — so if a company had more than 10
-   branches, the "All Branches" dropdown (on this page and anywhere else
-   that consumes `branches`) silently showed only the first 10 and had
-   no way to reach the rest.
-
-   Now it fans out across every page via fetchAllPages()/fetchUnitsPage()
-   above (REF_DATA_PAGE_SIZE = 200 per request), the same pattern already
-   used for rooms and beds in this file, so ALL branches load regardless
-   of how many exist. ── */
 const fetchAndNormalizeBranches = async (): Promise<Branch[]> => {
   try {
     const rawList = await fetchAllPages<any>(fetchUnitsPage, REF_DATA_PAGE_SIZE);
@@ -221,12 +166,6 @@ const getRoomUnitName = (r: any): string =>
   r?.branch?.name    ??
   "";
 
-/* ── PAGE NUMBER HELPER (shared pattern with BranchPage/RoomsPage) ─
-   Builds a windowed page-number list with ellipses, e.g.
-   [1, 2, 3, 4, 5, '...', 12] or [1, '...', 5, 6, 7, '...', 20].
-   `current` and `total` are both 1-based. Always keeps the first
-   and last page visible, plus a small window around the current
-   page, and collapses long runs into a single '...' entry. ── */
 const getPageNumbers = (current: number, total: number): (number | "...")[] => {
   const SIBLINGS = 1; // pages shown on each side of current
   const totalNumbers = SIBLINGS * 2 + 5; // first, last, current, 2 ellipses buffer
@@ -263,7 +202,7 @@ type FormState = {
   name: string; phone: string; email: string;
   idProofType: IdProofType | ""; idProofNumber: string;
   branchId: number | ""; roomId: number | ""; bedId: number | "";
-  advance: string; monthlyRent: string;
+  advance: string; monthlyRent: string; registrationFees: string;
   currentReading: string; acJoinReading: string;
   checkInDate: string; idProofDoc: File | null;
   tenantPhoto: File | null;
@@ -272,6 +211,7 @@ type FormState = {
 const EMPTY_FORM: FormState = {
   name: "", phone: "", email: "", idProofType: "", idProofNumber: "",
   branchId: "", roomId: "", bedId: "", advance: "", monthlyRent: "",
+  registrationFees: "",
   currentReading: "", acJoinReading: "", checkInDate: "", idProofDoc: null,
   tenantPhoto: null,
 };
@@ -293,13 +233,14 @@ type ApproveFormState = {
   bedId: number | "";
   advance: string;
   monthlyRent: string;
+  registrationFees: string;
   joinReading: string;
   acJoinReading: string;
 };
 
 const EMPTY_APPROVE_FORM: ApproveFormState = {
   branchId: "", roomId: "", bedId: "",
-  advance: "", monthlyRent: "", joinReading: "", acJoinReading: "",
+  advance: "", monthlyRent: "", registrationFees: "", joinReading: "", acJoinReading: "",
 };
 
 /* ── IdProofUploadField ─────────────────────────────────────────── */
@@ -495,20 +436,7 @@ const TenantForm = ({
     ? roomsById
     : rooms.filter((r) => getRoomUnitName(r).trim().toLowerCase() === selectedBranchName);
 
-  /* ── NEW: a room only belongs in the picklist if it still has at
-     least one free bed. Without this, a fully-occupied room (like
-     "101" — 2/2 beds taken) stayed selectable in the Room dropdown
-     and only failed afterwards with "No available beds in this
-     room" once you tried to pick a bed. This filters those rooms out
-     up front.
 
-     Exception: if we're editing a tenant who is already assigned to
-     that room, we keep it visible — otherwise you'd be unable to see/
-     edit a tenant's own room just because their own bed makes the
-     room look "full". (Their own bed is separately excluded from the
-     "occupied" check in availableBeds below.) If no bed data has
-     loaded yet for a room (roomBeds.length === 0), we don't hide it —
-     that's a "we don't know yet" state, not "full". ── */
   const roomHasAvailableBed = (room: Room) => {
     if (editTenant && Number(room.id) === Number(editTenant.roomId)) return true;
     const roomBeds = beds.filter((b) => Number(b.roomId) === Number(room.id));
@@ -631,16 +559,6 @@ const TenantForm = ({
               const roomIdNum = Number(v);
               set("roomId")(roomIdNum);
               setRoomSearch("");
-              /* ── NEW: auto-select the first free bed in this room
-                 as soon as it's picked, instead of leaving Bed empty
-                 and forcing a second dropdown interaction. This is
-                 what makes "click Room → Bed number shows up
-                 automatically" happen. Still fully editable — the
-                 Bed dropdown below is not disabled or locked, this
-                 is just a sensible default. Falls back to "" if the
-                 room genuinely has no free bed yet (shouldn't happen
-                 since availableRooms above already filters those
-                 out, but kept as a safety net). ── */
               const roomBeds = beds.filter((b) => Number(b.roomId) === roomIdNum);
               const firstFreeBed = roomBeds.find((b) =>
                 !isBedOccupied(b) || Number(b.id) === Number(editTenant?.bedId)
@@ -689,16 +607,20 @@ const TenantForm = ({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Rent</label>
-          <Input className="rounded-lg" type="number" placeholder="Rent" value={form.monthlyRent} onChange={(e) => set("monthlyRent")(e.target.value)} />
+          <label className="text-xs font-medium text-muted-foreground">Registration Fees</label>
+          <Input className="rounded-lg" type="number" placeholder="Registration Fees" value={form.registrationFees} onChange={(e) => set("registrationFees")(e.target.value)} />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
-          <Input className="rounded-lg" type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
+          <label className="text-xs font-medium text-muted-foreground">Rent</label>
+          <Input className="rounded-lg" type="number" placeholder="Rent" value={form.monthlyRent} onChange={(e) => set("monthlyRent")(e.target.value)} />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
+          <Input className="rounded-lg" type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
+        </div>
         {isAC ? (
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">AC Current Reading (optional)</label>
@@ -706,10 +628,14 @@ const TenantForm = ({
               value={form.acJoinReading} onChange={(e) => set("acJoinReading")(e.target.value)} />
           </div>
         ) : <div />}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Check-in Date</label>
           <Input className="rounded-lg" type="date" value={form.checkInDate} onChange={(e) => set("checkInDate")(e.target.value)} />
         </div>
+        <div />
       </div>
     </div>
   );
@@ -743,10 +669,6 @@ const TenantsPage = () => {
     return own ? [own] : [];
   }, [branches, isWarden, branchId]);
 
-  /* ── CHANGED: `tenants` now holds ONE PAGE only, not the full
-     matching set. `totalElements` tracks the server-reported total
-     so the pagination footer and page-count math no longer depend
-     on having fetched every row. ── */
   const [tenants,       setTenants]       = useState<Tenant[]>([]);
   const [totalElements, setTotalElements] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -759,16 +681,13 @@ const TenantsPage = () => {
   const selectedBranchRef = useRef(selectedBranch);
   useEffect(() => { selectedBranchRef.current = selectedBranch; }, [selectedBranch]);
 
-  /* ── NEW: status filter (All / Active / Checked Out / Absconded).
-     Pending tenants are intentionally NOT one of the options here —
-     they already get their own dedicated "Pending Approvals" table
-     above (via getPendingTenants) and continue to show there
-     regardless of what this filter is set to. This is what lets you
-     actually isolate Checked-Out or Absconded tenants instead of
-     them being mixed in with everyone else across pages. ── */
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const selectedStatusRef = useRef(selectedStatus);
   useEffect(() => { selectedStatusRef.current = selectedStatus; }, [selectedStatus]);
+
+  const [selectedRoom, setSelectedRoom] = useState<string>("all");
+  const selectedRoomRef = useRef(selectedRoom);
+  useEffect(() => { selectedRoomRef.current = selectedRoom; }, [selectedRoom]);
 
   const [addOpen,    setAddOpen]    = useState(false);
   const [editOpen,   setEditOpen]   = useState(false);
@@ -802,11 +721,6 @@ const TenantsPage = () => {
     }
   }, []);
 
-  /* ── NEW: NOTICE PERIOD state ──────────────────────────────────
-     Mirrors the "Pending Approvals" table pattern above — a small
-     dedicated list, fetched separately from the main paginated
-     tenant table, so Admin/Warden always see who's currently in
-     their one-month notice window without hunting through pages. ── */
   const [noticeTenants,       setNoticeTenants]       = useState<Tenant[]>([]);
   const [noticeTotalElements, setNoticeTotalElements] = useState(0);
   const [noticeLoading,       setNoticeLoading]       = useState(false);
@@ -861,16 +775,6 @@ const TenantsPage = () => {
     return () => { if (fraudDebounce.current) clearTimeout(fraudDebounce.current); };
   }, [form.phone, form.idProofNumber, addOpen]);
 
-  /* ── When the Add dialog opens, pre-fill the Branch field:
-     - Warden: always locked to their own branch (unchanged behavior).
-     - Admin/SuperAdmin: pre-fill with whatever branch is currently
-       selected in the "All Branches" filter dropdown on the page
-       (e.g. "Hostel Unit 1"), so opening Check-In while filtered to
-       a branch opens the dialog already scoped to that branch
-       instead of showing an empty Branch field. If the filter is
-       "all", Branch is left empty and picked manually, same as
-       before. Still fully editable in both cases (branchLocked only
-       disables it for wardens). ── */
   useEffect(() => {
     if (!addOpen) return;
     if (form.branchId) return; // already set — don't clobber a manual pick on reopen
@@ -922,27 +826,12 @@ const TenantsPage = () => {
 
   const reloadBeds = useCallback(() => refreshReferenceData(true), [refreshReferenceData]);
 
-  /* ── CHANGED: loadTenants now fetches exactly ONE page from the
-     server per call instead of looping until every page is fetched.
-     This is the fix for the "tenants?page=0" immediately followed by
-     "tenants?page=1" (etc) sequential waterfall seen in DevTools —
-     that pattern is gone entirely now; each call is a single request.
-
-     Accepts an explicit `pg` so callers (pagination buttons, branch
-     filter changes, search) can request a specific page without
-     relying on stale closure state. Defaults to the current `page`
-     state when not provided.
-
-     ── NEW: also accepts an explicit `status`. Defaults to whatever
-     the Status filter dropdown is currently set to
-     (selectedStatusRef.current), so any caller that doesn't care
-     about status (edit/delete/absconded flows, pagination buttons,
-     etc) automatically keeps respecting the active filter. ── */
   const loadTenants = useCallback(async (
     branch?: string,
     pg?: number,
     searchTerm?: string,
-    status?: string
+    status?: string,
+    room?: string
   ) => {
     setLoading(true);
     try {
@@ -950,8 +839,9 @@ const TenantsPage = () => {
       const activePage   = pg ?? page;
       const activeSearch = searchTerm ?? search;
       const activeStatus = status ?? selectedStatusRef.current;
+      const activeRoom   = room ?? selectedRoomRef.current;
       const { content, totalElements: total } =
-        await fetchTenantsPage(activePage, PAGE_SIZE, activeBranch, activeSearch, activeStatus);
+        await fetchTenantsPage(activePage, PAGE_SIZE, activeBranch, activeSearch, activeStatus, activeRoom);
       setTenants(content);
       setTotalElements(total);
     } catch {
@@ -990,43 +880,17 @@ const TenantsPage = () => {
     if (addOpen || editOpen || approveOpen) refreshReferenceData();
   }, [addOpen, editOpen, approveOpen, refreshReferenceData]);
 
-  /* ── CHANGED: branch-filter change resets to page 0 and fetches
-     that single page directly (was previously delegating to the
-     old fetch-everything loadTenants). Also refreshes the
-     notice-period list, since it too is scoped by branch for
-     Admin/SuperAdmin. ── */
-  /* ── CHANGED: replaced the "mountedRef ? skip : mark mounted" guard
-     with a previous-value comparison. The old pattern breaks under
-     React 18 StrictMode's dev-only double-invoke of effects on mount:
-     the 1st invocation sets branchFilterMounted.current = true and
-     returns (as intended), but the 2nd (synthetic) invocation then
-     sees .current already true — nothing distinguishes "a real 2nd
-     run" from "StrictMode's fake 2nd run" — so it falls through and
-     fires loadTenants()/loadNoticeTenants() again for the exact same
-     selectedBranch value. That's one of the three duplicate
-     tenants?page=0 calls you're seeing in the Network tab.
-     Comparing against the *previous value* of selectedBranch instead
-     is idempotent: it only proceeds when selectedBranch has actually
-     changed, so both StrictMode invocations on mount see "no change"
-     and skip, while a genuine branch-filter change later still fires
-     correctly (single invocation, not a mount). ── */
   const prevSelectedBranch = useRef(selectedBranch);
   useEffect(() => {
     if (prevSelectedBranch.current === selectedBranch) return;
     prevSelectedBranch.current = selectedBranch;
+    setSelectedRoom("all");
+    prevSelectedRoom.current = "all";
     setPage(0);
-    loadTenants(selectedBranch, 0);
+    loadTenants(selectedBranch, 0, undefined, undefined, "all");
     loadNoticeTenants();
   }, [selectedBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── NEW: status-filter change resets to page 0 and re-fetches that
-     single page with the chosen status applied server-side. This is
-     the actual mechanism that lets "Checked Out" and "Absconded" be
-     viewed as their own filtered lists instead of being scattered
-     across the "All Tenants" pagination. ── */
-  /* ── CHANGED: same StrictMode-safe previous-value pattern as the
-     branch filter above — see that comment for the full explanation
-     of why the old mountedRef guard double-fired under StrictMode. ── */
   const prevSelectedStatus = useRef(selectedStatus);
   useEffect(() => {
     if (prevSelectedStatus.current === selectedStatus) return;
@@ -1035,18 +899,14 @@ const TenantsPage = () => {
     loadTenants(selectedBranch, 0, undefined, selectedStatus);
   }, [selectedStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── NEW: debounced server-side search. Typing in the search box
-     resets to page 0 and re-fetches from the server after a short
-     pause, instead of filtering an in-memory full list (which no
-     longer exists now that tenants only holds one page). ── */
-  /* ── CHANGED: same StrictMode-safe previous-value pattern as the
-     branch/status filters above. This was the sneakiest of the three:
-     the old mountedRef guard's 2nd (StrictMode) invocation didn't call
-     loadTenants() synchronously — it scheduled a 400ms debounce
-     timeout instead, and since the component isn't really unmounted
-     between the two synthetic invocations, that timeout survived and
-     fired ~400ms after mount, producing a 3rd duplicate
-     tenants?page=0 request with an empty search term. ── */
+  const prevSelectedRoom = useRef(selectedRoom);
+  useEffect(() => {
+    if (prevSelectedRoom.current === selectedRoom) return;
+    prevSelectedRoom.current = selectedRoom;
+    setPage(0);
+    loadTenants(selectedBranch, 0, undefined, selectedStatus, selectedRoom);
+  }, [selectedRoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSearch = useRef(search);
   useEffect(() => {
@@ -1107,6 +967,15 @@ const TenantsPage = () => {
     return "-";
   }, [branches]);
 
+  const roomFilterOptions = useMemo(() => {
+    const scoped = selectedBranch === "all"
+      ? rooms
+      : rooms.filter((r) => Number(getRoomUnitId(r)) === Number(selectedBranch));
+    return [...scoped].sort((a, b) =>
+      a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })
+    );
+  }, [rooms, selectedBranch]);
+
   const extractError = (e: any, fallback: string) =>
     e?.response?.data?.message || e?.response?.data?.error || e?.message || fallback;
 
@@ -1119,9 +988,10 @@ const TenantsPage = () => {
     if (form.idProofNumber) fd.append("idProofNumber", form.idProofNumber);
     if (form.roomId !== "") fd.append("roomId", String(form.roomId));
     if (form.bedId  !== "") fd.append("bedId",  String(form.bedId));
-    fd.append("advance",     form.advance     || "0");
-    fd.append("monthlyRent", form.monthlyRent || "0");
-    fd.append("joinReading", form.currentReading || "0");
+    fd.append("advance",          form.advance          || "0");
+    fd.append("monthlyRent",      form.monthlyRent      || "0");
+    fd.append("registrationFees", form.registrationFees || "0");
+    fd.append("joinReading",      form.currentReading   || "0");
     if (form.acJoinReading) fd.append("acJoinReading", form.acJoinReading);
     if (form.checkInDate)   fd.append("checkInDate", form.checkInDate);
     if (form.idProofDoc)    fd.append("idProofDocument", form.idProofDoc);
@@ -1219,6 +1089,7 @@ const handleAdd = async () => {
         roomId: Number(approveForm.roomId),
         bedId: Number(approveForm.bedId),
         advance: approveForm.advance ? Number(approveForm.advance) : 0,
+        registrationFees: approveForm.registrationFees ? Number(approveForm.registrationFees) : 0,
         monthlyRent: approveForm.monthlyRent ? Number(approveForm.monthlyRent) : 0,
         joinReading: approveForm.joinReading ? Number(approveForm.joinReading) : 0,
         acJoinReading: approveForm.acJoinReading ? Number(approveForm.acJoinReading) : undefined,
@@ -1333,24 +1204,8 @@ const handleAdd = async () => {
   const currentPage1Based = page + 1;
   const pageNumbers = getPageNumbers(currentPage1Based, totalPages);
 
-  /* ── NOTE ON STATS: these previously summarized the FULL tenant
-     list (every page). Now that `tenants` only holds the current
-     page, these numbers would only reflect ~10 rows, which is
-     misleading. Rather than show wrong numbers, this card set is
-     removed from render below. If you want accurate global stats
-     back, the clean fix is a small dedicated endpoint —
-     GET /tenants/stats returning { active, absconded, checkedOut,
-     withDoc } as COUNT() queries — which is a single fast indexed
-     query instead of pulling every tenant row to count them in the
-     browser. Happy to write that endpoint + wire it back in if you
-     want the stat cards restored. ── */
-
   const getInitials = (name?: string) => name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'U';
 
-  /* ── NEW: human-friendly label for raw backend status values.
-     Backend enum values are things like "Active", "Checked_Out",
-     "Absconded", "PENDING" — this just prettifies the underscore
-     ones for display without changing what's sent to/from the API. ── */
   const statusLabel = (s?: string) => {
     if (!s) return "-";
     if (s === "Checked_Out") return "Checked Out";
@@ -1592,13 +1447,6 @@ const handleAdd = async () => {
           </div>
         )}
 
-        {/* ── NEW: Tenants in Notice Period table. Mirrors the
-           "Pending Approvals" pattern above so Admin/Warden always
-           see who's currently serving their one-month notice, with
-           the expected checkout date and remaining days, without
-           needing to hunt through the paginated "All Tenants" table
-           below. Only tenants with an active or completed checkout
-           notice appear here (backed by GET /tenants/notice-period). ── */}
         {noticeTenants.length > 0 && (
           <div className="tn-table-container" style={{ marginBottom: 24 }}>
             <div className="tn-pending-header">
@@ -1705,9 +1553,19 @@ const handleAdd = async () => {
             </SelectContent>
           </Select>
 
-          {/* ── NEW: Status filter. This is what actually lets you pull
-             up "just Checked Out" or "just Absconded" tenants instead
-             of hunting for them across the mixed, paginated list. ── */}
+
+
+           {/* ── NEW: Room filter, alongside Branch and Status. ── */}
+          <Select value={selectedRoom} onValueChange={setSelectedRoom}>
+            <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Rooms" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Rooms</SelectItem>
+              {roomFilterOptions.map((r) => (
+                <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Select value={selectedStatus} onValueChange={setSelectedStatus}>
             <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Status" /></SelectTrigger>
             <SelectContent>
@@ -1718,12 +1576,14 @@ const handleAdd = async () => {
             </SelectContent>
           </Select>
 
+
           <button className="tn-clear-btn" onClick={() => {
             setSearch("");
             setSelectedBranch(isWarden ? String(branchId ?? "all") : "all");
             setSelectedStatus("all");
+            setSelectedRoom("all");
             setPage(0);
-            loadTenants(isWarden ? String(branchId ?? "all") : "all", 0, "", "all");
+            loadTenants(isWarden ? String(branchId ?? "all") : "all", 0, "", "all", "all");
           }}>
             <RefreshCw size={14} className="shrink-0" /> Clear Filters
           </button>
@@ -1818,10 +1678,7 @@ const handleAdd = async () => {
                             }`}></div>
                             {statusLabel(t.status)}
                           </div>
-                          {/* ── NEW: small secondary tag showing notice-period
-                             progress right under the main status badge, so
-                             it's visible without opening the Notice Period
-                             table or the tenant's detail view. ── */}
+
                           {t.checkoutStatus && (
                             <div
                               className="tn-notice-tag"
@@ -1848,6 +1705,7 @@ const handleAdd = async () => {
                                 branchId: isNaN(derivedBranchId) ? "" : derivedBranchId,
                                 roomId: t.roomId, bedId: t.bedId,
                                 advance: String(t.advance), monthlyRent: String(t.monthlyRent),
+                                registrationFees: String(t.registrationFees ?? ""),
                                 currentReading: String(t.joinReading), acJoinReading: String(t.acJoinReading ?? ""),
                                 checkInDate: t.checkInDate, idProofDoc: null, tenantPhoto: null,
                               }});
@@ -1863,12 +1721,7 @@ const handleAdd = async () => {
                                 <ShieldX size={16} color="#f97316" strokeWidth={2} className="shrink-0" />
                               </button>
                             )}
-                            {/* ── NEW: Submit Checkout Notice — only offered
-                               for Active tenants who don't already have an
-                               open notice (checkoutStatus is null). Once a
-                               notice exists, manage it from the Notice
-                               Period table above (Cancel / Proceed to
-                               Checkout) instead of duplicating actions here. ── */}
+
                             {t.status === "Active" && !t.checkoutStatus && (
                               <button className="tn-action-btn" onClick={() => openNoticeDialog(t)} title="Submit Checkout Notice">
                                 <CalendarClock size={16} color="#4f46e5" strokeWidth={2} className="shrink-0" />
@@ -1884,15 +1737,6 @@ const handleAdd = async () => {
             </table>
           </div>
 
-          {/* ── CHANGED: pagination footer now driven entirely by
-             server-reported totalElements/totalPages, not by the
-             length of an in-memory full list. goToPage() fetches the
-             requested page directly rather than slicing locally.
-
-             ── CHANGED (numbered pagination): replaced the previous
-             "current / next only" control with the same windowed
-             numbered pagination (1 2 3 ... N) used on BranchPage and
-             RoomsPage, via getPageNumbers(). ── */}
           <div className="tn-pagination">
             <div className="tn-page-info">
               Showing {totalElements === 0 ? 0 : page * PAGE_SIZE + 1} to {Math.min((page + 1) * PAGE_SIZE, totalElements)} of {totalElements} tenants
@@ -1990,17 +1834,20 @@ const handleAdd = async () => {
                 </div>
 
                 {([
-                  ["Name",           viewTenant.name],
-                  ["Phone",          viewTenant.phone],
-                  ["Email",          viewTenant.email || "-"],
-                  ["Identity Proof", viewTenant.idProofType],
-                  ["ID Number",      viewTenant.idProofNumber],
-                  ["Branch",         viewTenant.branchName ?? branchName(viewTenant.roomId)],
-                  ["Room",           viewTenant.roomNumber ?? roomNo(viewTenant.roomId)],
-                  ["Bed",            String(viewTenant.bedNumber ?? bedNo(viewTenant.bedId))],
-                  ["Status",         statusLabel(viewTenant.status)],
-                  ["Check-in",       viewTenant.checkInDate],
-                  ["Check-out",      viewTenant.checkOutDate ?? "-"],
+                  ["Name",              viewTenant.name],
+                  ["Phone",             viewTenant.phone],
+                  ["Email",             viewTenant.email || "-"],
+                  ["Identity Proof",    viewTenant.idProofType],
+                  ["ID Number",         viewTenant.idProofNumber],
+                  ["Branch",            viewTenant.branchName ?? branchName(viewTenant.roomId)],
+                  ["Room",              viewTenant.roomNumber ?? roomNo(viewTenant.roomId)],
+                  ["Bed",               String(viewTenant.bedNumber ?? bedNo(viewTenant.bedId))],
+                  ["Advance",           `₹${viewTenant.advance ?? 0}`],
+                  ["Registration Fees", `₹${(viewTenant as any).registrationFees ?? 0}`],
+                  ["Monthly Rent",      `₹${viewTenant.monthlyRent ?? 0}`],
+                  ["Status",            statusLabel(viewTenant.status)],
+                  ["Check-in",          viewTenant.checkInDate],
+                  ["Check-out",         viewTenant.checkOutDate ?? "-"],
                 ] as [string, string][]).map(([label, val]) => (
                   <p key={label}><span className="font-medium">{label}:</span> {val}</p>
                 ))}
@@ -2255,24 +2102,32 @@ const handleAdd = async () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Registration Fees</label>
+                  <Input className="rounded-lg" type="number" placeholder="Registration Fees"
+                    value={approveForm.registrationFees}
+                    onChange={(e) => setApproveForm(f => ({ ...f, registrationFees: e.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Monthly Rent</label>
                   <Input className="rounded-lg" type="number" value={approveForm.monthlyRent}
                     onChange={(e) => setApproveForm(f => ({ ...f, monthlyRent: e.target.value }))} />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Join EB Reading</label>
                   <Input className="rounded-lg" type="number" value={approveForm.joinReading}
                     onChange={(e) => setApproveForm(f => ({ ...f, joinReading: e.target.value }))} />
                 </div>
+                {approveRoomHostelType === "AC" ? (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">AC Join Reading</label>
+                    <Input className="rounded-lg" type="number" value={approveForm.acJoinReading}
+                      onChange={(e) => setApproveForm(f => ({ ...f, acJoinReading: e.target.value }))} />
+                  </div>
+                ) : <div />}
               </div>
-
-              {approveRoomHostelType === "AC" && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">AC Join Reading</label>
-                  <Input className="rounded-lg" type="number" value={approveForm.acJoinReading}
-                    onChange={(e) => setApproveForm(f => ({ ...f, acJoinReading: e.target.value }))} />
-                </div>
-              )}
             </div>
 
             <DialogFooter className="mt-4">

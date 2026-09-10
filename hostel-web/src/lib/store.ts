@@ -605,13 +605,21 @@ export const checkoutTenant = async (
   tenantId: number,
   currentReading?: number | null,
   acFinalReading?: number | null,
-  overrideNoticePeriod?: boolean
+  overrideNoticePeriod?: boolean,
+  ebRate?: number | null
 ): Promise<Tenant> => {
   guard();
+  // FIX: the backend now creates the checkout's EB reading itself, inside
+  // the same transaction as the checkout (see TenantServiceImpl.
+  // checkoutTenant). ebRate is passed through so that reading uses the
+  // rate shown on the Checkout screen instead of the service's hardcoded
+  // default. There's no longer a separate addEBReading() call from the
+  // frontend for checkouts — see CheckoutPage.tsx.
   return d(await api.put(`/tenants/${tenantId}/checkout`, {
     finalReading: currentReading ?? null,
     acFinalReading: acFinalReading ?? null,
     overrideNoticePeriod: overrideNoticePeriod ?? false,
+    ebRate: ebRate ?? null,
   }));
 };
 
@@ -628,6 +636,7 @@ export const approveAndAllocateTenant = async (
     roomId: number;
     bedId: number;
     advance?: number;
+    registrationFees?: number;
     monthlyRent?: number;
     joinReading?: number;
     acJoinReading?: number;
@@ -639,6 +648,7 @@ export const approveAndAllocateTenant = async (
     bedId: data.bedId,
     advance: data.advance ?? 0,
     monthlyRent: data.monthlyRent ?? 0,
+    registrationFees: data.registrationFees ?? 0, 
     joinReading: data.joinReading ?? 0,
   };
   if (data.acJoinReading != null) params.acJoinReading = data.acJoinReading;

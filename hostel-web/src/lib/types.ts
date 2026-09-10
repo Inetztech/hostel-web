@@ -489,6 +489,7 @@ export interface Tenant {
   bedId: number;
   advance: number;
   monthlyRent: number;
+  registrationFees?: number;
   joinReading: number;
   checkoutReading: number | null;
   acJoinReading: number | null;
@@ -502,11 +503,9 @@ export interface Tenant {
   branchId?: number | null;
   branchName?: string | null;
 
-  // NEW: room/bed number for display without a second lookup
   roomNumber?: string | null;
   bedNumber?: number | null;
 
-  // NEW: NOTICE PERIOD / CHECKOUT NOTICE fields
   checkoutRequestDate?: string | null;
   noticePeriodStartDate?: string | null;
   noticePeriodEndDate?: string | null;
@@ -531,6 +530,7 @@ export interface TenantRequest {
   acJoinReading: number | null;
   advance: number;
   monthlyRent: number;
+  registrationFees?: number; 
   checkInDate: string;
 }
 
