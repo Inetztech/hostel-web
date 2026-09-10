@@ -1,4 +1,3 @@
-// src/components/RoleGuard.tsx
 import { Navigate } from "react-router-dom";
 import { getUserRole } from "@/lib/auth";
 import { Role } from "@/lib/types";

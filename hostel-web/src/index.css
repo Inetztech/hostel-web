@@ -129,27 +129,3 @@ a:hover {
   opacity: 0.85;
 }
 
-button {
-  border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
-  padding: 0.6em 1.2em;
-
-  font-size: 0.95rem;
-  font-weight: 500;
-  font-family: inherit;
-
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-
-  cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
-}
-
-button:hover {
-  background-color: hsl(var(--primary) / 0.9);
-}
-
-button:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
-}
