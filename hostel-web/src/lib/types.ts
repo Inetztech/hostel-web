@@ -506,6 +506,12 @@ export interface Tenant {
   roomNumber?: string | null;
   bedNumber?: number | null;
 
+  tenantStay?: TenantStay;
+  noOfDays?: number | null;
+  amountPerDay?: number | null;
+  ebAmount?: number | null;
+  totalAmount?: number | null;
+
   checkoutRequestDate?: string | null;
   noticePeriodStartDate?: string | null;
   noticePeriodEndDate?: string | null;
@@ -531,8 +537,14 @@ export interface TenantRequest {
   advance: number;
   monthlyRent: number;
   registrationFees?: number; 
+  tenantStay?: TenantStay;
+  noOfDays?: number;
+  amountPerDay?: number;
+  ebAmount?: number;
   checkInDate: string;
 }
+
+export type TenantStay = "DAILY" | "MONTHLY";
 
 // NEW: body for submitting a tenant checkout notice
 export interface CheckoutNoticeRequest {
@@ -546,6 +558,8 @@ export interface EBReading {
   roomId?: number;
   branchId?: number | null;
   branchName?: string | null;
+  tenantId?: number | null;
+  tenantName?: string | null;
   month: number;
   year: number;
   previousReading: number;

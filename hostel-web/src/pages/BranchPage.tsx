@@ -274,7 +274,7 @@ const BranchPage = () => {
             <Search size={16} color="#94a3b8" />
             <input
               type="text"
-              placeholder="Search branches..."
+              placeholder="Search branches and address..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />

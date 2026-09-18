@@ -606,20 +606,16 @@ export const checkoutTenant = async (
   currentReading?: number | null,
   acFinalReading?: number | null,
   overrideNoticePeriod?: boolean,
-  ebRate?: number | null
+  ebRate?: number | null,
+  ebAmountCharged?: number | null
 ): Promise<Tenant> => {
   guard();
-  // FIX: the backend now creates the checkout's EB reading itself, inside
-  // the same transaction as the checkout (see TenantServiceImpl.
-  // checkoutTenant). ebRate is passed through so that reading uses the
-  // rate shown on the Checkout screen instead of the service's hardcoded
-  // default. There's no longer a separate addEBReading() call from the
-  // frontend for checkouts — see CheckoutPage.tsx.
   return d(await api.put(`/tenants/${tenantId}/checkout`, {
     finalReading: currentReading ?? null,
     acFinalReading: acFinalReading ?? null,
     overrideNoticePeriod: overrideNoticePeriod ?? false,
     ebRate: ebRate ?? null,
+    ebAmountCharged: ebAmountCharged ?? null,
   }));
 };
 

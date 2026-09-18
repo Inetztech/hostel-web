@@ -1101,7 +1101,7 @@ const RoomsPage = () => {
                 <Search size={16} color="#94a3b8" />
                 <input
                   type="text"
-                  placeholder="Search rooms..."
+                  placeholder="Search rooms or branches..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                 />
