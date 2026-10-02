@@ -67,6 +67,8 @@ function HostelCardImage({ images, alt, fallback }: HostelCardImageProps) {
       <img
         src={src}
         alt={alt}
+        loading="lazy"
+        decoding="async"
         onClick={hasMultiple ? goNext : undefined}
         onError={() =>
           setErroredSlides((prev) => (prev[safeIndex] ? prev : { ...prev, [safeIndex]: true }))
@@ -819,48 +821,51 @@ export default function HomePage() {
       {/* Footer */}
       <footer id="contact" className="bg-slate-900 text-white pt-14 pb-8 px-6 border-t border-slate-800">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-10 pb-12 border-b border-slate-800">
-            {/* Brand column */}
-            <div className="lg:col-span-1">
-              <h4 className="text-lg font-black tracking-tight text-white">
-                Brindhavanam PG Hostels
-              </h4>
-              <p className="text-xs text-slate-400 mt-2 font-normal leading-relaxed">
-                Providing premier corporate and student accommodation solutions.
-              </p>
-            </div>
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-10 pb-12 border-b border-slate-800">
+            {/* Brand + dynamic location columns, grouped on the left */}
+            <div className="flex flex-col sm:flex-row flex-wrap gap-10">
+              {/* Brand column */}
+              <div className="sm:min-w-[200px]">
+                <h4 className="text-lg font-black tracking-tight text-white">
+                  Brindhavanam PG Hostels
+                </h4>
+                <p className="text-xs text-slate-400 mt-2 font-normal leading-relaxed">
+                  Providing premier corporate and student accommodation solutions.
+                </p>
+              </div>
 
-            {/* Dynamic location columns — generated from live hostel data */}
-            {footerLocationColumns.map(({ location, types }) => (
-              <div key={location}>
-                <h5 className="text-xs font-extrabold uppercase tracking-widest text-indigo-400 mb-4">
-                  {location}
-                </h5>
-                <ul className="space-y-2.5">
-                  <li>
-                    <button
-                      onClick={() => handleFooterLinkClick(location)}
-                      className="text-xs text-slate-400 hover:text-white transition-colors text-left"
-                    >
-                      All properties in {location}
-                    </button>
-                  </li>
-                  {types.map((type) => (
-                    <li key={type}>
+              {/* Dynamic location columns — generated from live hostel data */}
+              {footerLocationColumns.map(({ location, types }) => (
+                <div key={location} className="sm:min-w-[140px]">
+                  <h5 className="text-xs font-extrabold uppercase tracking-widest text-indigo-400 mb-4">
+                    {location}
+                  </h5>
+                  <ul className="space-y-2.5">
+                    <li>
                       <button
-                        onClick={() => handleFooterLinkClick(location, type)}
+                        onClick={() => handleFooterLinkClick(location)}
                         className="text-xs text-slate-400 hover:text-white transition-colors text-left"
                       >
-                        {TYPE_LABELS[type] ?? type} in {location}
+                        All properties in {location}
                       </button>
                     </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+                    {types.map((type) => (
+                      <li key={type}>
+                        <button
+                          onClick={() => handleFooterLinkClick(location, type)}
+                          className="text-xs text-slate-400 hover:text-white transition-colors text-left"
+                        >
+                          {TYPE_LABELS[type] ?? type} in {location}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
 
-            {/* Static support column */}
-            <div>
+            {/* Static support column — pushed to the far right */}
+            <div className="lg:text-right">
               <h5 className="text-xs font-extrabold uppercase tracking-widest text-indigo-400 mb-4">
                 Support
               </h5>
@@ -884,7 +889,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="pt-6 text-xs text-slate-500 tracking-wider font-medium text-center sm:text-left">
+          <div className="pt-6 text-xs text-slate-500 tracking-wider font-medium text-center sm:text-right">
             &copy; {new Date().getFullYear()} Brindhavanam Hostels. All rights reserved.
           </div>
         </div>

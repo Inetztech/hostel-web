@@ -196,7 +196,7 @@ const ComplaintPage = () => {
       toast.success("Complaint submitted");
       closeComplaintDialog();
       await loadComplaints();
-    } catch (err) {
+    } catch {
       toast.error("Failed to submit complaint");
     } finally {
       setLoading(false);
@@ -211,7 +211,7 @@ const ComplaintPage = () => {
       await updateComplaintStatus(id, status);
       setComplaints((prev) => prev.map((c) => (c.id === id ? { ...c, status } : c)));
       toast.success("Status updated");
-    } catch (err) {
+    } catch {
       toast.error("Failed to update status");
       loadComplaints();
     } finally {

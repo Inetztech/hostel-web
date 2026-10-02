@@ -20,7 +20,6 @@ import {
   History,
   Building2,
   Utensils,
-  AlertCircle,
 } from "lucide-react";
 
 /* =====================================================

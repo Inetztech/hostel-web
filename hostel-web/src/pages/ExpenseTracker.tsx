@@ -4,21 +4,13 @@ import {
   Plus,
   Trash2,
   Edit,
-  TrendingDown,
   FileSpreadsheet,
   Search,
   X,
   Filter,
   RotateCcw,
-  Eye,
   Columns,
   ArrowDown,
-  ArrowUp,
-  LayoutGrid,
-  Scissors,
-  MoreVertical,
-  Wallet,
-  LineChart,
   Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -36,14 +28,14 @@ import {
   getBranchId,
   getMyProfile,
   fetchAllPages,
-  getRooms,
+  fetchBranches,
   fetchExpenses,
   createExpense,
   updateExpense,
   deleteExpense,
   Expense,
 } from "@/lib/store";
-import { Room, MONTHS } from "@/lib/types";
+import { Branch, MONTHS } from "@/lib/types";
 import { ExpenseDialogModal } from "../components/expense/ExpenseDialogModal";
 import { ExpenseExportModal } from "../components/expense/ExpenseExportModal";
 import {
@@ -73,7 +65,7 @@ const ExpensePage = () => {
   const role = useMemo(() => getUserRole()?.toUpperCase(), []);
   const branchId = useMemo(() => getBranchId(), []);
 
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [userId, setUserId] = useState<number>(0);
 
@@ -109,23 +101,19 @@ const ExpensePage = () => {
       const profile = await getMyProfile().catch(() => null);
       if (profile?.id) setUserId(Number(profile.id));
 
-      // ── FIX: previously this called fetchExpenses() twice per load
-      // (once for `content`, once again just to compute `.length` for
-      // `totalElements`, both wrapped in fetchAllPages). fetchExpenses()
-      // hits GET /expense/getAll, which already returns the full,
-      // unpaginated list in one response — so fetchAllPages added no
-      // value here and the second call was pure duplication, visible as
-      // two identical "getAll" requests fired back-to-back in the
-      // Network tab. Now it's a single direct call. ──
-      const [roomList, expenseList] = await Promise.all([
-        fetchAllPages<Room>(getRooms).catch(() => []),
+      // The backend now returns ONLY the expenses that belong to the logged-in
+      // admin's / warden's own branches, so no client-side tenant filtering is
+      // needed here. Branches come from /units (not from rooms) so that a
+      // branch with no rooms yet still resolves to its real name.
+      const [branchList, expenseList] = await Promise.all([
+        fetchAllPages<Branch>((pg, size) => fetchBranches(pg, size)).catch(() => []),
         fetchExpenses().catch(() => []),
       ]);
 
-      setRooms(
+      setBranches(
         role === "ADMIN"
-          ? roomList
-          : roomList.filter((r) => String(r.unitId) === String(branchId)),
+          ? branchList
+          : branchList.filter((b) => String(b.id) === String(branchId)),
       );
       setExpenses(expenseList);
     } catch {
@@ -139,8 +127,9 @@ const ExpensePage = () => {
     loadData();
   }, [loadData]);
 
-  // ── Branch is chosen inside the modal itself, so it's accepted as a
-  // param here instead of falling back to the page-level filter.
+  // Branch is chosen inside the modal itself, so it's accepted as a param.
+  // `createdBy` is only sent to satisfy the request type; the server always
+  // overwrites it with the authenticated user's id.
   const handleSaveExpense = useCallback(
     async (
       description: string,
@@ -150,14 +139,13 @@ const ExpensePage = () => {
       branchId: number,
     ) => {
       try {
-        const activeUserId = userId || (role === "WARDEN" ? 2 : 1);
         const payload = {
           description,
           amount,
           category,
           expenseDate,
           branchId,
-          createdBy: activeUserId,
+          createdBy: userId,
         };
 
         if (editingExpense) {
@@ -172,7 +160,7 @@ const ExpensePage = () => {
         toast.error(err?.response?.data?.message || "Operation failed.");
       }
     },
-    [userId, role, editingExpense, loadData],
+    [userId, editingExpense, loadData],
   );
 
   const handleDelete = useCallback(
@@ -218,16 +206,8 @@ const ExpensePage = () => {
   }, [expenses, month, year, selectedBranch, search, role, branchId]);
 
   const branchList = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          rooms.map((r) => [
-            r.unitId,
-            { id: r.unitId, name: r.unitName || `Branch ${r.unitId}` },
-          ]),
-        ).values(),
-      ),
-    [rooms],
+    () => branches.map((b) => ({ id: b.id, name: b.unitName || `Branch ${b.id}` })),
+    [branches],
   );
 
   // Quick lookup: branchId -> branch name, for the table's Branch column

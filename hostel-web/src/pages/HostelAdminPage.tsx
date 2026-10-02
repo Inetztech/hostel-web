@@ -220,11 +220,6 @@ function TotalPricePreview({ totalBeds, bedPrice, durationMonths }: {
   );
 }
 
-// Multi-photo picker used in the Add Hostel modal. Enforces a minimum
-// photo count via the caption under the file input (styled
-// red/below-min, green/met, matching the existing bed-limit floor
-// caption pattern already used in the Edit modal) and renders a
-// thumbnail grid with per-photo removal.
 function HostelPhotosPicker({
   photos, onChange,
 }: { photos: File[]; onChange: (files: File[]) => void }) {
@@ -430,10 +425,6 @@ const HostelAdminPage = () => {
       }, form.document);
       const created = await createHostelWithAdmin(payload);
 
-      // Upload the gallery photos to the hostel that was just created.
-      // A failure here doesn't roll back hostel creation — the hostel and
-      // admin already exist — so it's surfaced as its own toast rather than
-      // thrown, and the admin can add photos later from Edit.
       try {
         await uploadHostelImages((created as any).id, form.photos);
       } catch {
@@ -474,18 +465,7 @@ const HostelAdminPage = () => {
     if (!editForm.adminName.trim()) { toast.error("Admin name required"); return; }
     if (!/^\d{10}$/.test(editForm.adminPhone)) { toast.error("Admin phone must be 10 digits"); return; }
     if (!editForm.adminEmail.trim()) { toast.error("Admin email required"); return; }
-    // Guard: the bed limit can go UP (52 -> 55) or stay the same, but
-    // never DOWN below what's already been committed for this hostel.
-    // "Already committed" is the larger of two numbers:
-    //   - editHostel.capacityBeds — the bed limit/subscription figure
-    //     that was already saved for this hostel (e.g. set to 52 when
-    //     it was created), even if no rooms have been built yet.
-    //   - editHostel.totalBeds — the ACTUAL beds physically created
-    //     across this hostel's rooms, in case that ever exceeds the
-    //     saved capacity figure.
-    // Using just one of these was the bug: checking only actual room
-    // beds let 52 -> 50 through whenever no rooms existed yet, even
-    // though the hostel's own bed limit was already 52.
+
     const existingBedFloor = Math.max(editHostel.capacityBeds || 0, editHostel.totalBeds || 0);
     if (existingBedFloor > 0 && Number(editForm.totalBeds) < existingBedFloor) {
       toast.error(
@@ -1017,14 +997,14 @@ const HostelAdminPage = () => {
                 <div className="h-card-inputs">
                   <div className="h-full">
                     <Input
-                      placeholder="Hostel Name"
+                      placeholder="Hostel Name *"
                       value={form.name}
                       onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                     />
                   </div>
                   <div>
                     <Input
-                      placeholder="City"
+                      placeholder="City *"
                       value={form.city}
                       onChange={e => setForm(p => ({ ...p, city: e.target.value }))}
                     />
@@ -1038,7 +1018,7 @@ const HostelAdminPage = () => {
                   </div>
                   <div className="h-full">
                     <Input
-                      placeholder="Address"
+                      placeholder="Address *"
                       value={form.address}
                       onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
                     />
@@ -1074,7 +1054,7 @@ const HostelAdminPage = () => {
               <div className="h-form-card h-form-card-compact">
                 <div className="h-card-header">
                   <ImageIcon size={14} className="text-blue-600" />
-                  <span>Hostel Images</span>
+                  <span>Hostel Images *</span>
                 </div>
                 <div className="h-card-inputs">
                   <div className="h-full">
@@ -1098,14 +1078,14 @@ const HostelAdminPage = () => {
                 <div className="h-card-inputs">
                   <div className="h-full">
                     <Input
-                      placeholder="Admin Name"
+                      placeholder="Admin Name *"
                       value={form.adminName}
                       onChange={e => setForm(p => ({ ...p, adminName: e.target.value }))}
                     />
                   </div>
                   <div className="h-full">
                     <Input
-                      placeholder="Admin Phone (10 digits)"
+                      placeholder="Admin Phone (10 digits) *"
                       maxLength={10}
                       value={form.adminPhone}
                       onChange={e => setForm(p => ({ ...p, adminPhone: e.target.value.replace(/\D/g, "") }))}
@@ -1114,7 +1094,7 @@ const HostelAdminPage = () => {
                   <div className="h-full">
                     <Input
                       type="email"
-                      placeholder="Admin Email"
+                      placeholder="Admin Email *"
                       value={form.adminEmail}
                       onChange={e => setForm(p => ({ ...p, adminEmail: e.target.value }))}
                     />
@@ -1172,14 +1152,14 @@ const HostelAdminPage = () => {
                 <div className="h-card-inputs">
                   <div className="h-full">
                     <Input
-                      placeholder="Hostel Name"
+                      placeholder="Hostel Name *"
                       value={editForm.name}
                       onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
                     />
                   </div>
                   <div>
                     <Input
-                      placeholder="City"
+                      placeholder="City *"
                       value={editForm.city}
                       onChange={e => setEditForm(p => ({ ...p, city: e.target.value }))}
                     />
@@ -1204,7 +1184,7 @@ const HostelAdminPage = () => {
                   </div>
                   <div className="h-full">
                     <Input
-                      placeholder="Address"
+                      placeholder="Address *"
                       value={editForm.address}
                       onChange={e => setEditForm(p => ({ ...p, address: e.target.value }))}
                     />
@@ -1277,14 +1257,14 @@ const HostelAdminPage = () => {
                 <div className="h-card-inputs">
                   <div>
                     <Input
-                      placeholder="Admin Name"
+                      placeholder="Admin Name *"
                       value={editForm.adminName}
                       onChange={e => setEditForm(p => ({ ...p, adminName: e.target.value }))}
                     />
                   </div>
                   <div>
                     <Input
-                      placeholder="Admin Phone"
+                      placeholder="Admin Phone *"
                       maxLength={10}
                       value={editForm.adminPhone}
                       onChange={e => setEditForm(p => ({ ...p, adminPhone: e.target.value.replace(/\D/g, "") }))}
@@ -1293,7 +1273,7 @@ const HostelAdminPage = () => {
                   <div className="h-full">
                     <Input
                       type="email"
-                      placeholder="Admin Email"
+                      placeholder="Admin Email *"
                       value={editForm.adminEmail}
                       onChange={e => setEditForm(p => ({ ...p, adminEmail: e.target.value }))}
                     />

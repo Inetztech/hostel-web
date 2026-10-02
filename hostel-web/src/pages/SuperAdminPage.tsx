@@ -768,7 +768,7 @@ useEffect(() => {
             {[
               { label: "Full Name",     key: "name",  type: "text",  placeholder: "John Doe" },
               { label: "Phone Number",  key: "phone", type: "tel",   placeholder: "9876543210" },
-              { label: "Email Address", key: "email", type: "email", placeholder: "name@example.com" },
+              { label: "Email Address", key: "email", type: "email", placeholder: "name@gmail.com" },
             ].map(f => (
               <div key={f.key} className="space-y-1">
                 <label className="text-xs font-semibold text-slate-600">{f.label}</label>

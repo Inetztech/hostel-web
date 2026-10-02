@@ -1,7 +1,5 @@
-import { useState, useCallback, memo } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { UserPlus, Calendar, Clock, Phone, UserCheck, Shield } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,130 +7,174 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface VisitorRequestModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (visitorName: string, visitorPhone: string, relation: string, visitDate: string, expectedInTime: string) => void;
+  onSubmit: (
+    visitorName: string,
+    visitorPhone: string,
+    relation: string,
+    visitDate: string,
+    expectedInTime: string
+  ) => void | Promise<void>;
 }
 
-export const VisitorRequestModal = memo(({
-  open,
-  onOpenChange,
-  onSubmit,
-}: VisitorRequestModalProps) => {
-  const [visitorName, setVisitorName] = useState("");
-  const [visitorPhone, setVisitorPhone] = useState("");
+const RELATIONS = ["Friend", "Parent", "Sibling", "Relative", "Guardian", "Colleague", "Other"];
+
+const todayISO = () => new Date().toISOString().split("T")[0];
+
+/* Shared look: matches the "Add Branch" dialog inputs */
+const inputCls =
+  "h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 " +
+  "placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/30 " +
+  "transition-colors";
+
+const Label = ({ text, required }: { text: string; required?: boolean }) => (
+  <label className="mb-1.5 block text-sm font-semibold text-slate-900">
+    {text} {required && <span className="text-red-500">*</span>}
+  </label>
+);
+
+export const VisitorRequestModal = ({ open, onOpenChange, onSubmit }: VisitorRequestModalProps) => {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [relation, setRelation] = useState("");
-  const [visitDate, setVisitDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [expectedInTime, setExpectedInTime] = useState("10:00");
+  const [visitDate, setVisitDate] = useState(todayISO());
+  const [inTime, setInTime] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (!visitorName.trim()) return toast.error("Please enter visitor name.");
-    if (!visitorPhone.trim() || visitorPhone.length < 10) return toast.error("Provide a valid phone number.");
-    if (!relation.trim()) return toast.error("Specify relationship (e.g. Parent, Friend).");
-    if (!visitDate) return toast.error("Select visit date.");
-    if (!expectedInTime) return toast.error("Specify expected in-time.");
+  // Fresh form every time the dialog opens
+  useEffect(() => {
+    if (open) {
+      setName("");
+      setPhone("");
+      setRelation("");
+      setVisitDate(todayISO());
+      setInTime("");
+      setSubmitting(false);
+    }
+  }, [open]);
 
-    onSubmit(visitorName, visitorPhone, relation, visitDate, expectedInTime);
-    onOpenChange(false);
-    setVisitorName("");
-    setVisitorPhone("");
-    setRelation("");
-  }, [visitorName, visitorPhone, relation, visitDate, expectedInTime, onSubmit, onOpenChange]);
+  const handleSubmit = async () => {
+    if (!name.trim()) return toast.error("Visitor name is required.");
+    if (!/^\d{10}$/.test(phone)) return toast.error("Enter a valid 10-digit phone number.");
+    if (!relation) return toast.error("Please select the relation.");
+    if (!visitDate) return toast.error("Visit date is required.");
+    if (!inTime) return toast.error("Expected arrival time is required.");
+
+    setSubmitting(true);
+    try {
+      await onSubmit(name.trim(), phone, relation, visitDate, inTime);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <UserPlus className="h-5 w-5 text-primary" /> Request Visitor Entry
-          </DialogTitle>
-          <DialogDescription className="text-xs">
-            Provide details of your visitor for warden approval.
+      <DialogContent className="max-w-[620px] rounded-2xl border-0 bg-white p-8 shadow-2xl">
+        <DialogHeader className="space-y-1 text-left">
+          <DialogTitle className="text-xl font-bold text-slate-900">Request Visitor Entry</DialogTitle>
+          <DialogDescription className="text-sm text-slate-500">
+            Submit a visitor entry request for <span className="font-semibold text-slate-600">approval</span>
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-3.5 pt-2">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <UserCheck className="h-3.5 w-3.5" /> Visitor Full Name
-            </label>
+        <div className="mt-2 space-y-5">
+          <div>
+            <Label text="Visitor Name" required />
             <input
               type="text"
-              placeholder="e.g. Ramesh Kumar"
-              value={visitorName}
-              onChange={(e) => setVisitorName(e.target.value)}
-              className="border rounded-md px-3 h-9 text-xs w-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Rahul Kumar"
+              className={inputCls}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                <Phone className="h-3.5 w-3.5" /> Phone Number
-              </label>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <div>
+              <Label text="Contact Phone" required />
               <input
                 type="tel"
-                placeholder="10-digit phone"
-                value={visitorPhone}
-                onChange={(e) => setVisitorPhone(e.target.value)}
-                className="border rounded-md px-3 h-9 text-xs w-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                inputMode="numeric"
+                maxLength={10}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                placeholder="Contact Phone (10 digits)"
+                className={inputCls}
               />
             </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                <Shield className="h-3.5 w-3.5" /> Relation
-              </label>
-              <input
-                type="text"
-                placeholder="Father / Brother / Friend"
-                value={relation}
-                onChange={(e) => setRelation(e.target.value)}
-                className="border rounded-md px-3 h-9 text-xs w-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
+            <div>
+              <Label text="Relation" required />
+              <Select value={relation} onValueChange={setRelation}>
+                <SelectTrigger className={inputCls + " justify-between"}>
+                  <SelectValue placeholder="Select relation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {RELATIONS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" /> Visit Date
-              </label>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <div>
+              <Label text="Visit Date" required />
               <input
                 type="date"
+                min={todayISO()}
                 value={visitDate}
                 onChange={(e) => setVisitDate(e.target.value)}
-                className="border rounded-md px-3 h-9 text-xs w-full bg-background focus:outline-none"
+                className={inputCls}
               />
             </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                <Clock className="h-3.5 w-3.5" /> Expected In-Time
-              </label>
+            <div>
+              <Label text="Expected In Time" required />
               <input
                 type="time"
-                value={expectedInTime}
-                onChange={(e) => setExpectedInTime(e.target.value)}
-                className="border rounded-md px-3 h-9 text-xs w-full bg-background focus:outline-none"
+                value={inTime}
+                onChange={(e) => setInTime(e.target.value)}
+                className={inputCls}
               />
             </div>
           </div>
+        </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t">
-            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm">
-              Submit Request
-            </Button>
-          </div>
-        </form>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="h-10 rounded-lg bg-[#5200FF] px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#4300d1] disabled:opacity-60"
+          >
+            {submitting ? "Submitting..." : "Submit Request"}
+          </button>
+        </div>
       </DialogContent>
     </Dialog>
   );
-});
-VisitorRequestModal.displayName = "VisitorRequestModal";
+};
+
+export default VisitorRequestModal;

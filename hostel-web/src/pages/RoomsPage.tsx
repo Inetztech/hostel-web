@@ -63,6 +63,22 @@ const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
   return undefined;
 };
 
+// Spring's MethodArgumentNotValidException can come back in a few shapes depending on how
+// the global exception handler formats it. Try the common ones before giving up to `fallback`.
+const extractApiError = (e: any, fallback: string): string => {
+  const data = e?.response?.data;
+  if (!data) return fallback;
+  if (typeof data.message === "string" && data.message.trim()) return data.message;
+  if (Array.isArray(data.errors) && data.errors.length) {
+    return data.errors
+      .map((x: any) => (typeof x === "string" ? x : x.defaultMessage || x.message))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof data.error === "string" && data.error.trim()) return data.error;
+  return fallback;
+};
+
 const getPageNumbers = (current: number, total: number): (number | "...")[] => {
   const SIBLINGS = 1; // pages shown on each side of current
   const totalNumbers = SIBLINGS * 2 + 5; // first, last, current, 2 ellipses buffer
@@ -460,7 +476,6 @@ const RoomsPage = () => {
     }
 
     window.history.replaceState({}, document.title);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supporting, location.state, isWarden, isAdmin]);
 
   /* ================= DEBOUNCE SEARCH INPUT ================= */
@@ -593,8 +608,12 @@ const RoomsPage = () => {
         toast.error("Room number and room type are required");
         return;
       }
+      const desiredBeds = Number(totalBeds) || 0;
+      if (desiredBeds < 1) {
+        toast.error("Total beds must be at least 1");
+        return;
+      }
       try {
-        const desiredBeds = Number(totalBeds) || 0;
         const res = await createRoom({
           roomNumber,
           hostelType: hostelType as HostelType,
@@ -618,7 +637,7 @@ const RoomsPage = () => {
           },
         });
       } catch (e: any) {
-        showBedLimitToast(e, navigate, "Create failed");
+        showBedLimitToast(e, navigate, extractApiError(e, "Create failed"));
       }
       return;
     }
@@ -627,13 +646,37 @@ const RoomsPage = () => {
       toast.error("Select an existing flat or enter a new flat number");
       return;
     }
-    const validEntries = flatRoomEntries.filter(
-      e => e.suffix.trim() && e.hostelType && Number(e.totalBeds) > 0
-    );
-    if (validEntries.length === 0) {
+
+    // A row counts as "blank" only if the user hasn't touched it at all — that's fine
+    // to ignore (e.g. an unused extra row from "Add Another Room"). But a row with
+    // SOME fields filled and others missing must not be silently dropped, or the
+    // user ends up with fewer rooms than they thought they were saving.
+    const isEntryBlank = (e: RoomEntryValue) =>
+      !e.suffix.trim() && !e.hostelType && e.totalBeds.trim() === "";
+    const isEntryComplete = (e: RoomEntryValue) =>
+      !!e.suffix.trim() && !!e.hostelType && Number(e.totalBeds) > 0;
+
+    const touchedEntries = flatRoomEntries.filter(e => !isEntryBlank(e));
+    if (touchedEntries.length === 0) {
       toast.error("Add at least one room with a name, room type, and bed count");
       return;
     }
+
+    const incomplete = touchedEntries.filter(e => !isEntryComplete(e));
+    if (incomplete.length > 0) {
+      const details = incomplete.map(e => {
+        const label = e.suffix.trim() || `Room ${flatRoomEntries.indexOf(e) + 1}`;
+        const missing: string[] = [];
+        if (!e.suffix.trim()) missing.push("name");
+        if (!e.hostelType) missing.push("room type");
+        if (!(Number(e.totalBeds) > 0)) missing.push("bed count");
+        return `${label} (missing ${missing.join(", ")})`;
+      });
+      toast.error(`Complete these rooms before saving: ${details.join("; ")}`);
+      return;
+    }
+
+    const validEntries = touchedEntries;
 
     try {
       const resolvedFlatId = await resolveFlatId(flatAssign, Number(effectiveUnitId));
@@ -663,11 +706,11 @@ const RoomsPage = () => {
           if (isBedLimitError(innerErr)) {
             // Limit hit mid-batch — show the "Add Beds" toast once and stop;
             // every remaining entry in this batch would fail the same way.
-            showBedLimitToast(innerErr, navigate, "Create failed");
+            showBedLimitToast(innerErr, navigate, extractApiError(innerErr, "Create failed"));
             break;
           }
           failedNames.push(
-            `${roomNumberToCreate} (${innerErr?.response?.data?.message || "unknown error"})`
+            `${roomNumberToCreate} (${extractApiError(innerErr, "unknown error")})`
           );
         }
       }
@@ -684,19 +727,27 @@ const RoomsPage = () => {
         loadRooms();
       }
     } catch (e: any) {
-      showBedLimitToast(e, navigate, "Create failed");
+      showBedLimitToast(e, navigate, extractApiError(e, "Create failed"));
     }
   };
 
   const handleEdit = async () => {
     if (!editRoomData) return;
+    if (!editRoomData.roomNumber?.trim() || !editRoomData.hostelType) {
+      toast.error("Room number and room type are required");
+      return;
+    }
+    const desiredBeds = Number(editRoomData.totalBeds) || 0;
+    if (desiredBeds < 1) {
+      toast.error("Total beds must be at least 1");
+      return;
+    }
     if (editFlatAssign.mode === "flat" && !editFlatAssign.flatId && !editFlatAssign.newFlatNumber.trim()) {
       toast.error("Select an existing flat or enter a new flat number");
       return;
     }
     try {
       const resolvedFlatId = await resolveFlatId(editFlatAssign, Number(editRoomData.unitId));
-      const desiredBeds = Number(editRoomData.totalBeds) || 0;
       await editRoom(editRoomData.id, {
         ...editRoomData,
         totalBeds:  desiredBeds,
@@ -709,7 +760,7 @@ const RoomsPage = () => {
       loadRooms();
     } catch (e: any) {
       // Bumping totalBeds on an existing room can also push past the cap.
-      showBedLimitToast(e, navigate, "Update failed");
+      showBedLimitToast(e, navigate, extractApiError(e, "Update failed"));
     }
   };
 
@@ -719,7 +770,7 @@ const RoomsPage = () => {
       toast.success("Room deleted");
       loadRooms();
     } catch (e: any) {
-      toast.error(e?.response?.data?.message || "Delete failed");
+      toast.error(extractApiError(e, "Delete failed"));
     }
   };
 

@@ -33,6 +33,9 @@ const typeMeta: Record<NotificationType, { icon: any; color: string; bg: string 
   TICKET_REPLY:         { icon: TicketIcon,          color: "text-blue-500",    bg: "bg-blue-50" },
   TICKET_STATUS_UPDATE: { icon: TicketIcon,          color: "text-amber-500",   bg: "bg-amber-50" },
   BED_LIMIT_DECISION:   { icon: BedDouble,           color: "text-emerald-500", bg: "bg-emerald-50" },
+  CHECKOUT_NOTICE_SUBMITTED: { icon: LogOutIcon,      color: "text-orange-500",  bg: "bg-orange-50" },
+  CHECKOUT_NOTICE_COMPLETED: { icon: CheckCheck,      color: "text-emerald-500", bg: "bg-emerald-50" },
+  SUNDAY_MEAL_CONFIRMATION:  { icon: UtensilsCrossed, color: "text-orange-500",  bg: "bg-orange-50" },
 };
 
 /** Lightweight relative time, e.g. "5m ago", "3h ago", "2d ago". */
@@ -112,6 +115,7 @@ export default function NotificationBell() {
     setUnread((u) => Math.max(0, u - 1));
     try {
       await markNotificationAsRead(n.id);
+      loadUnreadCount(); // confirm badge with server
     } catch {
       loadList(); // resync on failure
     }
@@ -123,6 +127,7 @@ export default function NotificationBell() {
     setUnread(0);
     try {
       await markAllNotificationsAsRead();
+      loadUnreadCount(); // confirm badge with server
     } catch {
       loadList();
     }
@@ -135,6 +140,7 @@ export default function NotificationBell() {
     if (wasUnread) setUnread((u) => Math.max(0, u - 1));
     try {
       await deleteNotification(id);
+      loadUnreadCount(); // confirm badge with server
     } catch {
       loadList();
     }

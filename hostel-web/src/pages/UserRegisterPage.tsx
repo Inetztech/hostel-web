@@ -37,7 +37,7 @@ import {
 import { toast } from "sonner";
 import {
   Users,
-  Search, Download, Plus, Pencil, Trash2, ChevronDown, RefreshCw, ChevronLeft, ChevronRight,
+  Search, Plus, Pencil, Trash2, RefreshCw, ChevronLeft, ChevronRight,
   Loader2, Building2, IndianRupee, Zap, FileText, Settings,
 } from "lucide-react";
 
@@ -210,7 +210,6 @@ const UserRegisterPage = () => {
     // Clear the navigation state after consuming it so a refresh or
     // back/forward navigation doesn't keep re-opening the dialog.
     window.history.replaceState({}, document.title);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
   /* ================= PERMISSIONS — CREATE DIALOG ================= */

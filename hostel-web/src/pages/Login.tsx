@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { getUserRole } from "@/lib/auth";
 import { loginUser } from "@/lib/store";
@@ -62,11 +62,17 @@ export default function Login() {
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+        html, body {
+          height: 100%;
+          overflow: hidden;
+        }
+
         .pg-root {
-          min-height: 100vh;
+          height: 100vh;
           display: flex;
           font-family: 'Outfit', sans-serif;
           background: #f5ede4;
+          overflow: hidden;
         }
 
         .pg-left {
@@ -229,13 +235,14 @@ export default function Login() {
 
         .pg-right {
           width: 460px;
-          min-height: 100vh;
+          height: 100vh;
           display: flex;
           flex-direction: column;
           justify-content: center;
           background: #f5ede4;
           padding: 60px 52px;
           position: relative;
+          overflow: hidden;
         }
 
         .pg-right::before {
@@ -527,8 +534,15 @@ export default function Login() {
           .pg-left { display: none; }
           .pg-right {
             width: 100%;
-            padding: 48px 32px;
+            padding: 32px 24px;
+            justify-content: flex-start;
+            overflow-y: auto;
           }
+          .form-title { font-size: 34px; }
+          .form-subtitle { margin-bottom: 26px; }
+          .field-group { margin-bottom: 16px; }
+          .form-divider { margin: 20px 0 0; }
+          .form-footer { margin-top: 14px; }
         }
       `}</style>
 
@@ -573,15 +587,15 @@ export default function Login() {
             <form onSubmit={handleLogin}>
               <div className="field-group">
                 <label className="field-label" htmlFor="email">
-                  <span className="field-label-dot" />
                   Email Address
+                  <span className="field-label-dot" />
                 </label>
                 <div className="field-input-wrap">
                   <input
                     className="field-input"
                     id="email"
                     type="email"
-                    placeholder="name@example.com"
+                    placeholder="name@gmail.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="email"
@@ -592,8 +606,8 @@ export default function Login() {
 
               <div className="field-group">
                 <label className="field-label" htmlFor="password">
-                  <span className="field-label-dot" />
                   Password
+                  <span className="field-label-dot" />
                 </label>
                 <div className="field-input-wrap">
                   <input
@@ -617,6 +631,19 @@ export default function Login() {
                     {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
                 </div>
+                <div style={{ textAlign: "right", marginTop: "10px" }}>
+                  <Link
+                    to="/forgot-password"
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      color: "#c47a45",
+                      textDecoration: "none",
+                    }}
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
               </div>
 
               {error && (
@@ -637,7 +664,6 @@ export default function Login() {
                     ) : (
                       <>
                         Sign In
-                        <span className="btn-arrow">→</span>
                       </>
                     )}
                   </div>

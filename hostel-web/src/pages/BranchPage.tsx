@@ -82,6 +82,61 @@ const getPageNumbers = (current: number, total: number): (number | "...")[] => {
   return pages;
 };
 
+// Shared client-side validation, mirrors the backend BranchRequest constraints
+// (unitName size, location size, phone pattern, capacityBeds >= 0, hostelId required).
+//
+// requireCapacity: true when creating a branch. When editing, an empty capacity is allowed
+// because it means "use the hostel's capacity" (null on the backend).
+const validateBranchForm = (
+  f: BranchForm,
+  hostelId: number | null | undefined,
+  requireCapacity: boolean = true,
+): string | null => {
+  const name = f.unitName.trim();
+  if (!name) return "Branch name required";
+  if (name.length < 2 || name.length > 100) return "Unit name must be between 2 and 100 characters";
+
+  const location = f.location.trim();
+  if (!location) return "Location is required";
+  if (location.length < 2 || location.length > 150) {
+    return "Location must be between 2 and 150 characters";
+  }
+
+  const phone = f.phone.trim();
+  if (!phone) return "Contact phone is required";
+  if (!/^[6-9]\d{9}$/.test(phone)) {
+    return "Phone must be a 10-digit number";
+  }
+
+  if (!hostelId || hostelId < 1) {
+    return "No hostel is assigned to your account yet. Ask your Super Admin to assign one.";
+  }
+
+  const capacity = f.capacityBeds.trim();
+  if (requireCapacity && capacity === "") return "Bed capacity is required";
+  if (capacity !== "" && Number(capacity) < 0) {
+    return "Capacity beds cannot be negative";
+  }
+
+  return null;
+};
+
+// Spring's MethodArgumentNotValidException can come back in a few shapes depending on how
+// the global exception handler formats it. Try the common ones before giving up to `fallback`.
+const extractApiError = (e: any, fallback: string): string => {
+  const data = e?.response?.data;
+  if (!data) return fallback;
+  if (typeof data.message === "string" && data.message.trim()) return data.message;
+  if (Array.isArray(data.errors) && data.errors.length) {
+    return data.errors
+      .map((x: any) => (typeof x === "string" ? x : x.defaultMessage || x.message))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof data.error === "string" && data.error.trim()) return data.error;
+  return fallback;
+};
+
 const BranchPage = () => {
   const navigate = useNavigate();
 
@@ -129,23 +184,21 @@ const BranchPage = () => {
 
   useEffect(() => { loadBranches(); }, [loadBranches]);
 
-  const err = (e: any, fallback: string) => toast.error(e?.response?.data?.message || fallback);
+  const err = (e: any, fallback: string) => toast.error(extractApiError(e, fallback));
 
   const handleAdd = async () => {
-    if (!form.unitName.trim()) { toast.error("Branch name required"); return; }
-    if (!myHostelId) {
-      toast.error("No hostel is assigned to your account yet. Ask your Super Admin to assign one.");
-      return;
-    }
+    const validationError = validateBranchForm(form, myHostelId, true);
+    if (validationError) { toast.error(validationError); return; }
+
     try {
       const res = await createBranch({
-        unitName: form.unitName,
-        location: form.location,
+        unitName: form.unitName.trim(),
+        location: form.location.trim(),
         state:    form.state || undefined,
         district: form.district || undefined,
-        phone:    form.phone,
+        phone:    form.phone.trim(),
         hostelId: myHostelId,
-        capacityBeds: form.capacityBeds === "" ? null : Number(form.capacityBeds),
+        capacityBeds: Number(form.capacityBeds),
       } as BranchRequest);
 
       toast.success("Branch created");
@@ -161,28 +214,44 @@ const BranchPage = () => {
 
       loadBranches();
     } catch (e: any) {
-      showBedLimitToast(e, navigate, "Create failed");
+      showBedLimitToast(e, navigate, extractApiError(e, "Create failed"));
     }
   };
 
   const handleEdit = async () => {
     if (!editBranch) return;
+
+    const editForm: BranchForm = {
+      unitName: editBranch.unitName,
+      state: editBranch.state ?? "",
+      district: editBranch.district ?? "",
+      area: "",
+      location: editBranch.location ?? "",
+      phone: editBranch.phone ?? "",
+      capacityBeds: editBranch.capacityBeds != null ? String(editBranch.capacityBeds) : "",
+    };
+    // Capacity is optional on edit: empty means "use the hostel's capacity".
+    const validationError = validateBranchForm(editForm, editBranch.hostelId ?? myHostelId, false);
+    if (validationError) { toast.error(validationError); return; }
+
     try {
       await updateBranch(editBranch.id, {
-        unitName: editBranch.unitName,
-        location: editBranch.location,
+        unitName: editBranch.unitName.trim(),
+        location: editBranch.location?.trim() ?? "",
         state:    editBranch.state || undefined,
         district: editBranch.district || undefined,
-        phone:    editBranch.phone ?? "",
+        phone:    editBranch.phone?.trim() ?? "",
         hostelId: editBranch.hostelId ?? myHostelId,
-        capacityBeds: editBranch.capacityBeds ?? null,
+        // Don't coerce a missing capacity to 0 - that would silently replace
+        // "uses hostel cap" with a real cap of 0 beds.
+        capacityBeds: editBranch.capacityBeds ?? undefined,
       } as BranchRequest);
       toast.success("Branch updated");
       setEditOpen(false);
       setEditBranch(null);
       loadBranches();
     } catch (e: any) {
-      showBedLimitToast(e, navigate, "Update failed");
+      showBedLimitToast(e, navigate, extractApiError(e, "Update failed"));
     }
   };
 
@@ -274,7 +343,7 @@ const BranchPage = () => {
             <Search size={16} color="#94a3b8" />
             <input
               type="text"
-              placeholder="Search branches and address..."
+              placeholder="Search branches or address..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -500,7 +569,7 @@ const BranchFormFields = ({
       </div>
 
       <div className="space-y-1.5">
-        <Label>Branch Name</Label>
+        <Label>Branch Name <span className="text-red-500">*</span></Label>
         <Input
           placeholder="e.g. North Wing, Block A"
           value={form.unitName}
@@ -536,7 +605,7 @@ const BranchFormFields = ({
         </div>
 
         <div className="space-y-1.5">
-          <Label>Location</Label>
+          <Label>Location <span className="text-red-500">*</span></Label>
           <LocationAreaSelect
             value={form.area}
             district={form.district}
@@ -550,7 +619,7 @@ const BranchFormFields = ({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>Contact Phone</Label>
+          <Label>Contact Phone <span className="text-red-500">*</span></Label>
           <Input
             placeholder="Contact Phone (10 digits)"
             value={form.phone}
@@ -564,7 +633,7 @@ const BranchFormFields = ({
         </div>
 
         <div className="space-y-1.5">
-          <Label>Bed Capacity (optional)</Label>
+          <Label>Bed Capacity <span className="text-red-500">*</span></Label>
           <Input
             type="number"
             min={0}
@@ -575,10 +644,6 @@ const BranchFormFields = ({
           />
         </div>
       </div>
-
-      <p className="text-xs text-muted-foreground -mt-2">
-        Leave Bed Capacity blank if this branch doesn't need its own cap — it will still be limited by the hostel's overall bed capacity.
-      </p>
     </div>
   );
 };

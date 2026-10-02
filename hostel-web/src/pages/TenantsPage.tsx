@@ -5,11 +5,13 @@ import {
   importTenantsExcel, getUserRole, getBranchId,
   checkFraud, markAbsconded,
   getPendingTenants, approveAndAllocateTenant,
-  submitCheckoutNotice, cancelCheckoutNotice, fetchTenantsInNoticePeriod,
+  cancelCheckoutNotice, fetchTenantsInNoticePeriod,
+  transferTenantRoomBed, getTenantTransferHistory,
 } from "@/lib/store";
-import { Room, Bed, Tenant, IdProofType, Branch, FraudCheckResponse, TenantStay } from "@/lib/types";
+import { Room, Bed, Tenant, IdProofType, Branch, FraudCheckResponse, TenantStay, TenantTransferRequest, TenantTransferResponse } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogFooter, DialogDescription, DialogClose, DialogTrigger,
@@ -24,8 +26,10 @@ import {
   Users, ShieldCheck, UserX, FileCheck2,
   Download, RefreshCw, ChevronLeft, ChevronRight, X, ClipboardCheck,
   CalendarClock, Ban, ArrowRightCircle, MoreHorizontal, CalendarDays,
+  ArrowLeftRight, History,
 } from "lucide-react";
 import api from "@/lib/api";
+import CheckoutReportButton from "@/components/CheckoutReportButton";
 
 /* ── Constants ──────────────────────────────────────────────────── */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -33,11 +37,21 @@ const PAGE_SIZE     = 10;
 
 const REF_DATA_PAGE_SIZE = 10;
 
+const REF_DATA_BULK_PAGE_SIZE = 10;
+
 const REF_DATA_CACHE_MS = 20_000;
 
 const PHONE_LENGTH = 10;
 const sanitizePhoneInput = (raw: string) => raw.replace(/\D/g, "").slice(0, PHONE_LENGTH);
 const isValidPhone = (phone: string) => /^\d{10}$/.test(phone);
+
+const getTodayISO = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 const getApiOrigin = (): string => {
   const base = api.defaults.baseURL ?? "";
@@ -49,20 +63,6 @@ const isBedOccupied = (b: any): boolean => {
   return raw === true || raw === 1 || String(raw).toLowerCase() === "true";
 };
 
-/* ── TenantStay helpers ──────────────────────────────────────────
-   Daily-stay total: (noOfDays * amountPerDay) + advanceEbAmount.
-
-   IMPORTANT — the daily form now captures TWO separate EB values:
-     • form.currentReading → the EB meter reading at check-in,
-       sent to the backend as `joinReading`. It is a reading, not
-       money, so it NEVER enters the total.
-     • form.ebAmount       → the Advance EB Amount in ₹, sent as
-       `ebAmount`. This is the only EB figure that feeds the total.
-
-   Daily stay still does NOT track a separate Advance deposit — the
-   field is hidden for Daily in the form below and the frontend always
-   sends advance="0", and the backend's computeTotalAmount() no longer
-   has an "+ advance" term at all. ── */
 const computeDailyTotal = (noOfDays: string, amountPerDay: string, advanceEbAmount: string) => {
   const days  = Number(noOfDays)        || 0;
   const rate  = Number(amountPerDay)    || 0;
@@ -101,25 +101,20 @@ const fetchTenantsPage = async (
   };
 };
 
-/* ── Rooms/beds fetchers ── */
-const fetchRoomsFresh = async (pg = 0, size = REF_DATA_PAGE_SIZE, forceFresh = false) => {
+const fetchRoomsFresh = async (pg = 0, size = REF_DATA_BULK_PAGE_SIZE, forceFresh = false, unitId?: number) => {
   const params: Record<string, any> = { page: pg, size };
   if (forceFresh) params._ = Date.now();
+  if (unitId != null) params.unitId = unitId;
   const res = await api.get("/rooms", { params });
-  return {
-    content:       res.data?.data?.content ?? res.data?.content ?? [],
-    totalElements: res.data?.data?.totalElements ?? res.data?.totalElements ?? 0,
-  };
+  return { content: res.data?.data?.content ?? [], totalElements: res.data?.data?.totalElements ?? 0 };
 };
 
-const fetchBedsFresh = async (pg = 0, size = REF_DATA_PAGE_SIZE, forceFresh = false) => {
+const fetchBedsFresh = async (pg = 0, size = REF_DATA_BULK_PAGE_SIZE, forceFresh = false, unitId?: number) => {
   const params: Record<string, any> = { page: pg, size };
   if (forceFresh) params._ = Date.now();
+  if (unitId != null) params.unitId = unitId;
   const res = await api.get("/beds", { params });
-  return {
-    content:       res.data?.data?.content ?? res.data?.content ?? [],
-    totalElements: res.data?.data?.totalElements ?? res.data?.totalElements ?? 0,
-  };
+  return { content: res.data?.data?.content ?? [], totalElements: res.data?.data?.totalElements ?? 0 };
 };
 
 const fetchUnitsPage = async (
@@ -246,8 +241,11 @@ type FormAction =
   | { type: "reset" }
   | { type: "load"; payload: Partial<FormState> };
 
+/* Reset always re-stamps checkInDate with *today's* date (not whatever
+   date happened to be baked into EMPTY_FORM at module-load time), so the
+   Check-In dialog opens with the date already filled in, every time. */
 const formReducer = (state: FormState, action: FormAction): FormState => {
-  if (action.type === "reset") return { ...EMPTY_FORM };
+  if (action.type === "reset") return { ...EMPTY_FORM, checkInDate: getTodayISO() };
   if (action.type === "load")  return { ...EMPTY_FORM, ...action.payload };
   return { ...state, [action.field]: action.value };
 };
@@ -266,6 +264,23 @@ type ApproveFormState = {
 const EMPTY_APPROVE_FORM: ApproveFormState = {
   branchId: "", roomId: "", bedId: "",
   advance: "", monthlyRent: "", registrationFees: "", joinReading: "", acJoinReading: "",
+};
+
+type TransferFormState = {
+  roomId: number | "";
+  bedId: number | "";
+  newRent: string;
+  effectiveDate: string;
+  reason: string;
+  oldRoomFinalReading: string;
+  oldRoomAcFinalReading: string;
+  newRoomJoinReading: string;
+  newRoomAcJoinReading: string;
+};
+
+const EMPTY_TRANSFER_FORM: TransferFormState = {
+  roomId: "", bedId: "", newRent: "", effectiveDate: "", reason: "",
+  oldRoomFinalReading: "", oldRoomAcFinalReading: "", newRoomJoinReading: "", newRoomAcJoinReading: "",
 };
 
 /* ── IdProofUploadField ─────────────────────────────────────────── */
@@ -438,14 +453,28 @@ const ID_PROOF_TYPE_LIST: IdProofType[] = ["AADHAR","PAN","VOTER_ID","DRIVING_LI
 
 const TenantForm = ({
   form, dispatch, rooms, beds, branches, editTenant, existingDoc, existingPhoto, fraudResult, branchLocked,
+  errors, clearError,
 }: {
   form: FormState; dispatch: React.Dispatch<FormAction>;
   rooms: Room[]; beds: Bed[]; branches: Branch[]; editTenant?: Tenant | null;
   existingDoc?: string | null; existingPhoto?: string | null; fraudResult?: FraudCheckResponse | null;
   branchLocked?: boolean;
+  /* Field-level required/format errors, keyed by FormState field name
+     (e.g. "name", "phone", "idProofType", "roomId", "noOfDays"), shown
+     inline under each field — same idea as "Name is required", "Phone
+     is required" etc. rather than one generic toast. */
+  errors?: Partial<Record<keyof FormState, string>>;
+  clearError?: (field: keyof FormState) => void;
 }) => {
   const [roomSearch, setRoomSearch] = useState("");
-  const set = (field: keyof FormState) => (value: any) => dispatch({ type: "set", field, value });
+  const set = (field: keyof FormState) => (value: any) => {
+    dispatch({ type: "set", field, value });
+    clearError?.(field);
+  };
+  const err = (field: keyof FormState) => errors?.[field];
+  const errCls = (field: keyof FormState) => (err(field) ? "border-red-500 focus-visible:ring-red-400" : "");
+  const FieldError = ({ field }: { field: keyof FormState }) =>
+    err(field) ? <p className="text-[11px] text-red-500 mt-0.5">{err(field)}</p> : null;
   const isAC = rooms.find((r) => r.id === Number(form.roomId))?.hostelType === "AC";
 
   const alreadyHasLogin = !!(editTenant && ((editTenant as any).userId || (editTenant as any).user));
@@ -498,13 +527,14 @@ const TenantForm = ({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Name</label>
-          <Input className="rounded-lg" placeholder="Name"  value={form.name}  onChange={(e) => set("name")(e.target.value)} />
+          <label className="text-xs font-medium text-muted-foreground">Name <span className="text-red-500">*</span></label>
+          <Input className={`rounded-lg ${errCls("name")}`} placeholder="Name"  value={form.name}  onChange={(e) => set("name")(e.target.value)} />
+          <FieldError field="name" />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Phone</label>
+          <label className="text-xs font-medium text-muted-foreground">Phone <span className="text-red-500">*</span></label>
           <Input
-            className="rounded-lg"
+            className={`rounded-lg ${errCls("phone")}`}
             placeholder="Phone (10 digits)"
             value={form.phone}
             inputMode="numeric"
@@ -517,6 +547,7 @@ const TenantForm = ({
               set("phone")(sanitizePhoneInput(form.phone + pasted));
             }}
           />
+          <FieldError field="phone" />
         </div>
       </div>
 
@@ -542,24 +573,28 @@ const TenantForm = ({
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">ID Proof Type</label>
           <Select value={form.idProofType} onValueChange={set("idProofType")}>
-            <SelectTrigger className="rounded-lg"><SelectValue placeholder="ID Proof Type" /></SelectTrigger>
+            <SelectTrigger className={`rounded-lg ${errCls("idProofType")}`}><SelectValue placeholder="ID Proof Type" /></SelectTrigger>
             <SelectContent>
               {ID_PROOF_TYPE_LIST.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
             </SelectContent>
           </Select>
+          <FieldError field="idProofType" />
         </div>
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">ID Proof Number</label>
-          <Input className="rounded-lg" placeholder="ID Proof Number" value={form.idProofNumber}
+          <Input className={`rounded-lg ${errCls("idProofNumber")}`} placeholder="ID Proof Number" value={form.idProofNumber}
             onChange={(e) => set("idProofNumber")(e.target.value)} />
+          <FieldError field="idProofNumber" />
         </div>
       </div>
 
       <IdProofUploadField idProofDoc={form.idProofDoc} existing={existingDoc} onChange={set("idProofDoc")} />
 
+      {/* ── Row order per the requested layout: Branch, Tenant Stay Type,
+          then Room, Bed, then Check-in Date. ── */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Branch</label>
+          <label className="text-xs font-medium text-muted-foreground">Branch <span className="text-red-500">*</span></label>
           <Select
             value={form.branchId ? String(form.branchId) : ""}
             disabled={branchLocked}
@@ -570,7 +605,7 @@ const TenantForm = ({
               setRoomSearch("");
             }}
           >
-            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Branch" /></SelectTrigger>
+            <SelectTrigger className={`rounded-lg ${errCls("branchId")}`}><SelectValue placeholder="Branch" /></SelectTrigger>
             <SelectContent>
               {branches.map((b) => (
                 <SelectItem key={getBranchRawId(b)} value={String(getBranchRawId(b))}>
@@ -579,9 +614,27 @@ const TenantForm = ({
               ))}
             </SelectContent>
           </Select>
+          <FieldError field="branchId" />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Room</label>
+          <label className="text-xs font-medium text-muted-foreground">Tenant Stay Type <span className="text-red-500">*</span></label>
+          <Select
+            value={form.tenantStay}
+            onValueChange={(v) => set("tenantStay")(v as TenantStay)}
+          >
+            <SelectTrigger className={`rounded-lg ${errCls("tenantStay")}`}><SelectValue placeholder="Select Stay Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="MONTHLY">Monthly</SelectItem>
+              <SelectItem value="DAILY">Daily</SelectItem>
+            </SelectContent>
+          </Select>
+          <FieldError field="tenantStay" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Room <span className="text-red-500">*</span></label>
           <Select value={form.roomId ? String(form.roomId) : ""}
             disabled={!form.branchId}
             onValueChange={(v) => {
@@ -594,7 +647,7 @@ const TenantForm = ({
               );
               set("bedId")(firstFreeBed ? firstFreeBed.id : "");
             }}>
-            <SelectTrigger className="rounded-lg"><SelectValue placeholder={form.branchId ? "Room" : "Select a branch first"} /></SelectTrigger>
+            <SelectTrigger className={`rounded-lg ${errCls("roomId")}`}><SelectValue placeholder={form.branchId ? "Room" : "Select a branch first"} /></SelectTrigger>
             <SelectContent>
               <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
                 <Input placeholder="Search room..." value={roomSearch}
@@ -610,16 +663,14 @@ const TenantForm = ({
               )}
             </SelectContent>
           </Select>
+          <FieldError field="roomId" />
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Bed</label>
+          <label className="text-xs font-medium text-muted-foreground">Bed <span className="text-red-500">*</span></label>
           <Select value={form.bedId ? String(form.bedId) : ""}
             disabled={!form.roomId}
             onValueChange={(v) => set("bedId")(Number(v))}>
-            <SelectTrigger className="rounded-lg"><SelectValue placeholder={form.roomId ? "Bed" : "Select a room first"} /></SelectTrigger>
+            <SelectTrigger className={`rounded-lg ${errCls("bedId")}`}><SelectValue placeholder={form.roomId ? "Bed" : "Select a room first"} /></SelectTrigger>
             <SelectContent>
               {availableBeds.map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
               {form.roomId && availableBeds.length === 0 && (
@@ -627,25 +678,10 @@ const TenantForm = ({
               )}
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Tenant Stay Type</label>
-          <Select
-            value={form.tenantStay}
-            onValueChange={(v) => set("tenantStay")(v as TenantStay)}
-          >
-            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Stay Type" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="MONTHLY">Monthly</SelectItem>
-              <SelectItem value="DAILY">Daily</SelectItem>
-            </SelectContent>
-          </Select>
+          <FieldError field="bedId" />
         </div>
       </div>
 
-      {/* ── Billing block: nothing shown until the user actually picks
-          Monthly or Daily above. There is no default stay type anymore
-          so this block is intentionally empty on a fresh dialog. ── */}
       {!form.tenantStay && (
         <p className="text-xs text-muted-foreground italic px-1 py-2">
           Select Monthly or Daily above to enter billing details.
@@ -700,14 +736,16 @@ const TenantForm = ({
         <>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">No. of Days</label>
-              <Input className="rounded-lg" type="number" placeholder="No. of Days"
+              <label className="text-xs font-medium text-muted-foreground">No. of Days <span className="text-red-500">*</span></label>
+              <Input className={`rounded-lg ${errCls("noOfDays")}`} type="number" placeholder="No. of Days"
                 value={form.noOfDays} onChange={(e) => set("noOfDays")(e.target.value)} />
+              <FieldError field="noOfDays" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Amount / Day</label>
-              <Input className="rounded-lg" type="number" placeholder="Amount per Day"
+              <label className="text-xs font-medium text-muted-foreground">Amount / Day <span className="text-red-500">*</span></label>
+              <Input className={`rounded-lg ${errCls("amountPerDay")}`} type="number" placeholder="Amount per Day"
                 value={form.amountPerDay} onChange={(e) => set("amountPerDay")(e.target.value)} />
+              <FieldError field="amountPerDay" />
             </div>
           </div>
 
@@ -820,13 +858,39 @@ const TenantsPage = () => {
 
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  const autoImportOnSelectRef = useRef(false);
 
-  const [form, dispatch] = useReducer(formReducer, EMPTY_FORM);
+  const [form, dispatch] = useReducer(
+    formReducer,
+    EMPTY_FORM,
+    (init) => ({ ...init, checkInDate: getTodayISO() })
+  );
+
+  const [formErrors, setFormErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const clearFormError = useCallback((field: keyof FormState) => {
+    setFormErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }, []);
 
   const [pendingTenants, setPendingTenants] = useState<Tenant[]>([]);
   const [approveOpen,    setApproveOpen]    = useState(false);
   const [approveTarget,  setApproveTarget]  = useState<Tenant | null>(null);
   const [approveForm,    setApproveForm]    = useState<ApproveFormState>(EMPTY_APPROVE_FORM);
+
+  const [transferOpen,       setTransferOpen]       = useState(false);
+  const [transferTarget,     setTransferTarget]     = useState<Tenant | null>(null);
+  const [transferForm,       setTransferForm]       = useState<TransferFormState>(EMPTY_TRANSFER_FORM);
+  const [transferSubmitting, setTransferSubmitting] = useState(false);
+  const [transferErrors,     setTransferErrors]     = useState<Record<string, string>>({});
+
+  const [historyOpen,   setHistoryOpen]   = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<Tenant | null>(null);
+  const [historyList,   setHistoryList]   = useState<TenantTransferResponse[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const loadPendingTenants = useCallback(async () => {
     try {
@@ -840,11 +904,6 @@ const TenantsPage = () => {
   const [noticeTenants,       setNoticeTenants]       = useState<Tenant[]>([]);
   const [noticeTotalElements, setNoticeTotalElements] = useState(0);
   const [noticeLoading,       setNoticeLoading]       = useState(false);
-
-  const [noticeDialogOpen, setNoticeDialogOpen] = useState(false);
-  const [noticeTarget,     setNoticeTarget]     = useState<Tenant | null>(null);
-  const [noticeMonths,     setNoticeMonths]     = useState("1");
-  const [noticeNote,       setNoticeNote]       = useState("");
 
   const loadNoticeTenants = useCallback(async () => {
     setNoticeLoading(true);
@@ -894,27 +953,50 @@ const TenantsPage = () => {
   useEffect(() => {
     if (!addOpen) return;
     if (form.branchId) return; // already set — don't clobber a manual pick on reopen
+
+    let targetBranchId: number | null = null;
     if (isWarden && branchId != null) {
-      dispatch({ type: "set", field: "branchId", value: Number(branchId) });
+      targetBranchId = Number(branchId);
     } else if (!isWarden && selectedBranch && selectedBranch !== "all") {
-      dispatch({ type: "set", field: "branchId", value: Number(selectedBranch) });
+      targetBranchId = Number(selectedBranch);
     }
-  }, [addOpen, isWarden, branchId, selectedBranch]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (targetBranchId == null) return;
+
+    dispatch({ type: "set", field: "branchId", value: targetBranchId });
+
+    if (selectedRoom && selectedRoom !== "all") {
+      const filteredRoom = allRoomsRef.current.find((r) => Number(r.id) === Number(selectedRoom));
+      if (filteredRoom && Number(getRoomUnitId(filteredRoom)) === targetBranchId) {
+        dispatch({ type: "set", field: "roomId", value: Number(selectedRoom) });
+
+        const roomBeds = allBedsRef.current.filter((b) => Number(b.roomId) === Number(selectedRoom));
+        const firstFreeBed = roomBeds.find((b) => !isBedOccupied(b));
+        if (firstFreeBed) {
+          dispatch({ type: "set", field: "bedId", value: firstFreeBed.id });
+        }
+      }
+    }
+  }, [addOpen, isWarden, branchId, selectedBranch, selectedRoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Refresh reference data (rooms + beds + branches) ── */
   const refreshReferenceData = useCallback(async (force = false) => {
-    if (!force && Date.now() - refDataFetchedAt.current < REF_DATA_CACHE_MS) {
-      return;
-    }
-    try {
-      const [allRooms, allBeds, allBranches] = await Promise.all([
-        fetchAllPages<Room>((pg, size) => fetchRoomsFresh(pg, size, force)),
-        fetchAllPages<Bed>((pg, size) => fetchBedsFresh(pg, size, force)),
-        fetchAndNormalizeBranches(),
-      ]);
+  if (!force && Date.now() - refDataFetchedAt.current < REF_DATA_CACHE_MS) return;
+  try {
+    const scopeUnitId = isWarden
+      ? Number(branchId)
+      : (selectedBranchRef.current !== "all" ? Number(selectedBranchRef.current) : undefined);
 
-      allRoomsRef.current = allRooms;
-      allBedsRef.current  = allBeds;
+    const [allRooms, allBeds, allBranches] = await Promise.all([
+      fetchAllPages<Room>((pg, size) => fetchRoomsFresh(pg, size, force, scopeUnitId)),
+      fetchAllPages<Bed>((pg, size) => fetchBedsFresh(pg, size, force, scopeUnitId)),
+      fetchAndNormalizeBranches(),
+    ]);
+
+    allRoomsRef.current = allRooms;
+    allBedsRef.current  = allBeds;
+    setRooms(allRooms);
+    setBeds(allBeds);
+    setBranches(allBranches);
 
       const filteredRooms = isWarden
         ? allRooms.filter((r) => Number(getRoomUnitId(r)) === Number(branchId))
@@ -1092,21 +1174,18 @@ const TenantsPage = () => {
     );
   }, [rooms, selectedBranch]);
 
-  const extractError = (e: any, fallback: string) =>
-    e?.response?.data?.message || e?.response?.data?.error || e?.message || fallback;
+  const extractError = (e: any, fallback: string) => {
+    const data = e?.response?.data;
+    if (Array.isArray(data?.errors) && data.errors.length > 0) {
+      const combined = data.errors
+        .map((err: any) => (typeof err === "string" ? err : err?.message || err?.defaultMessage))
+        .filter(Boolean)
+        .join("; ");
+      if (combined) return combined;
+    }
+    return data?.message || data?.error || e?.message || fallback;
+  };
 
-  /* ── Money/reading fields branch on form.tenantStay.
-
-     MONTHLY sends monthlyRent / registrationFees / joinReading / acJoinReading
-     exactly as before.
-
-     DAILY sends noOfDays / amountPerDay / ebAmount (the Advance EB Amount in ₹)
-     AND joinReading (the Current EB Reading from the meter), plus acJoinReading
-     when the room is AC. The meter readings are recorded for reference only —
-     the backend's computeTotalAmount() uses days × rate + ebAmount.
-
-     tenantStay itself is always sent so the backend knows which branch to
-     validate/persist. ── */
   const buildFormData = () => {
     const fd = new FormData();
     if (form.name)          fd.append("name", form.name);
@@ -1114,8 +1193,13 @@ const TenantsPage = () => {
     if (form.email)         fd.append("email", form.email);
     if (form.idProofType)   fd.append("idProofType", form.idProofType);
     if (form.idProofNumber) fd.append("idProofNumber", form.idProofNumber);
-    if (form.roomId !== "") fd.append("roomId", String(form.roomId));
-    if (form.bedId  !== "") fd.append("bedId",  String(form.bedId));
+
+    // roomId/bedId are @NotNull on the backend — appended unconditionally
+    // (rather than "if truthy") so a caller can never silently omit them.
+    // The pre-submit checks in handleAdd/handleEdit are what actually stop
+    // the user before we get here; this is the last line of defense.
+    fd.append("roomId", String(form.roomId));
+    fd.append("bedId",  String(form.bedId));
 
     // form.tenantStay is guaranteed non-blank here: handleAdd/handleEdit
     // both refuse to call buildFormData() until a stay type is chosen.
@@ -1146,21 +1230,44 @@ const TenantsPage = () => {
     return fd;
   };
 
-const handleAdd = async () => {
-    if (!form.name || !form.phone || !form.branchId || !form.roomId || !form.bedId) {
-      toast.error("Fill required fields"); return;
+  const validateForm = (): Partial<Record<keyof FormState, string>> => {
+    const errors: Partial<Record<keyof FormState, string>> = {};
+
+    if (!form.name.trim()) errors.name = "Name is required";
+
+    if (!form.phone) {
+      errors.phone = "Phone is required";
+    } else if (!isValidPhone(form.phone)) {
+      errors.phone = `Phone number must be exactly ${PHONE_LENGTH} digits`;
     }
-    if (!isValidPhone(form.phone)) {
-      toast.error(`Phone number must be exactly ${PHONE_LENGTH} digits`); return;
-    }
+
+    if (!form.branchId) errors.branchId = "Branch is required";
+    if (!form.roomId)   errors.roomId   = "Room is required";
+    if (!form.bedId)    errors.bedId    = "Bed is required";
+
     if (!form.tenantStay) {
-      toast.error("Please select a Tenant Stay Type (Monthly or Daily)");
+      errors.tenantStay = "Tenant stay type is required";
+    } else if (form.tenantStay === "DAILY") {
+      // Mirrors the backend: noOfDays @Min(1), amountPerDay @Min(0) — "0" is a valid rate but not a valid day count.
+      if (form.noOfDays === "" || isNaN(Number(form.noOfDays)) || Number(form.noOfDays) < 1) {
+        errors.noOfDays = "Number of days is required (minimum 1)";
+      }
+      if (form.amountPerDay === "" || isNaN(Number(form.amountPerDay)) || Number(form.amountPerDay) < 0) {
+        errors.amountPerDay = "Amount per day is required";
+      }
+    }
+
+    return errors;
+  };
+
+const handleAdd = async () => {
+    const errors = validateForm();
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      toast.error("Please fill in the highlighted required fields");
       return;
     }
-    if (form.tenantStay === "DAILY" && (!form.noOfDays || !form.amountPerDay)) {
-      toast.error("Enter number of days and amount per day for a daily-stay tenant");
-      return;
-    }
+    setFormErrors({});
     try {
       const newTenant: Tenant = await addTenant(buildFormData());
       const fraudCheck = (newTenant as any)?.fraudCheck ?? null;
@@ -1188,17 +1295,13 @@ const handleAdd = async () => {
 
   const handleEdit = async () => {
     if (!editTenant) return;
-    if (form.phone && !isValidPhone(form.phone)) {
-      toast.error(`Phone number must be exactly ${PHONE_LENGTH} digits`); return;
-    }
-    if (!form.tenantStay) {
-      toast.error("Please select a Tenant Stay Type (Monthly or Daily)");
+    const errors = validateForm();
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      toast.error("Please fill in the highlighted required fields");
       return;
     }
-    if (form.tenantStay === "DAILY" && (!form.noOfDays || !form.amountPerDay)) {
-      toast.error("Enter number of days and amount per day for a daily-stay tenant");
-      return;
-    }
+    setFormErrors({});
     try {
       await updateTenant(editTenant.id, buildFormData());
       toast.success(
@@ -1279,10 +1382,108 @@ const handleAdd = async () => {
 
   const approveRoomHostelType = rooms.find((r) => r.id === Number(approveForm.roomId))?.hostelType;
 
-  const handleExcelImport = async () => {
-    if (!excelFile) { toast.error("Please select an Excel file first"); return; }
+  /* ── Room / Bed Transfer ─────────────────────────────────────── */
+  const openTransferDialog = (t: Tenant) => {
+    setTransferTarget(t);
+    setTransferForm({ ...EMPTY_TRANSFER_FORM, effectiveDate: getTodayISO() });
+    setTransferErrors({});
+    setTransferOpen(true);
+  };
+
+  const transferRoomHostelType = rooms.find((r) => r.id === Number(transferForm.roomId))?.hostelType;
+
+  const validateTransferForm = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!transferForm.roomId) errs.roomId = "Select a new room";
+    if (!transferForm.bedId) errs.bedId = "Select a new bed";
+    if (transferForm.newRent === "" || Number(transferForm.newRent) < 0) {
+      errs.newRent = "Enter a valid rent amount";
+    }
+    if (!transferForm.effectiveDate) {
+      errs.effectiveDate = "Effective date is required";
+    } else if (transferTarget?.checkInDate && transferForm.effectiveDate < transferTarget.checkInDate) {
+      errs.effectiveDate = "Effective date cannot be before the tenant's check-in date";
+    }
+    if (
+      transferTarget &&
+      transferForm.roomId !== "" &&
+      transferForm.bedId !== "" &&
+      Number(transferForm.roomId) === Number(transferTarget.roomId) &&
+      Number(transferForm.bedId) === Number(transferTarget.bedId)
+    ) {
+      errs.bedId = "Tenant is already in this room/bed";
+    }
+    if (
+      transferForm.roomId !== "" && transferForm.bedId !== "" &&
+      isBedOccupied(beds.find((b) => Number(b.id) === Number(transferForm.bedId)))
+    ) {
+      errs.bedId = "Selected bed is already occupied";
+    }
+    if (
+      transferRoomHostelType === "AC" &&
+      transferForm.newRoomJoinReading !== "" &&
+      transferForm.newRoomAcJoinReading === ""
+    ) {
+      errs.newRoomAcJoinReading = "AC join reading is required for an AC room";
+    }
+    setTransferErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleTransfer = async () => {
+    if (!transferTarget) return;
+    if (!validateTransferForm()) return;
+
+    const payload: TenantTransferRequest = {
+      newRoomId: Number(transferForm.roomId),
+      newBedId: Number(transferForm.bedId),
+      newRent: Number(transferForm.newRent),
+      effectiveDate: transferForm.effectiveDate,
+      reason: transferForm.reason || undefined,
+      oldRoomFinalReading: transferForm.oldRoomFinalReading ? Number(transferForm.oldRoomFinalReading) : undefined,
+      oldRoomAcFinalReading: transferForm.oldRoomAcFinalReading ? Number(transferForm.oldRoomAcFinalReading) : undefined,
+      newRoomJoinReading: transferForm.newRoomJoinReading ? Number(transferForm.newRoomJoinReading) : undefined,
+      newRoomAcJoinReading: transferForm.newRoomAcJoinReading ? Number(transferForm.newRoomAcJoinReading) : undefined,
+    };
+
+    setTransferSubmitting(true);
     try {
-      await importTenantsExcel(excelFile);
+      await transferTenantRoomBed(transferTarget.id, payload);
+      const isFuture = transferForm.effectiveDate > getTodayISO();
+      toast.success(
+        isFuture
+          ? `Transfer scheduled for ${transferForm.effectiveDate}`
+          : `${transferTarget.name} transferred successfully`
+      );
+      setTransferOpen(false);
+      setTransferTarget(null);
+      setTransferForm(EMPTY_TRANSFER_FORM);
+      await Promise.all([loadTenantsRef.current(), reloadBeds()]);
+    } catch (e: any) {
+      toast.error(extractError(e, "Failed to transfer tenant"));
+    } finally {
+      setTransferSubmitting(false);
+    }
+  };
+
+  const openHistoryDialog = async (t: Tenant) => {
+    setHistoryTarget(t);
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const list = await getTenantTransferHistory(t.id);
+      setHistoryList(list);
+    } catch (e: any) {
+      toast.error(extractError(e, "Failed to load transfer history"));
+      setHistoryList([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const performExcelImport = async (file: File) => {
+    try {
+      await importTenantsExcel(file);
       toast.success("Excel imported successfully");
       setExcelFile(null);
       if (excelInputRef.current) excelInputRef.current.value = "";
@@ -1294,35 +1495,13 @@ const handleAdd = async () => {
     }
   };
 
-  /* ── NOTICE PERIOD handlers ───────────────────────────────────── */
-
-  const openNoticeDialog = (t: Tenant) => {
-    setNoticeTarget(t);
-    setNoticeMonths("1");
-    setNoticeNote("");
-    setNoticeDialogOpen(true);
-  };
-
-  const handleSubmitNotice = async () => {
-    if (!noticeTarget) return;
-    const monthsNum = noticeMonths ? Number(noticeMonths) : 1;
-    if (!monthsNum || monthsNum < 1 || monthsNum > 6) {
-      toast.error("Notice period must be between 1 and 6 months"); return;
+  const handleExcelImport = async () => {
+    if (!excelFile) {
+      autoImportOnSelectRef.current = true;
+      excelInputRef.current?.click();
+      return;
     }
-    try {
-      await submitCheckoutNotice(noticeTarget.id, {
-        noticePeriodMonths: monthsNum,
-        note: noticeNote.trim() || undefined,
-      });
-      toast.success(`Checkout notice submitted for ${noticeTarget.name}`);
-      setNoticeDialogOpen(false);
-      setNoticeTarget(null);
-      setNoticeMonths("1");
-      setNoticeNote("");
-      await Promise.all([loadTenantsRef.current(), loadNoticeTenantsRef.current()]);
-    } catch (e: any) {
-      toast.error(extractError(e, "Failed to submit checkout notice"));
-    }
+    await performExcelImport(excelFile);
   };
 
   const handleCancelNotice = (t: Tenant) => {
@@ -1345,16 +1524,10 @@ const handleAdd = async () => {
     );
   };
 
-  /* Hands off to the existing /checkout page (Tenant Check-Out module)
-     using the same router-state handoff pattern already used elsewhere
-     in this app (EBReadingsPage → RentPage, RoomsPage → TenantsPage). */
   const goToCheckout = (t: Tenant) => {
     navigate("/checkout", { state: { tenantId: t.id } });
   };
 
-  /* `tenants` is already exactly the current page from the server — no
-     further client-side slicing needed. Search and status are handled
-     server-side via the debounced/status effects above. */
   const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE));
 
   const goToPage = (newPage: number) => {
@@ -1493,20 +1666,23 @@ const handleAdd = async () => {
           <div className="tn-main-title">All Tenants</div>
 
           <div className="tn-controls">
-            <Input ref={excelInputRef} type="file" accept=".xlsx,.xls" className="w-44 rounded-lg"
+            <Input ref={excelInputRef} type="file" accept=".xlsx,.xls" className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
+                const wantsAutoImport = autoImportOnSelectRef.current;
+                autoImportOnSelectRef.current = false;
                 if (!file) return;
                 if (file.size > MAX_FILE_SIZE) { toast.error("File size must be below 10 MB"); e.target.value = ""; return; }
                 setExcelFile(file);
+                if (wantsAutoImport) performExcelImport(file);
               }} />
-            <button className="tn-btn-outline" onClick={handleExcelImport} disabled={!excelFile}>
+            <button className="tn-btn-outline" onClick={handleExcelImport}>
               <Download size={16} className="shrink-0" /> Import Excel
             </button>
 
             <Dialog open={addOpen} onOpenChange={(open) => {
               setAddOpen(open);
-              if (!open) { dispatch({ type: "reset" }); setLiveFraud(null); setAddResultFraud(null); }
+              if (!open) { dispatch({ type: "reset" }); setLiveFraud(null); setAddResultFraud(null); setFormErrors({}); }
             }}>
               <DialogTrigger asChild>
                 <button className="tn-btn-primary">
@@ -1538,6 +1714,7 @@ const handleAdd = async () => {
                     <TenantForm
                       form={form} dispatch={dispatch} rooms={rooms} beds={beds}
                       branches={formBranches} branchLocked={isWarden} fraudResult={liveFraud}
+                      errors={formErrors} clearError={clearFormError}
                     />
                   )}
                   <DialogFooter>
@@ -1704,8 +1881,9 @@ const handleAdd = async () => {
             <Search size={16} color="#94a3b8" className="shrink-0" />
             <input
               type="text"
-              placeholder="Search tenants..."
+              placeholder="Search tenants or Phone number..."
               value={search}
+
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
@@ -1906,10 +2084,30 @@ const handleAdd = async () => {
                               </button>
                             )}
 
+                            {/* Submit Checkout Notice removed: admin/warden are not
+                                permitted to create a notice on a tenant's behalf.
+                                See TenantController — only POST /tenants/me/checkout-notice
+                                (tenant self-service) exists on the backend. */}
+
                             {t.status === "Active" && !t.checkoutStatus && (
-                              <button className="tn-action-btn" onClick={() => openNoticeDialog(t)} title="Submit Checkout Notice">
-                                <CalendarClock size={16} color="#4f46e5" strokeWidth={2} className="shrink-0" />
+                              <button className="tn-action-btn" onClick={() => openTransferDialog(t)} title="Transfer Room/Bed">
+                                <ArrowLeftRight size={16} color="#0891b2" strokeWidth={2} className="shrink-0" />
                               </button>
+                            )}
+
+                            {t.status !== "PENDING" && (
+                              <button className="tn-action-btn" onClick={() => openHistoryDialog(t)} title="Transfer History">
+                                <History size={16} color="#64748b" strokeWidth={2} className="shrink-0" />
+                              </button>
+                            )}
+
+                            {t.status === "Checked_Out" && (
+                              <CheckoutReportButton
+                                variant="icon"
+                                className="tn-action-btn"
+                                tenantId={t.id}
+                                tenantName={t.name}
+                              />
                             )}
                           </div>
                         </td>
@@ -1956,7 +2154,7 @@ const handleAdd = async () => {
       </div>
 
       {/* Edit Dialog */}
-      <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) dispatch({ type: "reset" }); }}>
+      <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) { dispatch({ type: "reset" }); setFormErrors({}); } }}>
         <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
           <div className="relative max-h-[90vh] overflow-y-auto p-6">
             <DialogClose asChild>
@@ -1978,6 +2176,7 @@ const handleAdd = async () => {
               editTenant={editTenant}
               existingDoc={editTenant?.idProofDocument}
               existingPhoto={editTenant?.tenantPhoto}
+              errors={formErrors} clearError={clearFormError}
             />
             <DialogFooter>
               <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
@@ -2061,12 +2260,13 @@ const handleAdd = async () => {
                 ) : (
                   <p className="text-muted-foreground text-xs">No ID document uploaded</p>
                 )}
-                {viewTenant.checkoutStatus && (
+
+                {viewTenant.checkoutStatus && viewTenant.checkoutRequestDate && (
                   <div className="mt-1 rounded-lg border border-indigo-300 bg-indigo-50 p-3 text-xs text-indigo-800 space-y-1">
                     <p className="font-semibold flex items-center gap-1">
                       <CalendarClock className="h-3 w-3 shrink-0" /> {viewTenant.checkoutStatusLabel}
                     </p>
-                    <p>Notice submitted: {viewTenant.checkoutRequestDate ?? "-"}</p>
+                    <p>Notice submitted: {viewTenant.checkoutRequestDate}</p>
                     <p>Expected checkout date: {viewTenant.noticePeriodEndDate ?? "-"}</p>
                     {viewTenant.checkoutStatus !== "CHECKED_OUT" && (
                       <p>Days remaining: {viewTenant.remainingNoticeDays ?? "-"}</p>
@@ -2081,13 +2281,16 @@ const handleAdd = async () => {
                     </p>
                   </div>
                 )}
-                {viewTenant.status === "Checked_Out" && (
+                {/* {viewTenant.status === "Checked_Out" && (
                   <div className="mt-1 rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-800 space-y-1">
                     <p className="font-semibold flex items-center gap-1">
                       <FileCheck2 className="h-3 w-3 shrink-0" /> This tenant has checked out
                     </p>
+                    <div className="pt-1">
+                      <CheckoutReportButton variant="button" tenantId={viewTenant.id} tenantName={viewTenant.name} />
+                    </div>
                   </div>
-                )}
+                )} */}
                 {viewTenant.status === "PENDING" && (
                   <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 space-y-1">
                     <p className="font-semibold flex items-center gap-1">
@@ -2151,62 +2354,6 @@ const handleAdd = async () => {
             <Button variant="destructive" className="rounded-lg" onClick={handleMarkAbsconded}>
               Confirm — Mark Absconded
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Submit Checkout Notice Dialog */}
-      <Dialog open={noticeDialogOpen} onOpenChange={(open) => {
-        setNoticeDialogOpen(open);
-        if (!open) { setNoticeTarget(null); setNoticeMonths("1"); setNoticeNote(""); }
-      }}>
-        <DialogContent className="rounded-2xl [&>button]:hidden">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-indigo-600">
-              <CalendarClock className="h-5 w-5 shrink-0" /> Submit Checkout Notice
-            </DialogTitle>
-            <DialogDescription>
-              Starts the notice period for this tenant. The expected checkout date is
-              calculated automatically using calendar-month arithmetic (e.g. a notice
-              submitted on Aug 10 with a 1-month period expects checkout on Sep 10).
-            </DialogDescription>
-          </DialogHeader>
-          {noticeTarget && (
-            <div className="space-y-3">
-              <p className="text-sm font-medium">
-                Tenant: <span className="text-foreground">{noticeTarget.name}</span>
-                {" "}· Room {noticeTarget.roomNumber ?? roomNo(noticeTarget.roomId)}
-                {" "}· Bed {noticeTarget.bedNumber ?? bedNo(noticeTarget.bedId)}
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Notice Period (months)</label>
-                  <Input
-                    className="rounded-lg" type="number" min={1} max={6}
-                    value={noticeMonths}
-                    onChange={(e) => setNoticeMonths(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Note (optional)</label>
-                <Input
-                  className="rounded-lg"
-                  placeholder="e.g. Tenant requested early move-out for a new job"
-                  value={noticeNote}
-                  onChange={(e) => setNoticeNote(e.target.value)}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Expected checkout date will be today + {noticeMonths || 1} month(s). The tenant
-                stays Active during the notice period and final checkout can only be completed
-                once the notice period is done.
-              </p>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" className="rounded-lg" onClick={() => setNoticeDialogOpen(false)}>Cancel</Button>
-            <Button className="rounded-lg" onClick={handleSubmitNotice}>Submit Notice</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2343,6 +2490,227 @@ const handleAdd = async () => {
             <DialogFooter className="mt-4">
               <Button variant="outline" className="rounded-lg" onClick={() => setApproveOpen(false)}>Cancel</Button>
               <Button className="rounded-lg" onClick={handleApprove}>Approve & Check-In</Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Room/Bed Dialog */}
+      <Dialog open={transferOpen} onOpenChange={(open) => {
+        setTransferOpen(open);
+        if (!open) { setTransferTarget(null); setTransferForm(EMPTY_TRANSFER_FORM); setTransferErrors({}); }
+      }}>
+        <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+          <div className="relative max-h-[90vh] overflow-y-auto p-6">
+            <DialogClose asChild>
+              <button
+                type="button"
+                aria-label="Close"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4 shrink-0" />
+              </button>
+            </DialogClose>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ArrowLeftRight className="h-5 w-5 shrink-0" /> Transfer Room / Bed
+              </DialogTitle>
+              <DialogDescription>
+                Move <span className="font-medium">{transferTarget?.name}</span> to a new room and bed.
+                Their previous room, bed, rent and EB history are preserved.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 mt-2">
+              {/* Current room/bed — read-only */}
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-xs font-medium text-muted-foreground">Current Room</div>
+                  <div className="font-medium">
+                    {allRoomsRef.current.find((r) => r.id === transferTarget?.roomId)?.roomNumber ?? "-"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-muted-foreground">Current Bed</div>
+                  <div className="font-medium">
+                    {(() => {
+                      const b = beds.find((bd) => bd.id === transferTarget?.bedId);
+                      return b ? `Bed ${b.bedNumber}` : "-";
+                    })()}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-xs font-medium text-muted-foreground">Current Rent</div>
+                  <div className="font-medium">₹{transferTarget?.monthlyRent ?? "-"}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">New Room *</label>
+                  <Select
+                    value={transferForm.roomId ? String(transferForm.roomId) : ""}
+                    onValueChange={(v) => setTransferForm(f => ({ ...f, roomId: Number(v), bedId: "" }))}
+                  >
+                    <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select room" /></SelectTrigger>
+                    <SelectContent>
+                      {rooms
+                        .filter((r) => beds.filter((b) => Number(b.roomId) === Number(r.id) &&
+                          (!isBedOccupied(b) || Number(b.id) === Number(transferTarget?.bedId))).length > 0)
+                        .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {transferErrors.roomId && <p className="text-xs text-red-500">{transferErrors.roomId}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">New Bed *</label>
+                  <Select
+                    value={transferForm.bedId ? String(transferForm.bedId) : ""}
+                    disabled={!transferForm.roomId}
+                    onValueChange={(v) => setTransferForm(f => ({ ...f, bedId: Number(v) }))}
+                  >
+                    <SelectTrigger className="rounded-lg"><SelectValue placeholder={transferForm.roomId ? "Select bed" : "Select room first"} /></SelectTrigger>
+                    <SelectContent>
+                      {beds
+                        .filter((b) => Number(b.roomId) === Number(transferForm.roomId) &&
+                          (!isBedOccupied(b) || Number(b.id) === Number(transferTarget?.bedId)))
+                        .map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {transferErrors.bedId && <p className="text-xs text-red-500">{transferErrors.bedId}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">New Rent *</label>
+                  <Input className="rounded-lg" type="number" value={transferForm.newRent}
+                    onChange={(e) => setTransferForm(f => ({ ...f, newRent: e.target.value }))} />
+                  {transferErrors.newRent && <p className="text-xs text-red-500">{transferErrors.newRent}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Effective Date *</label>
+                  <Input className="rounded-lg" type="date" value={transferForm.effectiveDate}
+                    onChange={(e) => setTransferForm(f => ({ ...f, effectiveDate: e.target.value }))} />
+                  {transferErrors.effectiveDate && <p className="text-xs text-red-500">{transferErrors.effectiveDate}</p>}
+                  <p className="text-xs text-muted-foreground">
+                    Today or earlier applies immediately. A future date is scheduled and applied automatically.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Reason / Notes</label>
+                <Textarea className="rounded-lg" rows={2} value={transferForm.reason}
+                  onChange={(e) => setTransferForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="Optional — e.g. requested a quieter room" />
+              </div>
+
+              <details className="rounded-lg border border-slate-200 p-3">
+                <summary className="text-xs font-medium text-muted-foreground cursor-pointer select-none">
+                  Meter readings (optional — improves EB billing accuracy)
+                </summary>
+                <div className="grid grid-cols-2 gap-4 mt-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Old Room Final Reading</label>
+                    <Input className="rounded-lg" type="number" value={transferForm.oldRoomFinalReading}
+                      onChange={(e) => setTransferForm(f => ({ ...f, oldRoomFinalReading: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">New Room Join Reading</label>
+                    <Input className="rounded-lg" type="number" value={transferForm.newRoomJoinReading}
+                      onChange={(e) => setTransferForm(f => ({ ...f, newRoomJoinReading: e.target.value }))} />
+                  </div>
+                  {transferRoomHostelType === "AC" && (
+                    <>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">Old Room AC Final Reading</label>
+                        <Input className="rounded-lg" type="number" value={transferForm.oldRoomAcFinalReading}
+                          onChange={(e) => setTransferForm(f => ({ ...f, oldRoomAcFinalReading: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">New Room AC Join Reading</label>
+                        <Input className="rounded-lg" type="number" value={transferForm.newRoomAcJoinReading}
+                          onChange={(e) => setTransferForm(f => ({ ...f, newRoomAcJoinReading: e.target.value }))} />
+                        {transferErrors.newRoomAcJoinReading && (
+                          <p className="text-xs text-red-500">{transferErrors.newRoomAcJoinReading}</p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </details>
+            </div>
+
+            <DialogFooter className="mt-4">
+              <Button variant="outline" className="rounded-lg" onClick={() => setTransferOpen(false)} disabled={transferSubmitting}>
+                Cancel
+              </Button>
+              <Button className="rounded-lg" onClick={handleTransfer} disabled={transferSubmitting}>
+                {transferSubmitting ? "Transferring..." : "Transfer Tenant"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer History Dialog */}
+      <Dialog open={historyOpen} onOpenChange={(open) => {
+        setHistoryOpen(open);
+        if (!open) { setHistoryTarget(null); setHistoryList([]); }
+      }}>
+        <DialogContent className="sm:max-w-[640px] max-h-[80vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+          <div className="relative max-h-[80vh] overflow-y-auto p-6">
+            <DialogClose asChild>
+              <button
+                type="button"
+                aria-label="Close"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4 shrink-0" />
+              </button>
+            </DialogClose>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <History className="h-5 w-5 shrink-0" /> Transfer History
+              </DialogTitle>
+              <DialogDescription>
+                Room/bed transfer history for <span className="font-medium">{historyTarget?.name}</span>.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="mt-3 space-y-3">
+              {historyLoading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : historyList.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No room/bed transfers on record.</p>
+              ) : (
+                historyList.map((h) => (
+                  <div key={h.id} className="rounded-lg border border-slate-200 p-3 text-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium">
+                        Room {h.previousRoomNumber ?? "-"} (Bed {h.previousBedNumber ?? "-"})
+                        {" "}<ArrowLeftRight className="inline h-3.5 w-3.5 mx-1 shrink-0" />{" "}
+                        Room {h.newRoomNumber ?? "-"} (Bed {h.newBedNumber ?? "-"})
+                      </div>
+                      <span className={`tn-status-badge ${h.status === "COMPLETED" ? "active" : h.status === "PENDING" ? "notice" : "checkedout"}`}>
+                        {h.status}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                      <div>Previous Rent: ₹{h.previousRent ?? "-"}</div>
+                      <div>New Rent: ₹{h.newRent ?? "-"}</div>
+                      <div>Effective Date: {h.effectiveDate}</div>
+                      <div>Requested On: {h.transferDate}</div>
+                    </div>
+                    {h.reason && <div className="text-xs text-slate-600">Reason: {h.reason}</div>}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <DialogFooter className="mt-4">
+              <Button variant="outline" className="rounded-lg" onClick={() => setHistoryOpen(false)}>Close</Button>
             </DialogFooter>
           </div>
         </DialogContent>
