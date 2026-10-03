@@ -1220,6 +1220,28 @@ export default function AppLayout() {
     return () => { cancelled = true; };
   }, []);
 
+  // Keep permissions in sync with the DB: when the tab regains focus, re-fetch
+  // /users/me (getMyProfile honours its 30s cache, so this is cheap) and push the
+  // fresh list into state. Fixes sessionStorage "permissions" going stale after an
+  // admin changes this user's permissions while they are logged in.
+  useEffect(() => {
+    const sync = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        await getMyProfile();
+        setUserPermissionsState(getUserPermissions());
+      } catch {
+        /* ignore - next focus will retry */
+      }
+    };
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
+
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
