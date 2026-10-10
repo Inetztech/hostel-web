@@ -28,10 +28,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 
+// A11Y: the Cancelled badge used text-slate-500 on bg-slate-100, which is
+// just under the 4.5:1 contrast ratio. Darkened to text-slate-700.
 const STATUS_META: Record<DamageStatus, { label: string; className: string; icon: any }> = {
   PENDING:   { label: "Pending",   className: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100",   icon: Clock },
   PAID:      { label: "Paid",      className: "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100", icon: CheckCircle2 },
-  CANCELLED: { label: "Cancelled", className: "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200",     icon: Ban },
+  CANCELLED: { label: "Cancelled", className: "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200",     icon: Ban },
 };
 
 const emptyForm = {
@@ -51,11 +53,11 @@ function SectionHeading({ icon: Icon, title, subtitle }: { icon: any; title: str
   return (
     <div className="flex items-center gap-2 mb-3">
       <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600 shrink-0">
-        <Icon className="h-4 w-4" />
+        <Icon className="h-4 w-4" aria-hidden="true" />
       </div>
       <div>
         <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-        {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
       </div>
     </div>
   );
@@ -292,29 +294,34 @@ export default function DamagePage() {
           onClick={openCreate}
           className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 transition-all shadow-sm"
         >
-          <Plus className="h-4 w-4 stroke-[2.5]" /> Report Damage
+          <Plus className="h-4 w-4 stroke-[2.5]" aria-hidden="true" /> Report Damage
         </button>
       </div>
 
       {/* Main Data Table */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white overflow-hidden shadow-sm">
+      <div className="damage-table-card rounded-2xl border border-slate-200/80 bg-white overflow-hidden shadow-sm">
+        <div className="damage-table-scroll">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50/70 text-slate-500 text-xs font-semibold uppercase tracking-wider border-b border-slate-100">
+          <caption className="sr-only">Damage records</caption>
+          {/* A11Y: header text darkened from slate-500 to slate-600 for contrast. */}
+          <thead className="bg-slate-50/70 text-slate-600 text-xs font-semibold uppercase tracking-wider border-b border-slate-100">
             <tr>
-              <th className="text-left px-5 py-3.5">Title</th>
-              <th className="text-left px-5 py-3.5">Room</th>
-              <th className="text-left px-5 py-3.5">Date</th>
-              <th className="text-left px-5 py-3.5">Amount</th>
-              <th className="text-left px-5 py-3.5">Tenants</th>
-              <th className="text-left px-5 py-3.5">Status</th>
-              <th className="text-right px-5 py-3.5">Actions</th>
+              <th scope="col" className="text-left px-5 py-3.5">Title</th>
+              <th scope="col" className="text-left px-5 py-3.5">Room</th>
+              <th scope="col" className="text-left px-5 py-3.5">Date</th>
+              <th scope="col" className="text-left px-5 py-3.5">Amount</th>
+              <th scope="col" className="text-left px-5 py-3.5">Tenants</th>
+              <th scope="col" className="text-left px-5 py-3.5">Status</th>
+              <th scope="col" className="text-right px-5 py-3.5">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
+            {/* A11Y: empty/loading messages were text-slate-400 (~2.6:1 on
+                white, flagged by Lighthouse); now text-slate-600. */}
             {loading ? (
-              <tr><td colSpan={7} className="text-center py-10 text-slate-400">Loading records…</td></tr>
+              <tr><td colSpan={7} className="text-center py-10 text-slate-600">Loading records…</td></tr>
             ) : damages.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-10 text-slate-400">No damage records found</td></tr>
+              <tr><td colSpan={7} className="text-center py-10 text-slate-600">No damage records found</td></tr>
             ) : (
               damages.map((dmg) => {
                 const meta = STATUS_META[dmg.status];
@@ -326,7 +333,7 @@ export default function DamagePage() {
                     <td className="px-5 py-4">
                       <div className="font-semibold text-slate-900 uppercase text-xs tracking-wide">{dmg.title}</div>
                       {dmg.description && (
-                        <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">{dmg.description}</div>
+                        <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">{dmg.description}</div>
                       )}
                     </td>
                     <td className="px-5 py-4 font-medium text-slate-700">{dmg.roomNumbers?.join(", ") || "—"}</td>
@@ -342,8 +349,13 @@ export default function DamagePage() {
                         value={dmg.status}
                         onValueChange={(v) => handleStatusChange(dmg.id, v as DamageStatus)}
                       >
-                        <SelectTrigger className={`h-7 text-xs font-medium px-3 rounded-full border shadow-none gap-1.5 ${meta.className}`}>
-                          <meta.icon className="h-3.5 w-3.5" />
+                        {/* A11Y: this trigger is a button with no text label of
+                            its own; give it an accessible name. */}
+                        <SelectTrigger
+                          aria-label={`Status for ${dmg.title}`}
+                          className={`h-7 text-xs font-medium px-3 rounded-full border shadow-none gap-1.5 ${meta.className}`}
+                        >
+                          <meta.icon className="h-3.5 w-3.5" aria-hidden="true" />
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="rounded-xl">
@@ -361,6 +373,7 @@ export default function DamagePage() {
                         <button
                           type="button"
                           title={editDisabled ? "Cannot edit a paid/billed record" : "Edit"}
+                          aria-label={`Edit damage record ${dmg.title}`}
                           disabled={editDisabled}
                           onClick={(e) => { e.stopPropagation(); if (!editDisabled) openEdit(dmg); }}
                           className={`
@@ -371,7 +384,7 @@ export default function DamagePage() {
                             transition-all
                           `}
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Pencil className="h-4 w-4" aria-hidden="true" />
                         </button>
 
                         <AlertDialog>
@@ -379,6 +392,7 @@ export default function DamagePage() {
                             <button
                               type="button"
                               title={anyBilled ? "Cannot delete a billed record" : "Delete"}
+                              aria-label={`Delete damage record ${dmg.title}`}
                               disabled={anyBilled}
                               onClick={(e) => e.stopPropagation()}
                               className={`
@@ -389,13 +403,13 @@ export default function DamagePage() {
                                 transition-all
                               `}
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
                             </button>
                           </AlertDialogTrigger>
                           <AlertDialogContent className="rounded-2xl">
                             <AlertDialogHeader>
                               <AlertDialogTitle className="text-slate-900 font-bold">Delete this damage record?</AlertDialogTitle>
-                              <AlertDialogDescription className="text-slate-500">
+                              <AlertDialogDescription className="text-slate-600">
                                 Permanent operation: "{dmg.title}" and its assigned tenant balances will be removed.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
@@ -418,11 +432,15 @@ export default function DamagePage() {
             )}
           </tbody>
         </table>
+        </div>
 
         {/* Pagination Controls */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-500 font-medium">
-            <span>Page {pageIndex + 1} of {totalPages}</span>
+          <nav
+            aria-label="Pagination"
+            className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-600 font-medium"
+          >
+            <span aria-live="polite">Page {pageIndex + 1} of {totalPages}</span>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -441,7 +459,7 @@ export default function DamagePage() {
                 Next
               </button>
             </div>
-          </div>
+          </nav>
         )}
       </div>
 
@@ -450,7 +468,7 @@ export default function DamagePage() {
         <DialogContent
           className="
             max-w-2xl w-[95vw]
-            rounded-2xl
+            rounded-2xl mobile-form-dialog damage-mobile-dialog
             overflow-hidden
             p-0
             max-h-[85vh]
@@ -466,15 +484,16 @@ export default function DamagePage() {
               <button
                 type="button"
                 onClick={closeDialog}
+                aria-label="Close"
                 className="
                   absolute right-4 top-4
                   flex items-center justify-center h-7 w-7 rounded-full
-                  bg-white border border-slate-200 text-slate-400
+                  bg-white border border-slate-200 text-slate-500
                   hover:text-slate-700 hover:border-slate-300 hover:bg-slate-100
                   transition-all
                 "
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </DialogHeader>
 
@@ -486,9 +505,9 @@ export default function DamagePage() {
                     <div className="space-y-1">
                       <Label className="text-xs font-semibold text-slate-600">Hostel</Label>
                       <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 font-medium">
-                        <Building2 className="h-4 w-4 text-slate-400 shrink-0" />
+                        <Building2 className="h-4 w-4 text-slate-500 shrink-0" aria-hidden="true" />
                         <span className="truncate flex-1">{sessionHostelName || "—"}</span>
-                        <Lock className="h-3 w-3 text-slate-300 shrink-0" />
+                        <Lock className="h-3 w-3 text-slate-400 shrink-0" aria-label="Locked" />
                       </div>
                     </div>
 
@@ -499,7 +518,7 @@ export default function DamagePage() {
                           <span className="truncate flex-1">
                             {branches.find((b) => b.id === sessionBranchId)?.unitName ?? "—"}
                           </span>
-                          <Lock className="h-3 w-3 text-slate-300 shrink-0" />
+                          <Lock className="h-3 w-3 text-slate-400 shrink-0" aria-label="Locked" />
                         </div>
                       ) : (
                         <Select
@@ -507,7 +526,7 @@ export default function DamagePage() {
                           onValueChange={(v) => setForm((f) => ({ ...f, branchId: Number(v), roomIds: [], tenantIds: [] }))}
                           disabled={!!editingId || loadingLookups}
                         >
-                          <SelectTrigger className="rounded-xl border-slate-200">
+                          <SelectTrigger aria-label="Branch" className="rounded-xl border-slate-200">
                             <SelectValue placeholder={loadingLookups ? "Loading…" : "Select branch"} />
                           </SelectTrigger>
                           <SelectContent className="rounded-xl">
@@ -519,10 +538,13 @@ export default function DamagePage() {
                   </div>
 
                   <div className="space-y-1 relative">
-                    <Label className="text-xs font-semibold text-slate-600">Room(s)</Label>
+                    <Label htmlFor="damage-room-picker" className="text-xs font-semibold text-slate-600">Room(s)</Label>
                     <button
+                      id="damage-room-picker"
                       type="button"
                       disabled={roomFieldDisabled}
+                      aria-haspopup="listbox"
+                      aria-expanded={roomDropdownOpen}
                       onClick={() => setRoomDropdownOpen((o) => !o)}
                       className={`
                         w-full flex items-center justify-between gap-2 rounded-xl border border-slate-200
@@ -530,18 +552,18 @@ export default function DamagePage() {
                         ${roomFieldDisabled ? "opacity-60 cursor-not-allowed bg-slate-50" : "hover:border-slate-300"}
                       `}
                     >
-                      <span className={`truncate ${form.roomIds.length ? "text-slate-800" : "text-slate-400"}`}>
+                      <span className={`truncate ${form.roomIds.length ? "text-slate-800" : "text-slate-500"}`}>
                         {loadingLookups ? "Loading…" : selectedRoomLabel || "Select room(s)"}
                       </span>
-                      <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
+                      <ChevronDown className="h-4 w-4 text-slate-500 shrink-0" aria-hidden="true" />
                     </button>
 
                     {roomDropdownOpen && !roomFieldDisabled && (
                       <>
-                        <div className="fixed inset-0 z-40" onClick={() => setRoomDropdownOpen(false)} />
+                        <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setRoomDropdownOpen(false)} />
                         <div className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100">
                           {roomsForBranch.length === 0 ? (
-                            <p className="text-xs text-slate-400 px-3 py-2">No rooms in this branch</p>
+                            <p className="text-xs text-slate-600 px-3 py-2">No rooms in this branch</p>
                           ) : (
                             roomsForBranch.map((r) => (
                               <label
@@ -568,8 +590,9 @@ export default function DamagePage() {
                 <div className="rounded-xl border border-slate-200/80 p-4 space-y-3 bg-white">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <Label className="text-xs font-semibold text-slate-600">Title</Label>
+                      <Label htmlFor="damage-title" className="text-xs font-semibold text-slate-600">Title</Label>
                       <Input
+                        id="damage-title"
                         className="rounded-xl border-slate-200"
                         value={form.title}
                         onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
@@ -577,8 +600,9 @@ export default function DamagePage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs font-semibold text-slate-600">Damage Date</Label>
+                      <Label htmlFor="damage-date" className="text-xs font-semibold text-slate-600">Damage Date</Label>
                       <Input
+                        id="damage-date"
                         className="rounded-xl border-slate-200"
                         type="date"
                         value={form.damageDate}
@@ -588,8 +612,9 @@ export default function DamagePage() {
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-slate-600">Description</Label>
+                    <Label htmlFor="damage-description" className="text-xs font-semibold text-slate-600">Description</Label>
                     <Textarea
+                      id="damage-description"
                       className="rounded-xl border-slate-200"
                       rows={2}
                       value={form.description}
@@ -599,8 +624,9 @@ export default function DamagePage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <Label className="text-xs font-semibold text-slate-600">Total Amount (₹)</Label>
+                      <Label htmlFor="damage-amount" className="text-xs font-semibold text-slate-600">Total Amount (₹)</Label>
                       <Input
+                        id="damage-amount"
                         className="rounded-xl border-slate-200"
                         type="number"
                         min={0}
@@ -609,11 +635,12 @@ export default function DamagePage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs font-semibold text-slate-600 flex items-center gap-1">
-                        <ImageIcon className="h-3.5 w-3.5 text-slate-400" /> Photos
+                      <Label htmlFor="damage-photos" className="text-xs font-semibold text-slate-600 flex items-center gap-1">
+                        <ImageIcon className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" /> Photos
                       </Label>
                       <Input
-                        className="rounded-xl border-slate-200 text-xs text-slate-500"
+                        id="damage-photos"
+                        className="rounded-xl border-slate-200 text-xs text-slate-600"
                         type="file" accept="image/*" multiple
                         onChange={(e) => setForm((f) => ({ ...f, photos: Array.from(e.target.files ?? []) }))}
                       />
@@ -625,10 +652,16 @@ export default function DamagePage() {
                       {form.photos.map((p, i) => (
                         <span key={i} className="text-xs font-medium bg-slate-100 text-slate-600 rounded-lg px-2.5 py-1 flex items-center gap-1.5 border border-slate-200">
                           {p.name}
-                          <X
-                            className="h-3 w-3 cursor-pointer text-slate-400 hover:text-slate-700"
+                          {/* A11Y: was a clickable <svg>, which isn't keyboard
+                              reachable and has no name. Now a real button. */}
+                          <button
+                            type="button"
+                            aria-label={`Remove photo ${p.name}`}
+                            className="text-slate-500 hover:text-slate-700"
                             onClick={() => setForm((f) => ({ ...f, photos: f.photos.filter((_, idx) => idx !== i) }))}
-                          />
+                          >
+                            <X className="h-3 w-3" aria-hidden="true" />
+                          </button>
                         </span>
                       ))}
                     </div>
@@ -643,11 +676,11 @@ export default function DamagePage() {
                     <Label className="text-xs font-semibold text-slate-600">Responsible Tenants</Label>
                     <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-36 overflow-y-auto">
                       {form.roomIds.length === 0 ? (
-                        <p className="text-xs text-slate-400 px-3 py-2 font-medium">Select room(s) first</p>
+                        <p className="text-xs text-slate-600 px-3 py-2 font-medium">Select room(s) first</p>
                       ) : loadingTenants ? (
-                        <p className="text-xs text-slate-400 px-3 py-2 font-medium">Loading tenants…</p>
+                        <p className="text-xs text-slate-600 px-3 py-2 font-medium">Loading tenants…</p>
                       ) : roomTenants.length === 0 ? (
-                        <p className="text-xs text-slate-400 px-3 py-2 font-medium">No active tenants in selected room(s)</p>
+                        <p className="text-xs text-slate-600 px-3 py-2 font-medium">No active tenants in selected room(s)</p>
                       ) : (
                         roomTenants.map((t) => (
                           <label key={t.id} className="flex items-center gap-2.5 px-3 py-2 text-sm font-medium cursor-pointer hover:bg-slate-50 text-slate-700">
@@ -658,7 +691,7 @@ export default function DamagePage() {
                       )}
                     </div>
                     {form.tenantIds.length > 0 && form.totalAmount > 0 && (
-                      <p className="text-xs font-medium text-blue-600 pt-1">
+                      <p className="text-xs font-medium text-blue-700 pt-1">
                         Each of {form.tenantIds.length} tenant{form.tenantIds.length > 1 ? "s" : ""} will be billed ₹
                         {(form.totalAmount / form.tenantIds.length).toFixed(2)}
                       </p>
@@ -666,8 +699,9 @@ export default function DamagePage() {
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-slate-600">Notes (optional)</Label>
+                    <Label htmlFor="damage-notes" className="text-xs font-semibold text-slate-600">Notes (optional)</Label>
                     <Textarea
+                      id="damage-notes"
                       className="rounded-xl border-slate-200"
                       rows={2}
                       value={form.notes}

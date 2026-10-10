@@ -22,6 +22,21 @@ import {
   CalendarDays, ChevronRight, Zap, RefreshCw,
 } from "lucide-react";
 
+/* ------------------------------------------------------------------ */
+/* Accessible colour tokens (WCAG AA = 4.5:1 for normal text)          */
+/* Old values that FAILED are noted on the right.                      */
+/* ------------------------------------------------------------------ */
+const C = {
+  muted:      "#64748b", // 4.8:1 on white   (was #94a3b8 → 2.6:1)
+  subtle:     "#475569", // 7.6:1 on white / 7.1:1 on #f8fafc (table headers, footers, tinted bg)
+  link:       "#4f46e5", // 6.3:1 on white   (was #6366f1 → 4.5:1 borderline)
+  activeBg:   "#dcfce7",
+  activeText: "#166534", // 6.9:1 on #dcfce7 (was #16a34a → 2.9:1)
+  inactiveBg: "#f1f5f9",
+  inactiveText: "#475569", // 7.0:1 on #f1f5f9 (was #64748b → 4.3:1)
+  warning:    "#b45309", // 5.0:1 on white   (was #f59e0b → 2.1:1)
+};
+
 interface ExtendedAdminRequest {
   email: string;
   password: string;
@@ -43,7 +58,7 @@ function ActivityIcon({ type }: { type: string }) {
 
 function SkeletonCard() {
   return (
-    <div className="sa-card" style={{ gap: 8 }}>
+    <div className="sa-card" style={{ gap: 8 }} aria-hidden="true">
       <div style={{ height: 12, width: "60%", background: "#f1f5f9", borderRadius: 6 }} />
       <div style={{ height: 28, width: "40%", background: "#e2e8f0", borderRadius: 6, margin: "4px 0" }} />
       <div style={{ height: 10, width: "50%", background: "#f1f5f9", borderRadius: 6 }} />
@@ -52,10 +67,9 @@ function SkeletonCard() {
   );
 }
 
+/* Full Indian-grouped amount: 200000 -> ₹2,00,000 */
 function formatINR(amount: number): string {
-  if (amount >= 10_00_000) return `₹${(amount / 10_00_000).toFixed(1)}L`;
-  if (amount >= 1_000)     return `₹${amount.toLocaleString("en-IN")}`;
-  return `₹${amount}`;
+  return `₹${amount.toLocaleString("en-IN")}`;
 }
 
 export default function SuperAdminPage() {
@@ -113,12 +127,12 @@ export default function SuperAdminPage() {
     }
   }, [adminPage]);
 
-useEffect(() => {
-  (async () => {
-    await loadStats();   // 3 parallel requests finish first
-    await loadAdmins();  // then this 4th one starts
-  })();
-}, [loadStats, loadAdmins]);
+  useEffect(() => {
+    (async () => {
+      await loadStats();   // 3 parallel requests finish first
+      await loadAdmins();  // then this 4th one starts
+    })();
+  }, [loadStats, loadAdmins]);
   useEffect(() => { if (!dialogOpen) setHostelSearch(""); }, [dialogOpen]);
 
   const totalActiveTenants = dashboard?.totalTenants ?? 0;
@@ -194,54 +208,76 @@ useEffect(() => {
   const viewHostel = viewTarget?.hostelId != null ? hostels.find(h => h.id === viewTarget.hostelId) : undefined;
   const viewPlanName = (viewHostel as any)?.planName ?? null;
 
+  const activeBadgeStyle: React.CSSProperties = {
+    fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
+    background: C.activeBg, color: C.activeText,
+  };
+
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         .sa-wrap { font-family: 'Inter', sans-serif; background: #f8fafc; min-height: 100%; }
         .sa-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 4px 0 20px; }
-        .sa-date { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; font-weight: 500; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 12px; background: #fff; }
-        .sa-refresh-btn { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #64748b; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 12px; background: #fff; cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
-        .sa-refresh-btn:hover { background: #f1f5f9; border-color: #cbd5e1; color: #374151; }
-        .sa-stats { display: grid; grid-template-columns: repeat(5,1fr); gap: 14px; margin-bottom: 20px; }
-        @media(max-width:1100px){ .sa-stats { grid-template-columns: repeat(3,1fr); } }
-        @media(max-width:700px){ .sa-stats { grid-template-columns: repeat(2,1fr); } }
-        .sa-card { background: #fff; border-radius: 14px; border: 1px solid #e8ecf0; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.04); transition: box-shadow .2s, transform .15s; }
+        .sa-date { display: flex; align-items: center; gap: 6px; font-size: 13px; color: ${C.subtle}; font-weight: 500; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 12px; background: #fff; }
+        .sa-refresh-btn { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: ${C.subtle}; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 12px; background: #fff; cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
+        .sa-refresh-btn:hover { background: #f1f5f9; border-color: #cbd5e1; color: #1e293b; }
+        .sa-refresh-btn:disabled { cursor: not-allowed; opacity: .75; }
+        .sa-stats { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 14px; margin-bottom: 20px; }
+        @media(max-width:1100px){ .sa-stats { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+        @media(max-width:700px){
+          .sa-stats { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-bottom: 14px; }
+          /* 5th card fills the empty slot so the 2-col grid has no gap */
+          .sa-stats > .sa-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+          .sa-card { padding: 14px; position: relative; }
+          .sa-card-value { font-size: 24px; }
+          /* Icon pinned top-right so the number can use the whole card width */
+          .sa-card-icon { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; }
+          .sa-card-top > div:first-child { width: 100%; min-width: 0; }
+          .sa-card-label { padding-right: 38px; }
+          .sa-card-value.sa-money { font-size: 21px; }
+          .sa-card-value.sa-money-long { font-size: 17px; }
+          .sa-toolbar { padding-bottom: 12px; }
+        }
+        .sa-card { background: #fff; border-radius: 14px; border: 1px solid #e8ecf0; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.04); transition: box-shadow .2s, transform .15s; min-width: 0; }
         .sa-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.08); transform: translateY(-1px); }
-        .sa-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
+        .sa-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
         .sa-card-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .sa-card-label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
-        .sa-card-value { font-size: 28px; font-weight: 700; color: #0f172a; line-height: 1; margin-bottom: 2px; }
-        .sa-card-sub { font-size: 11px; color: #94a3b8; }
-        .sa-card-growth { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: #10b981; margin-top: 8px; }
-        .sa-card-growth span { color: #94a3b8; font-weight: 400; }
+        .sa-card-label { font-size: 11px; font-weight: 600; color: ${C.muted}; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+        .sa-card-value { font-size: 28px; font-weight: 700; color: #0f172a; line-height: 1; margin-bottom: 2px; white-space: nowrap; }
+        .sa-card-value.sa-money { font-size: 20px; }
+        .sa-card-value.sa-money-long { font-size: 16px; }
+        .sa-card-sub { font-size: 11px; color: ${C.muted}; }
+        .sa-card-growth { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: ${C.activeText}; margin-top: 8px; }
+        .sa-card-growth span { color: ${C.muted}; font-weight: 400; }
         .sa-two-col { display: grid; grid-template-columns: 1fr 360px; gap: 16px; margin-bottom: 20px; }
         @media(max-width:960px){ .sa-two-col { grid-template-columns: 1fr; } }
         .sa-panel { background: #fff; border-radius: 14px; border: 1px solid #e8ecf0; box-shadow: 0 1px 4px rgba(0,0,0,.04); overflow: hidden; }
         .sa-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 14px; border-bottom: 1px solid #f1f5f9; }
         .sa-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; }
-        .sa-view-all { font-size: 12px; font-weight: 600; color: #6366f1; background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 3px; font-family: 'Inter', sans-serif; padding: 0; }
+        .sa-view-all { font-size: 12px; font-weight: 600; color: ${C.link}; background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 3px; font-family: 'Inter', sans-serif; padding: 0; }
         .sa-view-all:hover { text-decoration: underline; }
+        .sa-view-all:focus-visible, .sa-refresh-btn:focus-visible, .sa-icon-btn:focus-visible { outline: 2px solid ${C.link}; outline-offset: 2px; }
         .sa-occ-table { width: 100%; border-collapse: collapse; }
-        .sa-occ-table thead tr th { padding: 10px 20px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #94a3b8; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
+        .sa-occ-table thead tr th { padding: 10px 20px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: ${C.subtle}; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
         .sa-occ-table tbody tr { border-bottom: 1px solid #f8fafc; transition: background .12s; }
         .sa-occ-table tbody tr:last-child { border-bottom: none; }
         .sa-occ-table tbody tr:hover { background: #f8fafc; }
         .sa-occ-table tbody td { padding: 12px 20px; vertical-align: middle; }
         .sa-hostel-name { font-size: 13px; font-weight: 600; color: #1e293b; }
-        .sa-hostel-loc  { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+        .sa-hostel-loc  { font-size: 11px; color: ${C.muted}; margin-top: 2px; }
         .sa-hostel-row-icon { width: 30px; height: 30px; border-radius: 8px; background: #eff6ff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .sa-active-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; background: #dcfce7; color: #16a34a; font-size: 11px; font-weight: 600; }
-        .sa-occ-footer { padding: 12px 20px; font-size: 12px; color: #94a3b8; border-top: 1px solid #f1f5f9; background: #fafafa; }
-        .sa-occ-footer strong { color: #6366f1; }
+        .sa-active-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; background: ${C.activeBg}; color: ${C.activeText}; font-size: 11px; font-weight: 600; }
+        .sa-occ-footer { padding: 12px 20px; font-size: 12px; color: ${C.subtle}; border-top: 1px solid #f1f5f9; background: #fafafa; }
+        .sa-occ-footer strong { color: ${C.link}; }
         .sa-activity-list { padding: 8px 0; }
         .sa-activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 20px; transition: background .12s; border-bottom: 1px solid #f8fafc; }
         .sa-activity-item:last-child { border-bottom: none; }
         .sa-activity-item:hover { background: #f8fafc; }
         .sa-activity-text { font-size: 12.5px; font-weight: 500; color: #1e293b; line-height: 1.45; }
-        .sa-activity-time { font-size: 11px; color: #94a3b8; margin-top: 3px; }
+        .sa-activity-time { font-size: 11px; color: ${C.muted}; margin-top: 3px; }
         .sa-sub-table { width: 100%; border-collapse: collapse; }
-        .sa-sub-table thead tr th { padding: 10px 20px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #94a3b8; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
+        .sa-sub-table thead tr th { padding: 10px 20px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: ${C.subtle}; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
         .sa-sub-table tbody tr { border-bottom: 1px solid #f8fafc; transition: background .12s; }
         .sa-sub-table tbody tr:last-child { border-bottom: none; }
         .sa-sub-table tbody tr:hover { background: #f8fafc; }
@@ -249,22 +285,26 @@ useEffect(() => {
         .sa-admin-panel { background: #fff; border-radius: 14px; border: 1px solid #e8ecf0; box-shadow: 0 1px 4px rgba(0,0,0,.04); overflow: hidden; }
         .sa-admin-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid #f1f5f9; }
         .sa-admin-table { width: 100%; border-collapse: collapse; }
-        .sa-admin-table thead tr th { padding: 10px 20px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #94a3b8; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
+        .sa-admin-table thead tr th { padding: 10px 20px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: ${C.subtle}; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
         .sa-admin-table tbody tr { border-bottom: 1px solid #f8fafc; transition: background .12s; }
         .sa-admin-table tbody tr:hover { background: #f8fafc; }
         .sa-admin-table tbody td { padding: 13px 20px; font-size: 13px; color: #1e293b; vertical-align: middle; }
-        .sa-admin-pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-top: 1px solid #f1f5f9; background: #fafafa; font-size: 12px; color: #64748b; }
+        .sa-admin-pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-top: 1px solid #f1f5f9; background: #fafafa; font-size: 12px; color: ${C.subtle}; }
         .sa-icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e8ecf0; background: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all .12s; padding: 0; }
         .sa-icon-btn svg { display: block; flex-shrink: 0; pointer-events: none; }
         .sa-icon-btn:hover { background: #f1f5f9; border-color: #cbd5e1; }
         .sa-icon-btn.danger:hover { background: #fef2f2; border-color: #fca5a5; }
         .sa-skeleton-pulse { animation: pulse 1.5s ease-in-out infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-        .sa-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: #94a3b8; font-size: 13px; gap: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) {
+          .sa-skeleton-pulse, .sa-card { animation: none; transition: none; }
+        }
+        .sa-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: ${C.muted}; font-size: 13px; gap: 8px; }
         .sa-plan-trigger { height: 28px; font-size: 11px; border-radius: 7px; }
         .sa-view-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
         .sa-view-row:last-child { border-bottom: none; }
-        .sa-view-label { font-size: 12px; color: #94a3b8; font-weight: 600; }
+        .sa-view-label { font-size: 12px; color: ${C.muted}; font-weight: 600; }
         .sa-view-value { font-size: 13px; color: #0f172a; font-weight: 600; text-align: right; }
       `}</style>
 
@@ -273,12 +313,12 @@ useEffect(() => {
         <div className="sa-toolbar">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div className="sa-date">
-              <CalendarDays size={13} />
+              <CalendarDays size={13} aria-hidden="true" />
               {new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
             </div>
             {!isAdminsView && (
               <button type="button" className="sa-refresh-btn" onClick={loadStats} disabled={statsLoading}>
-                <RefreshCw size={13} style={{ animation: statsLoading ? "spin 1s linear infinite" : "none" }} />
+                <RefreshCw size={13} aria-hidden="true" style={{ animation: statsLoading ? "spin 1s linear infinite" : "none" }} />
                 {statsLoading ? "Loading…" : "Refresh"}
               </button>
             )}
@@ -287,17 +327,17 @@ useEffect(() => {
             <button
               type="button"
               className="sa-view-all"
-              style={{ fontSize: 13, padding: "7px 14px", border: "1px solid #e0e7ff", borderRadius: 8, background: "#eef2ff", color: "#4f46e5" }}
+              style={{ fontSize: 13, padding: "7px 14px", border: "1px solid #e0e7ff", borderRadius: 8, background: "#eef2ff", color: C.link }}
               onClick={() => navigate("/super-admin/hostels")}
             >
-              Manage Admins <ChevronRight size={13} />
+              Manage Admins <ChevronRight size={13} aria-hidden="true" />
             </button>
           )}
           {isAdminsView && (
             <button
               type="button"
               className="sa-view-all"
-              style={{ fontSize: 13, padding: "7px 14px", border: "1px solid #e0e7ff", borderRadius: 8, background: "#eef2ff", color: "#4f46e5" }}
+              style={{ fontSize: 13, padding: "7px 14px", border: "1px solid #e0e7ff", borderRadius: 8, background: "#eef2ff", color: C.link }}
               onClick={() => navigate("/super-admin")}
             >
               ← Back to Dashboard
@@ -320,7 +360,7 @@ useEffect(() => {
                         <div className="sa-card-sub">Active Hostels</div>
                       </div>
                       <div className="sa-card-icon" style={{ background: "#eff6ff" }}>
-                        <Building2 size={20} color="#3b82f6" />
+                        <Building2 size={20} color="#3b82f6" aria-hidden="true" />
                       </div>
                     </div>
                   </div>
@@ -333,7 +373,7 @@ useEffect(() => {
                         <div className="sa-card-sub">Active Admins</div>
                       </div>
                       <div className="sa-card-icon" style={{ background: "#f5f3ff" }}>
-                        <Users size={20} color="#8b5cf6" />
+                        <Users size={20} color="#8b5cf6" aria-hidden="true" />
                       </div>
                     </div>
                   </div>
@@ -346,7 +386,7 @@ useEffect(() => {
                         <div className="sa-card-sub">Across All Hostels</div>
                       </div>
                       <div className="sa-card-icon" style={{ background: "#f0fdf4" }}>
-                        <UserCheck size={20} color="#10b981" />
+                        <UserCheck size={20} color="#10b981" aria-hidden="true" />
                       </div>
                     </div>
                   </div>
@@ -355,13 +395,17 @@ useEffect(() => {
                     <div className="sa-card-top">
                       <div>
                         <div className="sa-card-label">Monthly Revenue</div>
-                        <div className="sa-card-value" style={{ fontSize: monthlyRevenue >= 1_000 ? 20 : 28 }}>
-                          {monthlyRevenue > 0 ? formatINR(monthlyRevenue) : `₹0`}
+                        <div
+                          className={`sa-card-value sa-money${formatINR(monthlyRevenue).length > 11 ? " sa-money-long" : ""}`}
+                          style={{ whiteSpace: "nowrap", overflowWrap: "normal" }}
+                          title={formatINR(monthlyRevenue)}
+                        >
+                          {formatINR(monthlyRevenue)}
                         </div>
                         <div className="sa-card-sub">Total Collections</div>
                       </div>
                       <div className="sa-card-icon" style={{ background: "#fff7ed" }}>
-                        <IndianRupee size={20} color="#f97316" />
+                        <IndianRupee size={20} color="#f97316" aria-hidden="true" />
                       </div>
                     </div>
                   </div>
@@ -374,7 +418,7 @@ useEffect(() => {
                         <div className="sa-card-sub">Across Hostels</div>
                       </div>
                       <div className="sa-card-icon" style={{ background: "#faf5ff" }}>
-                        <Crown size={20} color="#a855f7" />
+                        <Crown size={20} color="#a855f7" aria-hidden="true" />
                       </div>
                     </div>
                   </div>
@@ -387,7 +431,7 @@ useEffect(() => {
                 <div className="sa-panel-header">
                   <span className="sa-panel-title">Hostels Overview</span>
                   <button type="button" className="sa-view-all" onClick={() => navigate("/super-admin/hostels")}>
-                    View All <ChevronRight size={12} />
+                    View All <ChevronRight size={12} aria-hidden="true" />
                   </button>
                 </div>
 
@@ -395,11 +439,12 @@ useEffect(() => {
                   <div className="sa-empty-state sa-skeleton-pulse">Loading hostel data…</div>
                 ) : hostels.length === 0 ? (
                   <div className="sa-empty-state">
-                    <Building2 size={28} color="#cbd5e1" />
+                    <Building2 size={28} color={C.muted} aria-hidden="true" />
                     No hostels registered yet.
                   </div>
                 ) : (
                   <>
+                    <div className="sa-mobile-table-scroll">
                     <table className="sa-occ-table">
                       <thead>
                         <tr>
@@ -418,7 +463,7 @@ useEffect(() => {
                               <td>
                                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                   <div className="sa-hostel-row-icon">
-                                    <Building2 size={13} color="#3b82f6" />
+                                    <Building2 size={13} color="#3b82f6" aria-hidden="true" />
                                   </div>
                                   <div>
                                     <div className="sa-hostel-name">{h.name}</div>
@@ -428,14 +473,14 @@ useEffect(() => {
                               </td>
                               <td>
                                 {hostelSummary && hostelSummary.tenantCount > 0 ? (
-                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#64748b" }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: C.subtle }}>
                                     {hostelSummary.tenantCount}
                                   </span>
                                 ) : (
-                                  <span style={{ fontSize: 12, color: "#94a3b8" }}>—</span>
+                                  <span style={{ fontSize: 12, color: C.muted }}>—</span>
                                 )}
                               </td>
-                              <td style={{ fontSize: 13, color: "#64748b" }}>
+                              <td style={{ fontSize: 13, color: C.subtle }}>
                                 {hostelBranches.length > 0 ? hostelBranches.length : (h.branchCount ?? "—")}
                               </td>
                               <td>
@@ -446,6 +491,7 @@ useEffect(() => {
                         })}
                       </tbody>
                     </table>
+                    </div>
                     <div className="sa-occ-footer">
                       Showing {Math.min(5, hostels.length)} of <strong>{hostels.length}</strong> hostels
                     </div>
@@ -457,7 +503,7 @@ useEffect(() => {
                 <div className="sa-panel-header">
                   <span className="sa-panel-title">Recent Activity</span>
                   <button type="button" className="sa-view-all" onClick={() => navigate("/super-admin/hostels")}>
-                    View All <ChevronRight size={12} />
+                    View All <ChevronRight size={12} aria-hidden="true" />
                   </button>
                 </div>
                 <div className="sa-activity-list">
@@ -505,7 +551,7 @@ useEffect(() => {
               <div className="sa-panel-header">
                 <span className="sa-panel-title">Hostel Directory</span>
                 <button type="button" className="sa-view-all" onClick={() => navigate("/super-admin/hostels")}>
-                  View All <ChevronRight size={12} />
+                  View All <ChevronRight size={12} aria-hidden="true" />
                 </button>
               </div>
 
@@ -513,10 +559,11 @@ useEffect(() => {
                 <div className="sa-empty-state sa-skeleton-pulse">Loading hostel directory…</div>
               ) : hostels.length === 0 ? (
                 <div className="sa-empty-state">
-                  <Building2 size={28} color="#cbd5e1" />
+                  <Building2 size={28} color={C.muted} aria-hidden="true" />
                   No hostels found.
                 </div>
               ) : (
+                <div className="sa-mobile-table-scroll">
                 <table className="sa-sub-table">
                   <thead>
                     <tr>
@@ -533,23 +580,22 @@ useEffect(() => {
                       return (
                         <tr key={h.id}>
                           <td style={{ fontWeight: 600, color: "#0f172a" }}>{h.name}</td>
-                          <td style={{ color: "#64748b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <td style={{ color: C.subtle, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {h.address || "—"}
                           </td>
-                          <td style={{ color: "#64748b" }}>{h.adminPhone || h.phone || "—"}</td>
-                          <td style={{ color: "#64748b" }}>
+                          <td style={{ color: C.subtle }}>{h.adminPhone || h.phone || "—"}</td>
+                          <td style={{ color: C.subtle }}>
                             {hostelBranches.length > 0 ? hostelBranches.length : (h.branchCount ?? "—")}
                           </td>
                           <td>
-                            <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, background: "#dcfce7", color: "#16a34a" }}>
-                              Active
-                            </span>
+                            <span style={activeBadgeStyle}>Active</span>
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
           </>
@@ -560,7 +606,7 @@ useEffect(() => {
             <div className="sa-admin-panel-header">
               <div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>Admin Management</div>
-                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
                   Manage and provision administrator credentials · {adminTotal} total admin{adminTotal !== 1 ? "s" : ""}
                 </div>
               </div>
@@ -568,12 +614,12 @@ useEffect(() => {
                 onClick={openCreate}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-lg flex items-center gap-1.5"
               >
-                <Plus size={15} /> Create Admin
+                <Plus size={15} aria-hidden="true" /> Create Admin
               </Button>
             </div>
 
             {adminLoading ? (
-              <div style={{ padding: 48, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
+              <div style={{ padding: 48, textAlign: "center", color: C.muted, fontSize: 13 }}>
                 Loading admins…
               </div>
             ) : (
@@ -598,11 +644,12 @@ useEffect(() => {
 
                       return (
                         <tr key={admin.id}>
-                          <td style={{ color: "#94a3b8", fontWeight: 500 }}>{adminPage * 10 + idx + 1}</td>
+                          <td style={{ color: C.muted, fontWeight: 500 }}>{adminPage * 10 + idx + 1}</td>
                           <td>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              {/* #4f46e5 → #7c3aed keeps white initials ≥ 4.5:1 */}
                               <div style={{
-                                width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+                                width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#4f46e5,#7c3aed)",
                                 display: "flex", alignItems: "center", justifyContent: "center",
                                 fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0,
                               }}>
@@ -610,7 +657,7 @@ useEffect(() => {
                               </div>
                               <div>
                                 <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 13 }}>{admin.name || "—"}</div>
-                                <div style={{ fontSize: 11, color: "#94a3b8" }}>{admin.phone || "—"}</div>
+                                <div style={{ fontSize: 11, color: C.muted }}>{admin.phone || "—"}</div>
                               </div>
                             </div>
                           </td>
@@ -618,48 +665,53 @@ useEffect(() => {
                           <td>
                             {admin.hostelName ? (
                               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#1e293b" }}>
-                                <Building2 size={12} color="#94a3b8" />
+                                <Building2 size={12} color={C.muted} aria-hidden="true" />
                                 {admin.hostelName}
                               </span>
                             ) : (
-                              <span style={{ color: "#f59e0b", fontSize: 12, fontWeight: 600 }}>Unassigned</span>
+                              <span style={{ color: C.warning, fontSize: 12, fontWeight: 600 }}>Unassigned</span>
                             )}
                           </td>
                           <td>
                             {adminHostelId == null ? (
-                              <span style={{ fontSize: 11, color: "#cbd5e1" }}>—</span>
+                              <span style={{ fontSize: 11, color: C.muted }}>—</span>
                             ) : hostelPlanName ? (
                               <span style={{ fontSize: 12, fontWeight: 600, color: "#0f172a" }}>
                                 {hostelPlanName}
                               </span>
                             ) : (
-                              <span style={{ fontSize: 11, color: "#94a3b8" }}>No Plan</span>
+                              <span style={{ fontSize: 11, color: C.muted }}>No Plan</span>
                             )}
                           </td>
                           <td>
                             <span style={{
                               fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
-                              background: admin.active ? "#dcfce7" : "#f1f5f9",
-                              color: admin.active ? "#16a34a" : "#64748b",
+                              background: admin.active ? C.activeBg : C.inactiveBg,
+                              color: admin.active ? C.activeText : C.inactiveText,
                             }}>
                               {admin.active ? "Active" : "Inactive"}
                             </span>
                           </td>
                           <td>
                             <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                              <button type="button" className="sa-icon-btn" title="View" onClick={() => openView(admin)}>
-                                <Eye size={13} color="#64748b" />
+                              <button type="button" className="sa-icon-btn" title="View" aria-label="View admin" onClick={() => openView(admin)}>
+                                <Eye size={13} color={C.subtle} />
                               </button>
-                              <button type="button" className="sa-icon-btn" title="Edit" onClick={() => openEdit(admin)}>
-                                <Pencil size={13} color="#64748b" />
+                              <button type="button" className="sa-icon-btn" title="Edit" aria-label="Edit admin" onClick={() => openEdit(admin)}>
+                                <Pencil size={13} color={C.subtle} />
                               </button>
-                              <button type="button" className="sa-icon-btn" title={admin.active ? "Deactivate" : "Activate"} onClick={() => handleToggle(admin)}>
+                              <button
+                                type="button" className="sa-icon-btn"
+                                title={admin.active ? "Deactivate" : "Activate"}
+                                aria-label={admin.active ? "Deactivate admin" : "Activate admin"}
+                                onClick={() => handleToggle(admin)}
+                              >
                                 {admin.active
-                                  ? <ShieldOff size={13} color="#f87171" />
-                                  : <ShieldCheck size={13} color="#34d399" />}
+                                  ? <ShieldOff size={13} color="#dc2626" />
+                                  : <ShieldCheck size={13} color="#059669" />}
                               </button>
-                              <button type="button" className="sa-icon-btn danger" title="Delete" onClick={() => handleDelete(admin.id)}>
-                                <Trash2 size={13} color="#f87171" />
+                              <button type="button" className="sa-icon-btn danger" title="Delete" aria-label="Delete admin" onClick={() => handleDelete(admin.id)}>
+                                <Trash2 size={13} color="#dc2626" />
                               </button>
                             </div>
                           </td>
@@ -670,7 +722,7 @@ useEffect(() => {
                       <tr>
                         <td colSpan={7}>
                           <div className="sa-empty-state">
-                            <Users size={28} color="#cbd5e1" />
+                            <Users size={28} color={C.muted} aria-hidden="true" />
                             No administrators found. Create one to get started.
                           </div>
                         </td>
@@ -706,7 +758,7 @@ useEffect(() => {
             <div className="pt-1">
               <div style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 14, marginBottom: 4, borderBottom: "1px solid #f1f5f9" }}>
                 <div style={{
-                  width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+                  width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(135deg,#4f46e5,#7c3aed)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0,
                 }}>
@@ -714,7 +766,7 @@ useEffect(() => {
                 </div>
                 <div>
                   <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 15 }}>{viewTarget.name || "—"}</div>
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>{viewTarget.email}</div>
+                  <div style={{ fontSize: 12, color: C.muted }}>{viewTarget.email}</div>
                 </div>
               </div>
 
@@ -734,8 +786,8 @@ useEffect(() => {
                 <span className="sa-view-label">Status</span>
                 <span style={{
                   fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
-                  background: viewTarget.active ? "#dcfce7" : "#f1f5f9",
-                  color: viewTarget.active ? "#16a34a" : "#64748b",
+                  background: viewTarget.active ? C.activeBg : C.inactiveBg,
+                  color: viewTarget.active ? C.activeText : C.inactiveText,
                 }}>
                   {viewTarget.active ? "Active" : "Inactive"}
                 </span>
@@ -771,8 +823,9 @@ useEffect(() => {
               { label: "Email Address", key: "email", type: "email", placeholder: "name@gmail.com" },
             ].map(f => (
               <div key={f.key} className="space-y-1">
-                <label className="text-xs font-semibold text-slate-600">{f.label}</label>
+                <label htmlFor={`admin-${f.key}`} className="text-xs font-semibold text-slate-600">{f.label}</label>
                 <Input
+                  id={`admin-${f.key}`}
                   type={f.type}
                   placeholder={f.placeholder}
                   value={(form as any)[f.key]}
@@ -782,8 +835,9 @@ useEffect(() => {
               </div>
             ))}
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-600">Password</label>
+              <label htmlFor="admin-password" className="text-xs font-semibold text-slate-600">Password</label>
               <Input
+                id="admin-password"
                 type="password"
                 placeholder={editTarget ? "Leave blank to keep unchanged" : "••••••••"}
                 value={form.password}
@@ -802,13 +856,14 @@ useEffect(() => {
                 </SelectTrigger>
                 <SelectContent className="max-h-[280px]">
                   <div className="flex items-center px-2 py-1.5 border-b border-slate-100 sticky top-0 bg-white z-10">
-                    <Search className="h-3.5 w-3.5 text-slate-400 mr-2 shrink-0" />
+                    <Search className="h-3.5 w-3.5 text-slate-500 mr-2 shrink-0" aria-hidden="true" />
                     <input
                       type="text" placeholder="Search hostel…"
+                      aria-label="Search hostel"
                       value={hostelSearch}
                       onChange={e => setHostelSearch(e.target.value)}
                       onKeyDown={e => e.stopPropagation()}
-                      className="w-full text-xs bg-transparent outline-none border-none py-0.5 text-slate-800 placeholder-slate-400"
+                      className="w-full text-xs bg-transparent outline-none border-none py-0.5 text-slate-800 placeholder-slate-500"
                     />
                   </div>
                   <div className="pt-1">
@@ -816,20 +871,20 @@ useEffect(() => {
                       <SelectItem key={h.id} value={String(h.id)}>{h.name}</SelectItem>
                     ))}
                     {filteredHostels.length === 0 && (
-                      <p className="text-[11px] text-slate-400 text-center py-3">No matches found</p>
+                      <p className="text-[11px] text-slate-500 text-center py-3">No matches found</p>
                     )}
                   </div>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-slate-400 pt-0.5">Admin screens will be scoped to this hostel.</p>
+              <p className="text-xs text-slate-500 pt-0.5">Admin screens will be scoped to this hostel.</p>
             </div>
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-600">Hostel's Subscription Plan</label>
               {form.hostelId == null ? (
                 <div style={{
-                  border: "1px dashed #e2e8f0", borderRadius: 8, padding: "10px 12px",
-                  fontSize: 12, color: "#94a3b8", background: "#f8fafc",
+                  border: "1px dashed #cbd5e1", borderRadius: 8, padding: "10px 12px",
+                  fontSize: 12, color: C.muted, background: "#f8fafc",
                 }}>
                   Select a hostel above to view its plan
                 </div>
@@ -838,12 +893,12 @@ useEffect(() => {
                   <div style={{
                     border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px",
                     fontSize: 13, fontWeight: 600,
-                    color: selectedHostel?.planName ? "#0f172a" : "#94a3b8",
+                    color: selectedHostel?.planName ? "#0f172a" : C.muted,
                     background: "#f8fafc",
                   }}>
                     {selectedHostel?.planName || "No plan assigned"}
                   </div>
-                  <p className="text-xs text-slate-400 pt-0.5">
+                  <p className="text-xs text-slate-500 pt-0.5">
                     Plan for "{selectedHostel?.name}". Plan editing is currently unavailable here.
                   </p>
                 </>

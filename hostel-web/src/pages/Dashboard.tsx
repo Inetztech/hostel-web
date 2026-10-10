@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useId, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { getDashboard, getUserRole, getBranchId } from "@/lib/store";
 import api from "@/lib/api";
@@ -85,6 +85,8 @@ const adminModeLabels: Record<NonNullable<DetailMode>, string> = {
   overallPending: "Overall Pending",
 };
 
+const TH_CLASS = "text-xs font-semibold text-muted-foreground uppercase tracking-wide";
+
 const fetchAll = async (url: string, extraParams?: Record<string, any>): Promise<any[]> => {
   const first = await api.get(url, {
     params: { page: 0, size: PAGE_SIZE, ...extraParams },
@@ -115,26 +117,63 @@ const fetchAll = async (url: string, extraParams?: Record<string, any>): Promise
   );
 };
 
+/* ───────────── Accessibility helpers ───────────── */
+
+/** Close a modal when Escape is pressed. */
+const useEscapeKey = (onClose: () => void) => {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+};
+
+/** Sortable <th>: keyboard-operable, announces sort direction. */
+const SortHeader = ({
+  label, asc, onToggle, className = "",
+}: { label: string; asc: boolean; onToggle: () => void; className?: string }) => (
+  <th scope="col" aria-sort={asc ? "ascending" : "descending"} className={`${TH_CLASS} ${className}`}>
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={`Sort by ${label}, currently ${asc ? "ascending" : "descending"}`}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+      className="inline-flex items-center gap-1 cursor-pointer select-none rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+    >
+      {label}
+      {asc ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
+    </span>
+  </th>
+);
+
 const PaymentBadge = ({ mode }: { mode: string | null }) => {
   if (!mode) return <span className="text-xs text-muted-foreground">—</span>;
   const upper = mode.toUpperCase();
   if (upper === "CASH") {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-        <Banknote className="h-3 w-3" /> Cash
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+        <Banknote className="h-3 w-3" aria-hidden="true" /> Cash
       </span>
     );
   }
   if (upper === "UPI") {
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
-        <CreditCard className="h-3 w-3" /> UPI
+        <CreditCard className="h-3 w-3" aria-hidden="true" /> UPI
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400 px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">
-      <CreditCard className="h-3 w-3" /> {mode}
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-sky-800 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400 px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">
+      <CreditCard className="h-3 w-3" aria-hidden="true" /> {mode}
     </span>
   );
 };
@@ -143,19 +182,19 @@ const StatusBadge = ({ status }: { status: string }) => {
   const s = status?.toUpperCase();
   if (s === "PAID")
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-        <CheckCircle2 className="h-3 w-3" /> Paid
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> Paid
       </span>
     );
   if (s === "PARTIAL")
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
-        <AlertTriangle className="h-3 w-3" /> Partial
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" /> Partial
       </span>
     );
   return (
     <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400 px-2 py-0.5 rounded-full border border-rose-200 dark:border-rose-800">
-      <AlertTriangle className="h-3 w-3" /> Pending
+      <AlertTriangle className="h-3 w-3" aria-hidden="true" /> Pending
     </span>
   );
 };
@@ -165,15 +204,17 @@ interface StatCardProps {
   icon: React.ElementType; color: string; iconBg: string;
 }
 
+// CONTRAST FIX: label/sub were text-gray-400 (#9ca3af ≈ 2.5:1 on white).
+// Now gray-600 / gray-500 (≥ 4.5:1) — passes WCAG AA.
 const StatCard = ({ label, value, sub, icon: Icon, color, iconBg }: StatCardProps) => (
   <div className="bg-white border border-gray-100 rounded-2xl px-5 py-4 flex items-center justify-between gap-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)] hover:-translate-y-[1px] transition-all duration-200">
     <div className="min-w-0">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 truncate">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 truncate">{label}</p>
       <p className="text-[26px] font-bold leading-tight mt-1 text-gray-900 tabular-nums">{value}</p>
-      {sub && <p className="text-xs text-gray-400 mt-1 truncate">{sub}</p>}
+      {sub && <p className="text-xs text-gray-500 mt-1 truncate">{sub}</p>}
     </div>
     <div className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center ${iconBg}`}>
-      <Icon className={`h-5 w-5 ${color}`} />
+      <Icon className={`h-5 w-5 ${color}`} aria-hidden="true" />
     </div>
   </div>
 );
@@ -184,24 +225,47 @@ interface FinCardProps {
   onClick?: () => void;
 }
 
-const FinCard = ({ label, value, icon: Icon, color, iconBg, accent, onClick }: FinCardProps) => (
-  <div
-    onClick={onClick}
-    className={`relative bg-white border border-gray-100 rounded-2xl px-5 py-4 flex items-center justify-between gap-4 overflow-hidden shadow-[0_1px_2px_rgba(16,24,40,0.04)] ${onClick ? "cursor-pointer hover:shadow-[0_8px_20px_rgba(16,24,40,0.08)] hover:-translate-y-[2px] active:translate-y-0 transition-all duration-200" : ""}`}
-  >
-    <span className={`absolute left-0 top-0 h-full w-1 ${accent}`} />
-    <div className="min-w-0 pl-1.5">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 truncate">{label}</p>
-      <p className={`text-[22px] font-bold leading-tight mt-1 tabular-nums ${color}`}>
-        ₹{Math.round(value).toLocaleString()}
-      </p>
-      {onClick && <p className="text-[10.5px] text-gray-400 mt-1 font-medium">View details →</p>}
+// CONTRAST FIX: label + "View details" now gray-600 (was gray-400).
+// A11Y FIX: clickable card is keyboard-focusable (Tab, Enter, Space) with a
+// descriptive accessible name. Label no longer truncates so it's fully readable.
+const FinCard = ({ label, value, icon: Icon, color, iconBg, accent, onClick }: FinCardProps) => {
+  const amount = `₹${Math.round(value).toLocaleString()}`;
+  const interactive = onClick
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        "aria-label": `${label}: ${amount}. View details`,
+        onClick,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        },
+      }
+    : {};
+
+  return (
+    <div
+      {...interactive}
+      className={`relative bg-white border border-gray-100 rounded-2xl px-5 py-4 flex items-center justify-between gap-4 overflow-hidden shadow-[0_1px_2px_rgba(16,24,40,0.04)] ${
+        onClick
+          ? "cursor-pointer hover:shadow-[0_8px_20px_rgba(16,24,40,0.08)] hover:-translate-y-[2px] active:translate-y-0 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6A35FF]/60"
+          : ""
+      }`}
+    >
+      <span className={`absolute left-0 top-0 h-full w-1 ${accent}`} aria-hidden="true" />
+      <div className="min-w-0 pl-1.5">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 leading-snug">{label}</p>
+        <p className={`text-[22px] font-bold leading-tight mt-1 tabular-nums ${color}`}>{amount}</p>
+        {onClick && <p className="text-xs text-gray-600 mt-1 font-medium">View details →</p>}
+      </div>
+      <div className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center ${iconBg}`}>
+        <Icon className={`h-5 w-5 ${color}`} aria-hidden="true" />
+      </div>
     </div>
-    <div className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center ${iconBg}`}>
-      <Icon className={`h-5 w-5 ${color}`} />
-    </div>
-  </div>
-);
+  );
+};
 
 interface FinanceCardsProps {
   currentCollected: number; currentPending: number;
@@ -214,9 +278,9 @@ const FinanceCardsSection = ({
   overallCollected, overallPending,
   onCardClick,
 }: FinanceCardsProps) => (
-  <div className="grid grid-cols-2 gap-4">
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
     <FinCard label="Collected This Month" value={currentCollected}
-      icon={CheckCircle2} color="text-emerald-600"
+      icon={CheckCircle2} color="text-emerald-700"
       iconBg="bg-emerald-50"
       accent="bg-emerald-400"
       onClick={onCardClick ? () => onCardClick("currentCollected") : undefined} />
@@ -231,7 +295,7 @@ const FinanceCardsSection = ({
       accent="bg-[#6A35FF]"
       onClick={onCardClick ? () => onCardClick("overallCollected") : undefined} />
     <FinCard label="Overall Pending" value={overallPending}
-      icon={TrendingDown} color="text-orange-600"
+      icon={TrendingDown} color="text-orange-700"
       iconBg="bg-orange-50"
       accent="bg-orange-400"
       onClick={onCardClick ? () => onCardClick("overallPending") : undefined} />
@@ -239,8 +303,8 @@ const FinanceCardsSection = ({
 );
 
 const SectionHeading = ({ children }: { children: React.ReactNode }) => (
-  <h2 className="text-[11px] font-semibold mb-4 text-gray-400 uppercase tracking-wider flex items-center gap-2">
-    <span className="h-3 w-[3px] rounded-full bg-blue-500/70" />
+  <h2 className="text-[11px] font-semibold mb-4 text-gray-600 uppercase tracking-wider flex items-center gap-2">
+    <span className="h-3 w-[3px] rounded-full bg-blue-500/70" aria-hidden="true" />
     {children}
   </h2>
 );
@@ -432,21 +496,17 @@ const AdminDetailModal = ({ mode, branchId, onClose }: AdminDetailModalProps) =>
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortAsc, setSortAsc] = useState(false);
+  const titleId = useId();
+
+  useEscapeKey(onClose);
 
   useEffect(() => {
     if (!mode) return;
     setLoading(true); setError(null);
     (async () => {
       try {
-        // CHANGED: this used to try GET /dashboard/tenant first and only
-        // fall back to fetchTenantDetailsFromRents on failure. But that
-        // endpoint is restricted to role TENANT on the backend
-        // (@PreAuthorize("hasRole('TENANT')...") in DashboardController),
-        // so for an ADMIN/WARDEN viewing this modal it was *guaranteed*
-        // to fail every time — spamming the console with 401/403 errors
-        // on every card click, before silently falling through anyway.
-        // There is no admin-facing equivalent of that endpoint, so go
-        // straight to the working client-side computation instead.
+        // /dashboard/tenant is TENANT-only on the backend, so ADMIN/WARDEN
+        // go straight to the client-side computation.
         const data = await fetchTenantDetailsFromRents(mode!, branchId);
         setRows(data);
       } catch {
@@ -480,62 +540,60 @@ const AdminDetailModal = ({ mode, branchId, onClose }: AdminDetailModalProps) =>
       style={{ backgroundColor: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-background rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-background rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border"
+      >
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <div>
-            <h2 className="text-base font-semibold">{mode ? adminModeLabels[mode] : ""}</h2>
+            <h2 id={titleId} className="text-base font-semibold">{mode ? adminModeLabels[mode] : ""}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Tenant-wise breakdown</p>
           </div>
           <button
             onClick={onClose}
             type="button"
+            aria-label="Close dialog"
             style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
-            className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors"
+            className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors focus-visible:ring-2 focus-visible:ring-primary/50"
           >
-            <X className="h-4 w-4 text-gray-500" />
+            <X className="h-4 w-4 text-gray-600" aria-hidden="true" />
           </button>
         </div>
         <div className="px-6 py-3 border-b">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <input type="text" placeholder="Search by name or room…" value={search}
+              aria-label="Search by tenant name or room"
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-3 py-2 text-sm rounded-md border bg-muted/40 focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
         </div>
         <div className="overflow-y-auto flex-1">
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">Loading…</div>
+            <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">Loading…</div>
           ) : error ? (
-            <div className="flex items-center justify-center py-16 text-sm text-destructive">{error}</div>
+            <div role="alert" className="flex items-center justify-center py-16 text-sm text-destructive">{error}</div>
           ) : filtered.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">No records found</div>
           ) : (
             <table className="w-full text-sm">
+              <caption className="sr-only">{mode ? adminModeLabels[mode] : ""} by tenant</caption>
               <thead className="sticky top-0 bg-muted/60 border-b">
                 <tr>
-                  <th className="text-left px-6 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">ID</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tenant</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Room</th>
+                  <th scope="col" className={`text-left px-6 py-3 ${TH_CLASS}`}>ID</th>
+                  <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>Tenant</th>
+                  <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>Room</th>
                   {isCollected ? (
                     <>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pending</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none"
-                        onClick={() => setSortAsc(p => !p)}>
-                        <span className="inline-flex items-center gap-1">
-                          Collected {sortAsc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                        </span>
-                      </th>
+                      <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>Pending</th>
+                      <SortHeader label="Collected" asc={sortAsc} onToggle={() => setSortAsc((p) => !p)} className="text-right px-6 py-3" />
                     </>
                   ) : (
                     <>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Collected</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none"
-                        onClick={() => setSortAsc(p => !p)}>
-                        <span className="inline-flex items-center gap-1">
-                          Pending {sortAsc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                        </span>
-                      </th>
+                      <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>Collected</th>
+                      <SortHeader label="Pending" asc={sortAsc} onToggle={() => setSortAsc((p) => !p)} className="text-right px-6 py-3" />
                     </>
                   )}
                 </tr>
@@ -552,11 +610,11 @@ const AdminDetailModal = ({ mode, branchId, onClose }: AdminDetailModalProps) =>
                     {isCollected ? (
                       <>
                         <td className="px-4 py-3 text-rose-600 font-medium">₹{Math.round(row.pendingAmount).toLocaleString()}</td>
-                        <td className="px-6 py-3 text-right text-emerald-600 font-semibold">₹{Math.round(row.collectedAmount).toLocaleString()}</td>
+                        <td className="px-6 py-3 text-right text-emerald-700 font-semibold">₹{Math.round(row.collectedAmount).toLocaleString()}</td>
                       </>
                     ) : (
                       <>
-                        <td className="px-4 py-3 text-emerald-600 font-medium">₹{Math.round(row.collectedAmount).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-emerald-700 font-medium">₹{Math.round(row.collectedAmount).toLocaleString()}</td>
                         <td className="px-6 py-3 text-right text-rose-600 font-semibold">₹{Math.round(row.pendingAmount).toLocaleString()}</td>
                       </>
                     )}
@@ -571,7 +629,7 @@ const AdminDetailModal = ({ mode, branchId, onClose }: AdminDetailModalProps) =>
             <span className="text-xs text-muted-foreground">
               {filtered.length} tenant{filtered.length !== 1 ? "s" : ""}
             </span>
-            <span className={`text-sm font-bold ${isCollected ? "text-emerald-600" : "text-rose-600"}`}>
+            <span className={`text-sm font-bold ${isCollected ? "text-emerald-700" : "text-rose-600"}`}>
               Total: ₹{Math.round(total).toLocaleString()}
             </span>
           </div>
@@ -593,6 +651,9 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortAsc, setSortAsc] = useState(false);
+  const titleId = useId();
+
+  useEscapeKey(onClose);
 
   useEffect(() => {
     setLoading(true);
@@ -652,59 +713,66 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
       style={{ backgroundColor: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-background rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] overflow-hidden border">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-background rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] overflow-hidden border"
+      >
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <div>
-            <h2 className="text-base font-semibold">{tenantModeLabels[mode]}</h2>
+            <h2 id={titleId} className="text-base font-semibold">{tenantModeLabels[mode]}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Month-wise payment breakdown</p>
           </div>
           <button
             onClick={onClose}
             type="button"
+            aria-label="Close dialog"
             style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
-            className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors"
+            className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors focus-visible:ring-2 focus-visible:ring-primary/50"
           >
-            <X className="h-4 w-4 text-gray-500" />
+            <X className="h-4 w-4 text-gray-600" aria-hidden="true" />
           </button>
         </div>
         <div className="px-6 py-3 border-b">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <input type="text" placeholder="Search by month, mode, or transaction ID…" value={search}
+              aria-label="Search by month, payment mode, or transaction ID"
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-3 py-2 text-sm rounded-md border bg-muted/40 focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
         </div>
         <div className="overflow-y-auto flex-1">
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">Loading records…</div>
+            <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">Loading records…</div>
           ) : error ? (
-            <div className="flex items-center justify-center py-16 text-sm text-destructive">{error}</div>
+            <div role="alert" className="flex items-center justify-center py-16 text-sm text-destructive">{error}</div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
-              <CheckCircle2 className="h-8 w-8 opacity-30" />
+              <CheckCircle2 className="h-8 w-8 opacity-30" aria-hidden="true" />
               <p className="text-sm">No records found</p>
             </div>
           ) : (
             <table className="w-full text-sm">
+              <caption className="sr-only">{tenantModeLabels[mode]}</caption>
               <thead className="sticky top-0 bg-muted/60 border-b">
                 <tr>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">ID</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    <span className="inline-flex items-center gap-1"><Calendar className="h-3 w-3" /> Period</span>
+                  <th scope="col" className={`text-left px-5 py-3 ${TH_CLASS}`}>ID</th>
+                  <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>
+                    <span className="inline-flex items-center gap-1"><Calendar className="h-3 w-3" aria-hidden="true" /> Period</span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    <span className="inline-flex items-center gap-1"><CreditCard className="h-3 w-3" /> Mode</span>
+                  <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>Status</th>
+                  <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>
+                    <span className="inline-flex items-center gap-1"><CreditCard className="h-3 w-3" aria-hidden="true" /> Mode</span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Transaction ID</th>
-                  <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none"
-                    onClick={() => setSortAsc((p) => !p)}>
-                    <span className="inline-flex items-center gap-1 justify-end">
-                      {isPaidMode ? "Paid" : "Pending"}
-                      {sortAsc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                    </span>
-                  </th>
+                  <th scope="col" className={`text-left px-4 py-3 ${TH_CLASS}`}>Transaction ID</th>
+                  <SortHeader
+                    label={isPaidMode ? "Paid" : "Pending"}
+                    asc={sortAsc}
+                    onToggle={() => setSortAsc((p) => !p)}
+                    className="text-right px-5 py-3"
+                  />
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -729,16 +797,16 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
                     <td className="px-5 py-3 text-right">
                       {isPaidMode ? (
                         <div>
-                          <span className="font-semibold text-emerald-600">₹{Math.round(row.paidAmount ?? 0).toLocaleString()}</span>
+                          <span className="font-semibold text-emerald-700">₹{Math.round(row.paidAmount ?? 0).toLocaleString()}</span>
                           {(row.pendingAmount ?? 0) > 0 && (
-                            <div className="text-xs text-rose-500 mt-0.5">+₹{Math.round(row.pendingAmount).toLocaleString()} due</div>
+                            <div className="text-xs text-rose-600 mt-0.5">+₹{Math.round(row.pendingAmount).toLocaleString()} due</div>
                           )}
                         </div>
                       ) : (
                         <div>
                           <span className="font-semibold text-rose-600">₹{Math.round(row.pendingAmount ?? 0).toLocaleString()}</span>
                           {(row.paidAmount ?? 0) > 0 && (
-                            <div className="text-xs text-emerald-600 mt-0.5">₹{Math.round(row.paidAmount).toLocaleString()} paid</div>
+                            <div className="text-xs text-emerald-700 mt-0.5">₹{Math.round(row.paidAmount).toLocaleString()} paid</div>
                           )}
                         </div>
                       )}
@@ -752,7 +820,7 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
         {!loading && filtered.length > 0 && (
           <div className="px-6 py-3 border-t bg-muted/30 flex justify-between items-center">
             <span className="text-xs text-muted-foreground">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</span>
-            <span className={`text-sm font-bold ${isPaidMode ? "text-emerald-600" : "text-rose-600"}`}>
+            <span className={`text-sm font-bold ${isPaidMode ? "text-emerald-700" : "text-rose-600"}`}>
               Total: ₹{Math.round(total).toLocaleString()}
             </span>
           </div>
@@ -777,13 +845,14 @@ const AdminDashboard = ({ data }: { data: GlobalDashboard; userName?: string }) 
     <div>
       {detailMode && <AdminDetailModal mode={detailMode} branchId={null} onClose={() => setDetailMode(null)} />}
 
-      <div className="grid grid-cols-5 gap-4 mb-6">
+      {/* RESPONSIVE FIX: was a fixed grid-cols-5, which clipped cards on narrow screens */}
+      <div className="dashboard-stats-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
         {stats.map((s) => <StatCard key={s.label} {...s} />)}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-1 gap-4 mb-6">
-        <div>
-          <h2 className="text-[14px] font-bold text-gray-900 mb-4">Financial Summary (Rent + EB)</h2>
+      <div className="grid grid-cols-1 gap-4 mb-6">
+        <section aria-labelledby="admin-fin-heading">
+          <h2 id="admin-fin-heading" className="text-[14px] font-bold text-gray-900 mb-4">Financial Summary (Rent + EB)</h2>
           <FinanceCardsSection
             currentCollected={data.rentCollected ?? 0}
             currentPending={data.pendingDues ?? 0}
@@ -791,18 +860,19 @@ const AdminDashboard = ({ data }: { data: GlobalDashboard; userName?: string }) 
             overallPending={data.overallPending ?? 0}
             onCardClick={setDetailMode}
           />
-        </div>
+        </section>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      {/* RESPONSIVE FIX: was a fixed grid-cols-3 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex flex-col min-h-[220px]">
           <h3 className="text-[14px] font-bold text-gray-900 mb-4">Recent Complaints</h3>
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="h-10 w-10 rounded-full bg-[#6A35FF]/10 flex items-center justify-center mb-3">
-              <MessageSquare className="h-5 w-5 text-[#6A35FF]" />
+              <MessageSquare className="h-5 w-5 text-[#6A35FF]" aria-hidden="true" />
             </div>
             <p className="text-[13px] font-semibold text-gray-800">No complaints found.</p>
-            <p className="text-[12px] text-gray-500 mt-1">All clear! No complaints at the moment.</p>
+            <p className="text-[12px] text-gray-600 mt-1">All clear! No complaints at the moment.</p>
           </div>
           <Link to="/complaints" className="mt-4 w-full py-2 border border-gray-100 rounded-lg text-center text-[12px] font-semibold text-[#6A35FF] bg-white hover:bg-gray-50 transition-colors">
             View All Complaints
@@ -813,10 +883,10 @@ const AdminDashboard = ({ data }: { data: GlobalDashboard; userName?: string }) 
           <h3 className="text-[14px] font-bold text-gray-900 mb-4">Upcoming Check-Out</h3>
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center mb-3">
-              <CalendarCheck className="h-5 w-5 text-blue-500" />
+              <CalendarCheck className="h-5 w-5 text-blue-600" aria-hidden="true" />
             </div>
             <p className="text-[13px] font-semibold text-gray-800">No upcoming check-outs.</p>
-            <p className="text-[12px] text-gray-500 mt-1">No tenants scheduled for check-out.</p>
+            <p className="text-[12px] text-gray-600 mt-1">No tenants scheduled for check-out.</p>
           </div>
           <Link to="/checkout" className="mt-4 w-full py-2 border border-gray-100 rounded-lg text-center text-[12px] font-semibold text-[#6A35FF] bg-white hover:bg-gray-50 transition-colors">
             View All Check-Outs
@@ -827,10 +897,10 @@ const AdminDashboard = ({ data }: { data: GlobalDashboard; userName?: string }) 
           <h3 className="text-[14px] font-bold text-gray-900 mb-4">Recent Payments</h3>
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="h-10 w-10 rounded-full bg-emerald-50 flex items-center justify-center mb-3">
-              <Wallet className="h-5 w-5 text-emerald-500" />
+              <Wallet className="h-5 w-5 text-emerald-600" aria-hidden="true" />
             </div>
             <p className="text-[13px] font-semibold text-gray-800">No recent payments.</p>
-            <p className="text-[12px] text-gray-500 mt-1">Payment history will appear here.</p>
+            <p className="text-[12px] text-gray-600 mt-1">Payment history will appear here.</p>
           </div>
           <Link to="/payments" className="mt-4 w-full py-2 border border-gray-100 rounded-lg text-center text-[12px] font-semibold text-[#6A35FF] bg-white hover:bg-gray-50 transition-colors">
             View All Payments
@@ -864,7 +934,7 @@ const WardenDashboard = ({ data, branchId, financials }: WardenDashboardProps) =
       {detailMode && <AdminDetailModal mode={detailMode} branchId={branchId} onClose={() => setDetailMode(null)} />}
 
       <SectionHeading>Branch Overview</SectionHeading>
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
         {stats.map((s) => <StatCard key={s.label} {...s} />)}
       </div>
 
@@ -884,14 +954,14 @@ const WardenDashboard = ({ data, branchId, financials }: WardenDashboardProps) =
         <div className="group bg-white border border-gray-100 rounded-2xl p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:shadow-[0_8px_20px_rgba(106,53,255,0.08)] hover:border-[#6A35FF]/20 flex flex-col min-h-[220px] transition-all duration-300">
           <div className="flex justify-between items-start mb-4">
             <h3 className="text-[14px] font-bold text-gray-900 group-hover:text-[#6A35FF] transition-colors">Recent Complaints</h3>
-            <div className="h-2 w-2 rounded-full bg-[#6A35FF]/30 group-hover:bg-[#6A35FF] transition-colors" />
+            <div className="h-2 w-2 rounded-full bg-[#6A35FF]/30 group-hover:bg-[#6A35FF] transition-colors" aria-hidden="true" />
           </div>
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="h-12 w-12 rounded-full bg-[#6A35FF]/10 flex items-center justify-center mb-3 group-hover:scale-110 group-hover:bg-[#6A35FF]/15 transition-all duration-300">
-              <MessageSquare className="h-5 w-5 text-[#6A35FF]" />
+              <MessageSquare className="h-5 w-5 text-[#6A35FF]" aria-hidden="true" />
             </div>
             <p className="text-[13px] font-semibold text-gray-800">No complaints found.</p>
-            <p className="text-[12px] text-gray-500 mt-1">All clear! No complaints at the moment.</p>
+            <p className="text-[12px] text-gray-600 mt-1">All clear! No complaints at the moment.</p>
           </div>
           <Link to="/complaints" className="mt-4 w-full py-2.5 border border-gray-100 rounded-xl text-center text-[12px] font-semibold text-[#6A35FF] bg-white hover:bg-[#6A35FF] hover:text-white hover:border-[#6A35FF] transition-all duration-300">
             View All Complaints
@@ -900,34 +970,34 @@ const WardenDashboard = ({ data, branchId, financials }: WardenDashboardProps) =
 
         <div className="group bg-white border border-gray-100 rounded-2xl p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:shadow-[0_8px_20px_rgba(59,130,246,0.08)] hover:border-blue-500/20 flex flex-col min-h-[220px] transition-all duration-300">
           <div className="flex justify-between items-start mb-4">
-            <h3 className="text-[14px] font-bold text-gray-900 group-hover:text-blue-500 transition-colors">Upcoming Check-Out</h3>
-            <div className="h-2 w-2 rounded-full bg-blue-500/30 group-hover:bg-blue-500 transition-colors" />
+            <h3 className="text-[14px] font-bold text-gray-900 group-hover:text-blue-600 transition-colors">Upcoming Check-Out</h3>
+            <div className="h-2 w-2 rounded-full bg-blue-500/30 group-hover:bg-blue-500 transition-colors" aria-hidden="true" />
           </div>
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="h-12 w-12 rounded-full bg-blue-50 flex items-center justify-center mb-3 group-hover:scale-110 group-hover:bg-blue-100 transition-all duration-300">
-              <CalendarCheck className="h-5 w-5 text-blue-500" />
+              <CalendarCheck className="h-5 w-5 text-blue-600" aria-hidden="true" />
             </div>
             <p className="text-[13px] font-semibold text-gray-800">No upcoming check-outs.</p>
-            <p className="text-[12px] text-gray-500 mt-1">No tenants scheduled for check-out.</p>
+            <p className="text-[12px] text-gray-600 mt-1">No tenants scheduled for check-out.</p>
           </div>
-          <Link to="/checkout" className="mt-4 w-full py-2.5 border border-gray-100 rounded-xl text-center text-[12px] font-semibold text-blue-500 bg-white hover:bg-blue-500 hover:text-white hover:border-blue-500 transition-all duration-300">
+          <Link to="/checkout" className="mt-4 w-full py-2.5 border border-gray-100 rounded-xl text-center text-[12px] font-semibold text-blue-700 bg-white hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all duration-300">
             View All Check-Outs
           </Link>
         </div>
 
         <div className="group bg-white border border-gray-100 rounded-2xl p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:shadow-[0_8px_20px_rgba(16,185,129,0.08)] hover:border-emerald-500/20 flex flex-col min-h-[220px] transition-all duration-300">
           <div className="flex justify-between items-start mb-4">
-            <h3 className="text-[14px] font-bold text-gray-900 group-hover:text-emerald-500 transition-colors">Recent Payments</h3>
-            <div className="h-2 w-2 rounded-full bg-emerald-500/30 group-hover:bg-emerald-500 transition-colors" />
+            <h3 className="text-[14px] font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">Recent Payments</h3>
+            <div className="h-2 w-2 rounded-full bg-emerald-500/30 group-hover:bg-emerald-500 transition-colors" aria-hidden="true" />
           </div>
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="h-12 w-12 rounded-full bg-emerald-50 flex items-center justify-center mb-3 group-hover:scale-110 group-hover:bg-emerald-100 transition-all duration-300">
-              <Wallet className="h-5 w-5 text-emerald-500" />
+              <Wallet className="h-5 w-5 text-emerald-600" aria-hidden="true" />
             </div>
             <p className="text-[13px] font-semibold text-gray-800">No recent payments.</p>
-            <p className="text-[12px] text-gray-500 mt-1">Payment history will appear here.</p>
+            <p className="text-[12px] text-gray-600 mt-1">Payment history will appear here.</p>
           </div>
-          <Link to="/payments" className="mt-4 w-full py-2.5 border border-gray-100 rounded-xl text-center text-[12px] font-semibold text-emerald-600 bg-white hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-all duration-300">
+          <Link to="/payments" className="mt-4 w-full py-2.5 border border-gray-100 rounded-xl text-center text-[12px] font-semibold text-emerald-700 bg-white hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-all duration-300">
             View All Payments
           </Link>
         </div>
@@ -954,15 +1024,15 @@ const TenantDashboardView = ({ data, financials }: { data: TenantDashboard; fina
         <TenantDetailModal mode={detailMode} tenantId={tenantId} onClose={() => setDetailMode(null)} />
       ) : null}
       <SectionHeading>My Room &amp; Bed Details</SectionHeading>
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <StatCard label="My Room" value={data.myRoomNumber ?? "—"} sub={data.myRoomType ?? "Room type"} icon={Home} color="text-primary" iconBg="bg-primary/10" />
         <StatCard label="My Bed" value={data.myBedNumber ?? "—"} sub="Assigned bed number" icon={Bed} color="text-cyan-600" iconBg="bg-cyan-50" />
         <div className="bg-white border border-gray-100 rounded-2xl px-5 py-4 col-span-1 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-3">Contact</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-3">Contact</p>
           <div className="space-y-1.5 text-sm">
-            <div><span className="text-gray-400 text-xs">Phone: </span><span className="font-medium text-gray-800">{data.tenantPhone ?? "—"}</span></div>
-            <div><span className="text-gray-400 text-xs">Email: </span><span className="font-medium text-xs text-gray-800">{data.tenantEmail ?? "—"}</span></div>
-            <div><span className="text-gray-400 text-xs">Branch: </span><span className="font-medium text-xs text-gray-800">{data.myBranchName ?? "—"}</span></div>
+            <div><span className="text-gray-600 text-xs">Phone: </span><span className="font-medium text-gray-800">{data.tenantPhone ?? "—"}</span></div>
+            <div><span className="text-gray-600 text-xs">Email: </span><span className="font-medium text-xs text-gray-800">{data.tenantEmail ?? "—"}</span></div>
+            <div><span className="text-gray-600 text-xs">Branch: </span><span className="font-medium text-xs text-gray-800">{data.myBranchName ?? "—"}</span></div>
           </div>
         </div>
       </div>
@@ -974,18 +1044,18 @@ const TenantDashboardView = ({ data, financials }: { data: TenantDashboard; fina
               to="/payments"
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-primary hover:opacity-90 transition-opacity px-3.5 py-2 rounded-lg mb-3"
             >
-              <CreditCard className="h-3.5 w-3.5" /> Pay Now
+              <CreditCard className="h-3.5 w-3.5" aria-hidden="true" /> Pay Now
             </Link>
           ) : null}
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <FinCard label="This Month Paid" value={financials.currentMonthPaid} icon={CheckCircle2} color="text-emerald-600" iconBg="bg-emerald-50" accent="bg-emerald-400" onClick={() => setDetailMode("thisMonthPaid")} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FinCard label="This Month Paid" value={financials.currentMonthPaid} icon={CheckCircle2} color="text-emerald-700" iconBg="bg-emerald-50" accent="bg-emerald-400" onClick={() => setDetailMode("thisMonthPaid")} />
           <FinCard label="This Month Pending" value={financials.currentMonthPending} icon={AlertTriangle} color="text-rose-600" iconBg="bg-rose-50" accent="bg-rose-400" onClick={() => setDetailMode("thisMonthPending")} />
           <FinCard label="Overall Paid" value={financials.overallPaid} icon={TrendingUp} color="text-indigo-600" iconBg="bg-indigo-50" accent="bg-indigo-400" onClick={() => setDetailMode("overallPaid")} />
-          <FinCard label="Overall Pending" value={financials.overallPending} icon={TrendingDown} color="text-orange-600" iconBg="bg-orange-50" accent="bg-orange-400" onClick={() => setDetailMode("overallPending")} />
+          <FinCard label="Overall Pending" value={financials.overallPending} icon={TrendingDown} color="text-orange-700" iconBg="bg-orange-50" accent="bg-orange-400" onClick={() => setDetailMode("overallPending")} />
         </div>
         <div className="mt-3">
-          <Link to="/payments" className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors">
+          <Link to="/payments" className="text-xs text-gray-600 underline underline-offset-2 hover:text-foreground transition-colors">
             View full payment history →
           </Link>
         </div>
@@ -1124,21 +1194,21 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24 text-sm text-gray-400 gap-2">
-        <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading dashboard…
+      <div role="status" className="flex items-center justify-center py-24 text-sm text-gray-600 gap-2">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Loading dashboard…
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 gap-3">
+      <div role="alert" className="flex flex-col items-center justify-center py-24 gap-3">
         <p className="text-sm text-destructive font-medium">{error}</p>
         <button
           onClick={() => { hasFetched.current = false; loadDashboard(); }}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-gray-600 underline underline-offset-2 hover:text-foreground transition-colors"
         >
-          <RefreshCw className="h-3 w-3" /> Try again
+          <RefreshCw className="h-3 w-3" aria-hidden="true" /> Try again
         </button>
       </div>
     );

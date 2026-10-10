@@ -31,15 +31,22 @@ const RELATIONS = ["Friend", "Parent", "Sibling", "Relative", "Guardian", "Colle
 
 const todayISO = () => new Date().toISOString().split("T")[0];
 
-/* Shared look: matches the "Add Branch" dialog inputs */
+/* Shared look: matches the "Add Branch" dialog inputs.
+   A11Y: placeholder darkened from slate-400 to slate-500 for contrast on slate-50. */
 const inputCls =
   "h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 " +
-  "placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/30 " +
+  "placeholder:text-slate-500 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/30 " +
   "transition-colors";
 
-const Label = ({ text, required }: { text: string; required?: boolean }) => (
-  <label className="mb-1.5 block text-sm font-semibold text-slate-900">
-    {text} {required && <span className="text-red-500">*</span>}
+/* A11Y: label is now associated with its control through htmlFor/id. */
+const Label = ({ text, htmlFor, required }: { text: string; htmlFor: string; required?: boolean }) => (
+  <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-semibold text-slate-900">
+    {text}{" "}
+    {required && (
+      <span className="text-red-600" aria-hidden="true">
+        *
+      </span>
+    )}
   </label>
 );
 
@@ -83,17 +90,19 @@ export const VisitorRequestModal = ({ open, onOpenChange, onSubmit }: VisitorReq
       <DialogContent className="max-w-[620px] rounded-2xl border-0 bg-white p-8 shadow-2xl">
         <DialogHeader className="space-y-1 text-left">
           <DialogTitle className="text-xl font-bold text-slate-900">Request Visitor Entry</DialogTitle>
-          <DialogDescription className="text-sm text-slate-500">
-            Submit a visitor entry request for <span className="font-semibold text-slate-600">approval</span>
+          <DialogDescription className="text-sm text-slate-600">
+            Submit a visitor entry request for <span className="font-semibold text-slate-700">approval</span>
           </DialogDescription>
         </DialogHeader>
 
         <div className="mt-2 space-y-5">
           <div>
-            <Label text="Visitor Name" required />
+            <Label text="Visitor Name" htmlFor="visitor-name" required />
             <input
+              id="visitor-name"
               type="text"
               autoFocus
+              aria-required="true"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Rahul Kumar"
@@ -103,11 +112,13 @@ export const VisitorRequestModal = ({ open, onOpenChange, onSubmit }: VisitorReq
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
-              <Label text="Contact Phone" required />
+              <Label text="Contact Phone" htmlFor="visitor-phone" required />
               <input
+                id="visitor-phone"
                 type="tel"
                 inputMode="numeric"
                 maxLength={10}
+                aria-required="true"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
                 placeholder="Contact Phone (10 digits)"
@@ -115,9 +126,9 @@ export const VisitorRequestModal = ({ open, onOpenChange, onSubmit }: VisitorReq
               />
             </div>
             <div>
-              <Label text="Relation" required />
+              <Label text="Relation" htmlFor="visitor-relation" required />
               <Select value={relation} onValueChange={setRelation}>
-                <SelectTrigger className={inputCls + " justify-between"}>
+                <SelectTrigger id="visitor-relation" aria-required="true" className={inputCls + " justify-between"}>
                   <SelectValue placeholder="Select relation" />
                 </SelectTrigger>
                 <SelectContent>
@@ -133,19 +144,23 @@ export const VisitorRequestModal = ({ open, onOpenChange, onSubmit }: VisitorReq
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
-              <Label text="Visit Date" required />
+              <Label text="Visit Date" htmlFor="visitor-date" required />
               <input
+                id="visitor-date"
                 type="date"
                 min={todayISO()}
+                aria-required="true"
                 value={visitDate}
                 onChange={(e) => setVisitDate(e.target.value)}
                 className={inputCls}
               />
             </div>
             <div>
-              <Label text="Expected In Time" required />
+              <Label text="Expected In Time" htmlFor="visitor-time" required />
               <input
+                id="visitor-time"
                 type="time"
+                aria-required="true"
                 value={inTime}
                 onChange={(e) => setInTime(e.target.value)}
                 className={inputCls}

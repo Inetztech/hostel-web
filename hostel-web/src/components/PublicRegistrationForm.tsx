@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useId } from "react";
 import { IdProofType } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +11,7 @@ import {
 import { FileText, Clock, Camera, Sparkles, UserCheck, ShieldCheck, Calendar, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; 
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ID_PROOF_TYPE_LIST: IdProofType[] = [
   "AADHAR",
   "PAN",
@@ -33,6 +33,21 @@ export default function PublicRegisterForm({
   onSubmit,
   onCancel,
 }: PublicRegisterFormProps) {
+  // Unique id prefix so every <label htmlFor> points at exactly one control,
+  // even if this form is ever rendered twice on the same page.
+  const uid = useId();
+  const ids = {
+    name: `${uid}-name`,
+    phone: `${uid}-phone`,
+    email: `${uid}-email`,
+    photo: `${uid}-photo`,
+    idType: `${uid}-id-type`,
+    idNumber: `${uid}-id-number`,
+    idDoc: `${uid}-id-doc`,
+    roomTypeLabel: `${uid}-room-type-label`,
+    moveDate: `${uid}-move-date`,
+  };
+
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -40,8 +55,8 @@ export default function PublicRegisterForm({
   const [idProofType, setIdProofType] = useState<IdProofType | "">("");
   const [idProofNumber, setIdProofNumber] = useState("");
   const [idProofDoc, setIdProofDoc] = useState<File | null>(null);
-  const [preferredRoomType, setPreferredRoomType] = useState("");      
-  const [preferredRoomSharing, setPreferredRoomSharing] = useState(""); 
+  const [preferredRoomType, setPreferredRoomType] = useState("");
+  const [preferredRoomSharing, setPreferredRoomSharing] = useState("");
   const [expectedMoveDate, setExpectedMoveDate] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -103,13 +118,20 @@ export default function PublicRegisterForm({
     }
   };
 
+  const labelCls =
+    "block text-xs sm:text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1.5";
+  const inputCls =
+    "w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2.5 text-base sm:text-xs text-white placeholder-stone-500 outline-none focus:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500/50 min-h-11 sm:min-h-0";
+  const fileCls =
+    "w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-300 file:border-0 file:bg-emerald-700 file:text-white file:rounded-lg file:px-2.5 file:py-1 file:mr-2 file:text-[10px] file:font-semibold file:cursor-pointer hover:file:bg-emerald-600";
+
   return (
     <div className="bg-[#0f1117] text-stone-100 rounded-3xl shadow-2xl border border-stone-800/80 overflow-hidden w-full max-w-4xl mx-auto">
       {/* Top Compact Banner */}
-      <div className="px-6 py-4 bg-gradient-to-r from-stone-900 via-[#141824] to-stone-900 border-b border-stone-800/80 flex items-center justify-between">
+      <div className="px-4 sm:px-6 py-4 bg-gradient-to-r from-stone-900 via-[#141824] to-stone-900 border-b border-stone-800/80 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-4 h-4" aria-hidden="true" />
           </div>
           <div>
             <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase block">
@@ -122,71 +144,78 @@ export default function PublicRegisterForm({
         </div>
 
         <div className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-800/50 px-3 py-1 rounded-xl text-[11px] text-emerald-300 font-semibold">
-          <Clock className="w-3.5 h-3.5 text-emerald-400 animate-pulse" /> Pending Review
+          <Clock className="w-3.5 h-3.5 text-emerald-400 animate-pulse" aria-hidden="true" /> Pending Review
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-5 space-y-4">
+      <form onSubmit={handleSubmit} className="p-3 sm:p-5 space-y-4">
 
         {/* Section 1: Applicant Details */}
-        <div className="bg-stone-900/40 border border-stone-800/60 p-4 rounded-2xl space-y-3">
+        <div className="bg-stone-900/40 border border-stone-800/60 p-3 sm:p-4 rounded-2xl space-y-3">
           <div className="flex items-center gap-2 pb-2 border-b border-stone-800/80">
             <div className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
-              <UserCheck className="w-3 h-3" />
+              <UserCheck className="w-3 h-3" aria-hidden="true" />
             </div>
-            <p className="text-[11px] font-black uppercase tracking-wider text-emerald-400">
+            <p className="text-xs sm:text-[11px] font-black uppercase tracking-wider text-emerald-400">
               1. Applicant Details
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
-                Full Name <span className="text-rose-400">*</span>
+              <label htmlFor={ids.name} className={labelCls}>
+                Full Name <span className="text-rose-400" aria-hidden="true">*</span>
               </label>
               <input
+                id={ids.name}
                 type="text"
                 required
+                autoComplete="name"
                 placeholder="Rahul Sharma"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white placeholder-stone-600 outline-none focus:border-emerald-500"
+                className={inputCls}
               />
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
-                Phone Number <span className="text-rose-400">*</span>
+              <label htmlFor={ids.phone} className={labelCls}>
+                Phone Number <span className="text-rose-400" aria-hidden="true">*</span>
               </label>
               <input
+                id={ids.phone}
                 type="tel"
                 required
+                autoComplete="tel"
                 placeholder="+91 98765 43210"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white placeholder-stone-600 outline-none focus:border-emerald-500"
+                className={inputCls}
               />
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
+              <label htmlFor={ids.email} className={labelCls}>
                 Email Address
               </label>
               <input
+                id={ids.email}
                 type="email"
+                autoComplete="email"
                 placeholder="applicant@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white placeholder-stone-600 outline-none focus:border-emerald-500"
+                className={inputCls}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
-              Tenant Photo
+            <label htmlFor={ids.photo} className={labelCls}>
+              Tenant Photo (JPG / PNG)
             </label>
             <input
+              id={ids.photo}
               ref={photoInputRef}
               type="file"
               accept=".jpg,.jpeg,.png"
@@ -210,37 +239,42 @@ export default function PublicRegisterForm({
                 }
                 setTenantPhoto(file);
               }}
-              className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-[11px] text-stone-300 file:border-0 file:bg-emerald-600 file:text-white file:rounded-lg file:px-2.5 file:py-1 file:mr-2 file:text-[10px] file:font-semibold file:cursor-pointer hover:file:bg-emerald-500"
+              className={fileCls}
             />
             {tenantPhoto && (
               <p className="text-[10px] text-emerald-400 flex items-center gap-1 mt-1 font-medium">
-                <Camera className="w-3 h-3" /> {tenantPhoto.name}
+                <Camera className="w-3 h-3" aria-hidden="true" /> {tenantPhoto.name}
               </p>
             )}
           </div>
         </div>
 
         {/* Section 2: Identity Verification */}
-        <div className="bg-stone-900/40 border border-stone-800/60 p-4 rounded-2xl space-y-3">
+        <div className="bg-stone-900/40 border border-stone-800/60 p-3 sm:p-4 rounded-2xl space-y-3">
           <div className="flex items-center gap-2 pb-2 border-b border-stone-800/80">
             <div className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
-              <ShieldCheck className="w-3 h-3" />
+              <ShieldCheck className="w-3 h-3" aria-hidden="true" />
             </div>
-            <p className="text-[11px] font-black uppercase tracking-wider text-emerald-400">
+            <p className="text-xs sm:text-[11px] font-black uppercase tracking-wider text-emerald-400">
               2. Identity Verification
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
+              <label htmlFor={ids.idType} className={labelCls}>
                 ID Proof Type
               </label>
               <Select
                 value={idProofType}
                 onValueChange={(val) => setIdProofType(val as IdProofType)}
               >
-                <SelectTrigger className="bg-stone-950 border-stone-800 text-xs text-white h-9 rounded-xl">
+                {/* id + aria-label give the Radix combobox button an accessible name */}
+                <SelectTrigger
+                  id={ids.idType}
+                  aria-label="ID proof type"
+                  className="bg-stone-950 border-stone-800 text-base sm:text-xs text-white h-11 sm:h-9 rounded-xl"
+                >
                   <SelectValue placeholder="Select ID Type" />
                 </SelectTrigger>
                 <SelectContent className="bg-stone-900 border-stone-800 text-white rounded-xl shadow-xl">
@@ -254,24 +288,26 @@ export default function PublicRegisterForm({
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
+              <label htmlFor={ids.idNumber} className={labelCls}>
                 ID Number
               </label>
               <input
+                id={ids.idNumber}
                 type="text"
                 placeholder="Enter ID Number"
                 value={idProofNumber}
                 onChange={(e) => setIdProofNumber(e.target.value)}
-                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white placeholder-stone-600 outline-none focus:border-emerald-500"
+                className={inputCls}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
+            <label htmlFor={ids.idDoc} className={labelCls}>
               Upload ID Document (PDF / Image)
             </label>
             <input
+              id={ids.idDoc}
               ref={fileInputRef}
               type="file"
               accept=".pdf,.jpg,.jpeg,.png"
@@ -302,33 +338,38 @@ export default function PublicRegisterForm({
                 }
                 setIdProofDoc(file);
               }}
-              className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-[11px] text-stone-300 file:border-0 file:bg-emerald-600 file:text-white file:rounded-lg file:px-2.5 file:py-1 file:mr-2 file:text-[10px] file:font-semibold file:cursor-pointer hover:file:bg-emerald-500"
+              className={fileCls}
             />
             {idProofDoc && (
               <p className="text-[10px] text-emerald-400 flex items-center gap-1 mt-1 font-medium">
-                <FileText className="w-3 h-3" /> {idProofDoc.name}
+                <FileText className="w-3 h-3" aria-hidden="true" /> {idProofDoc.name}
               </p>
             )}
           </div>
         </div>
 
         {/* Section 3: Stay Preferences */}
-        <div className="bg-stone-900/40 border border-stone-800/60 p-4 rounded-2xl space-y-3">
+        <div className="bg-stone-900/40 border border-stone-800/60 p-3 sm:p-4 rounded-2xl space-y-3">
           <div className="flex items-center gap-2 pb-2 border-b border-stone-800/80">
             <div className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
-              <Calendar className="w-3 h-3" />
+              <Calendar className="w-3 h-3" aria-hidden="true" />
             </div>
-            <p className="text-[11px] font-black uppercase tracking-wider text-emerald-400">
+            <p className="text-xs sm:text-[11px] font-black uppercase tracking-wider text-emerald-400">
               3. Stay Preferences
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
+              {/* A group of radios is labelled by a span + role="radiogroup", not a <label> */}
+              <span id={ids.roomTypeLabel} className={labelCls}>
                 Preferred Room Type
-              </label>
-              <div className="space-y-2 mt-1">
+              </span>
+              <div
+                role="radiogroup"
+                aria-labelledby={ids.roomTypeLabel}
+                className="space-y-2 mt-1"
+              >
                 {sharingOptions.length > 0 ? (
                   sharingOptions.map((opt) => (
                     <label
@@ -342,7 +383,7 @@ export default function PublicRegisterForm({
                       <span className="flex items-center gap-2 text-xs text-white">
                         <input
                           type="radio"
-                          name="preferredRoomType"
+                          name={`${uid}-preferredRoomType`}
                           checked={preferredRoomType === opt.label}
                           onChange={() => {
                             setPreferredRoomType(opt.label);
@@ -362,7 +403,7 @@ export default function PublicRegisterForm({
                   ))
                 ) : (
                   <div className="flex items-center gap-2 px-3 py-3 rounded-xl border border-dashed border-stone-800 bg-stone-950 text-stone-400 text-xs">
-                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" aria-hidden="true" />
                     <span>No room sharing options available for this property yet.</span>
                   </div>
                 )}
@@ -370,36 +411,38 @@ export default function PublicRegisterForm({
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold tracking-wider uppercase text-stone-400 mb-1">
-                Expected Move-In Date <span className="text-rose-400">*</span>
+              <label htmlFor={ids.moveDate} className={labelCls}>
+                Expected Move-In Date <span className="text-rose-400" aria-hidden="true">*</span>
               </label>
               <input
+                id={ids.moveDate}
                 type="date"
                 required
                 value={expectedMoveDate}
                 onChange={(e) => setExpectedMoveDate(e.target.value)}
-                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 h-9"
+                className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-base sm:text-xs text-white outline-none focus:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500/50 h-11 sm:h-9"
               />
             </div>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="pt-1 flex items-center justify-end gap-2.5">
+        <div className="pt-1 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
           {onCancel && (
             <Button
               type="button"
               variant="outline"
               onClick={onCancel}
-              className="text-xs px-5 py-2.5 border-stone-700 bg-stone-900 text-stone-300 hover:bg-stone-800 hover:text-white rounded-xl h-9"
+              className="text-xs px-5 py-2.5 border-stone-700 bg-stone-900 text-stone-300 hover:bg-stone-800 hover:text-white rounded-xl min-h-11 sm:h-9"
             >
               Cancel
             </Button>
           )}
+          {/* emerald-700 (not 600): white on emerald-600 is only ~3.8:1, below the 4.5:1 AA minimum */}
           <Button
             type="submit"
             disabled={isSubmitting}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider px-6 py-2.5 rounded-xl shadow-lg shadow-emerald-900/40 h-9"
+            className="bg-emerald-700 hover:bg-emerald-600 text-white font-black text-xs uppercase tracking-wider px-6 py-2.5 rounded-xl shadow-lg shadow-emerald-900/40 h-9"
           >
             {isSubmitting ? "Submitting..." : "Submit Registration"}
           </Button>

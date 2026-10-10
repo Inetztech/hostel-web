@@ -295,6 +295,7 @@ const IdProofUploadField = ({
       </label>
       <input
         ref={ref} type="file" accept=".pdf,.jpg,.jpeg,.png"
+        aria-label="ID proof document"
         onChange={(e) => {
           const file = e.target.files?.[0] ?? null;
           if (!file) { onChange(null); return; }
@@ -311,7 +312,7 @@ const IdProofUploadField = ({
         className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       />
       {idProofDoc && (
-        <p className="text-xs text-green-600 flex items-center gap-1">
+        <p className="text-xs text-green-700 flex items-center gap-1">
           <FileText className="h-3 w-3 shrink-0" />
           {idProofDoc.name}
           <span className="text-muted-foreground">({(idProofDoc.size / 1024).toFixed(1)} KB)</span>
@@ -319,7 +320,7 @@ const IdProofUploadField = ({
       )}
       {!idProofDoc && existing && (
         <a href={`${getApiOrigin()}${existing}`} target="_blank" rel="noopener noreferrer"
-          className="text-xs text-blue-600 underline flex items-center gap-1">
+          className="text-xs text-blue-700 underline flex items-center gap-1">
           <FileText className="h-3 w-3 shrink-0" /> View current document
         </a>
       )}
@@ -359,6 +360,7 @@ const TenantPhotoUploadField = ({
         <div className="flex-1 space-y-1">
           <input
             ref={ref} type="file" accept=".jpg,.jpeg,.png"
+            aria-label="Tenant photo"
             onChange={(e) => {
               const file = e.target.files?.[0] ?? null;
               if (!file) { onChange(null); return; }
@@ -375,7 +377,7 @@ const TenantPhotoUploadField = ({
             className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           />
           {tenantPhoto && (
-            <p className="text-xs text-green-600 flex items-center gap-1">
+            <p className="text-xs text-green-700 flex items-center gap-1">
               <Camera className="h-3 w-3 shrink-0" />
               {tenantPhoto.name}
               <span className="text-muted-foreground">({(tenantPhoto.size / 1024).toFixed(1)} KB)</span>
@@ -428,8 +430,8 @@ const FraudCard = ({
                 </a>
                 <a href={`https://wa.me/91${r.branchContact.replace(/\D/g,"")}?text=${buildFraudWhatsAppMsg(r, tenantName, tenantPhone)}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-green-700 hover:bg-green-200 font-medium">
-                  <svg viewBox="0 0 24 24" className="h-3 w-3 fill-current shrink-0" xmlns="http://www.w3.org/2000/svg">
+                  className="inline-flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-green-800 hover:bg-green-200 font-medium">
+                  <svg viewBox="0 0 24 24" className="h-3 w-3 fill-current shrink-0" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
                   </svg>
                   WhatsApp
@@ -474,7 +476,7 @@ const TenantForm = ({
   const err = (field: keyof FormState) => errors?.[field];
   const errCls = (field: keyof FormState) => (err(field) ? "border-red-500 focus-visible:ring-red-400" : "");
   const FieldError = ({ field }: { field: keyof FormState }) =>
-    err(field) ? <p className="text-[11px] text-red-500 mt-0.5">{err(field)}</p> : null;
+    err(field) ? <p className="text-[11px] text-red-600 mt-0.5">{err(field)}</p> : null;
   const isAC = rooms.find((r) => r.id === Number(form.roomId))?.hostelType === "AC";
 
   const alreadyHasLogin = !!(editTenant && ((editTenant as any).userId || (editTenant as any).user));
@@ -527,13 +529,14 @@ const TenantForm = ({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Name <span className="text-red-500">*</span></label>
-          <Input className={`rounded-lg ${errCls("name")}`} placeholder="Name"  value={form.name}  onChange={(e) => set("name")(e.target.value)} />
+          <label className="text-xs font-medium text-muted-foreground">Name <span className="text-red-600">*</span></label>
+          <Input aria-label="Name" className={`rounded-lg ${errCls("name")}`} placeholder="Name"  value={form.name}  onChange={(e) => set("name")(e.target.value)} />
           <FieldError field="name" />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Phone <span className="text-red-500">*</span></label>
+          <label className="text-xs font-medium text-muted-foreground">Phone <span className="text-red-600">*</span></label>
           <Input
+            aria-label="Phone"
             className={`rounded-lg ${errCls("phone")}`}
             placeholder="Phone (10 digits)"
             value={form.phone}
@@ -554,7 +557,7 @@ const TenantForm = ({
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Email</label>
-          <Input className="rounded-lg" placeholder="Email" value={form.email} onChange={(e) => set("email")(e.target.value)} />
+          <Input aria-label="Email" className="rounded-lg" placeholder="Email" value={form.email} onChange={(e) => set("email")(e.target.value)} />
         </div>
         <div />
       </div>
@@ -573,7 +576,7 @@ const TenantForm = ({
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">ID Proof Type</label>
           <Select value={form.idProofType} onValueChange={set("idProofType")}>
-            <SelectTrigger className={`rounded-lg ${errCls("idProofType")}`}><SelectValue placeholder="ID Proof Type" /></SelectTrigger>
+            <SelectTrigger aria-label="ID proof type" className={`rounded-lg ${errCls("idProofType")}`}><SelectValue placeholder="ID Proof Type" /></SelectTrigger>
             <SelectContent>
               {ID_PROOF_TYPE_LIST.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
             </SelectContent>
@@ -582,7 +585,7 @@ const TenantForm = ({
         </div>
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">ID Proof Number</label>
-          <Input className={`rounded-lg ${errCls("idProofNumber")}`} placeholder="ID Proof Number" value={form.idProofNumber}
+          <Input aria-label="ID proof number" className={`rounded-lg ${errCls("idProofNumber")}`} placeholder="ID Proof Number" value={form.idProofNumber}
             onChange={(e) => set("idProofNumber")(e.target.value)} />
           <FieldError field="idProofNumber" />
         </div>
@@ -594,7 +597,7 @@ const TenantForm = ({
           then Room, Bed, then Check-in Date. ── */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Branch <span className="text-red-500">*</span></label>
+          <label className="text-xs font-medium text-muted-foreground">Branch <span className="text-red-600">*</span></label>
           <Select
             value={form.branchId ? String(form.branchId) : ""}
             disabled={branchLocked}
@@ -605,7 +608,7 @@ const TenantForm = ({
               setRoomSearch("");
             }}
           >
-            <SelectTrigger className={`rounded-lg ${errCls("branchId")}`}><SelectValue placeholder="Branch" /></SelectTrigger>
+            <SelectTrigger aria-label="Branch" className={`rounded-lg ${errCls("branchId")}`}><SelectValue placeholder="Branch" /></SelectTrigger>
             <SelectContent>
               {branches.map((b) => (
                 <SelectItem key={getBranchRawId(b)} value={String(getBranchRawId(b))}>
@@ -617,12 +620,12 @@ const TenantForm = ({
           <FieldError field="branchId" />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Tenant Stay Type <span className="text-red-500">*</span></label>
+          <label className="text-xs font-medium text-muted-foreground">Tenant Stay Type <span className="text-red-600">*</span></label>
           <Select
             value={form.tenantStay}
             onValueChange={(v) => set("tenantStay")(v as TenantStay)}
           >
-            <SelectTrigger className={`rounded-lg ${errCls("tenantStay")}`}><SelectValue placeholder="Select Stay Type" /></SelectTrigger>
+            <SelectTrigger aria-label="Tenant stay type" className={`rounded-lg ${errCls("tenantStay")}`}><SelectValue placeholder="Select Stay Type" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="MONTHLY">Monthly</SelectItem>
               <SelectItem value="DAILY">Daily</SelectItem>
@@ -634,7 +637,7 @@ const TenantForm = ({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Room <span className="text-red-500">*</span></label>
+          <label className="text-xs font-medium text-muted-foreground">Room <span className="text-red-600">*</span></label>
           <Select value={form.roomId ? String(form.roomId) : ""}
             disabled={!form.branchId}
             onValueChange={(v) => {
@@ -647,10 +650,10 @@ const TenantForm = ({
               );
               set("bedId")(firstFreeBed ? firstFreeBed.id : "");
             }}>
-            <SelectTrigger className={`rounded-lg ${errCls("roomId")}`}><SelectValue placeholder={form.branchId ? "Room" : "Select a branch first"} /></SelectTrigger>
+            <SelectTrigger aria-label="Room" className={`rounded-lg ${errCls("roomId")}`}><SelectValue placeholder={form.branchId ? "Room" : "Select a branch first"} /></SelectTrigger>
             <SelectContent>
               <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
-                <Input placeholder="Search room..." value={roomSearch}
+                <Input aria-label="Search room" placeholder="Search room..." value={roomSearch}
                   onChange={(e) => setRoomSearch(e.target.value)}
                   onKeyDown={(e) => e.stopPropagation()} className="h-8 text-sm rounded-lg" autoFocus />
               </div>
@@ -666,11 +669,11 @@ const TenantForm = ({
           <FieldError field="roomId" />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Bed <span className="text-red-500">*</span></label>
+          <label className="text-xs font-medium text-muted-foreground">Bed <span className="text-red-600">*</span></label>
           <Select value={form.bedId ? String(form.bedId) : ""}
             disabled={!form.roomId}
             onValueChange={(v) => set("bedId")(Number(v))}>
-            <SelectTrigger className={`rounded-lg ${errCls("bedId")}`}><SelectValue placeholder={form.roomId ? "Bed" : "Select a room first"} /></SelectTrigger>
+            <SelectTrigger aria-label="Bed" className={`rounded-lg ${errCls("bedId")}`}><SelectValue placeholder={form.roomId ? "Bed" : "Select a room first"} /></SelectTrigger>
             <SelectContent>
               {availableBeds.map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
               {form.roomId && availableBeds.length === 0 && (
@@ -693,22 +696,22 @@ const TenantForm = ({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Advance</label>
-              <Input className="rounded-lg" type="number" placeholder="Advance" value={form.advance} onChange={(e) => set("advance")(e.target.value)} />
+              <Input aria-label="Advance" className="rounded-lg" type="number" placeholder="Advance" value={form.advance} onChange={(e) => set("advance")(e.target.value)} />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Registration Fees</label>
-              <Input className="rounded-lg" type="number" placeholder="Registration Fees" value={form.registrationFees} onChange={(e) => set("registrationFees")(e.target.value)} />
+              <Input aria-label="Registration fees" className="rounded-lg" type="number" placeholder="Registration Fees" value={form.registrationFees} onChange={(e) => set("registrationFees")(e.target.value)} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Rent</label>
-              <Input className="rounded-lg" type="number" placeholder="Rent" value={form.monthlyRent} onChange={(e) => set("monthlyRent")(e.target.value)} />
+              <Input aria-label="Rent" className="rounded-lg" type="number" placeholder="Rent" value={form.monthlyRent} onChange={(e) => set("monthlyRent")(e.target.value)} />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
-              <Input className="rounded-lg" type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
+              <Input aria-label="Current EB reading" className="rounded-lg" type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
             </div>
           </div>
 
@@ -716,7 +719,7 @@ const TenantForm = ({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Current AC EB Reading</label>
-                <Input className="rounded-lg" type="number" placeholder="Current AC EB Reading"
+                <Input aria-label="Current AC EB reading" className="rounded-lg" type="number" placeholder="Current AC EB Reading"
                   value={form.acJoinReading} onChange={(e) => set("acJoinReading")(e.target.value)} />
               </div>
               <div />
@@ -736,14 +739,14 @@ const TenantForm = ({
         <>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">No. of Days <span className="text-red-500">*</span></label>
-              <Input className={`rounded-lg ${errCls("noOfDays")}`} type="number" placeholder="No. of Days"
+              <label className="text-xs font-medium text-muted-foreground">No. of Days <span className="text-red-600">*</span></label>
+              <Input aria-label="Number of days" className={`rounded-lg ${errCls("noOfDays")}`} type="number" placeholder="No. of Days"
                 value={form.noOfDays} onChange={(e) => set("noOfDays")(e.target.value)} />
               <FieldError field="noOfDays" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Amount / Day <span className="text-red-500">*</span></label>
-              <Input className={`rounded-lg ${errCls("amountPerDay")}`} type="number" placeholder="Amount per Day"
+              <label className="text-xs font-medium text-muted-foreground">Amount / Day <span className="text-red-600">*</span></label>
+              <Input aria-label="Amount per day" className={`rounded-lg ${errCls("amountPerDay")}`} type="number" placeholder="Amount per Day"
                 value={form.amountPerDay} onChange={(e) => set("amountPerDay")(e.target.value)} />
               <FieldError field="amountPerDay" />
             </div>
@@ -752,13 +755,13 @@ const TenantForm = ({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
-              <Input className="rounded-lg" type="number" placeholder="Current EB Reading"
+              <Input aria-label="Current EB reading" className="rounded-lg" type="number" placeholder="Current EB Reading"
                 value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
               <p className="text-[11px] text-muted-foreground">Meter reading at check-in.</p>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Advance EB Amount (₹)</label>
-              <Input className="rounded-lg" type="number" placeholder="Advance EB Amount"
+              <Input aria-label="Advance EB amount" className="rounded-lg" type="number" placeholder="Advance EB Amount"
                 value={form.ebAmount} onChange={(e) => set("ebAmount")(e.target.value)} />
               <p className="text-[11px] text-muted-foreground">Collected upfront and added to the total.</p>
             </div>
@@ -768,7 +771,7 @@ const TenantForm = ({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Current AC EB Reading</label>
-                <Input className="rounded-lg" type="number" placeholder="Current AC EB Reading"
+                <Input aria-label="Current AC EB reading" className="rounded-lg" type="number" placeholder="Current AC EB Reading"
                   value={form.acJoinReading} onChange={(e) => set("acJoinReading")(e.target.value)} />
               </div>
               <div />
@@ -787,7 +790,7 @@ const TenantForm = ({
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Check-in Date</label>
-          <Input className="rounded-lg" type="date" value={form.checkInDate} onChange={(e) => set("checkInDate")(e.target.value)} />
+          <Input aria-label="Check-in date" className="rounded-lg" type="date" value={form.checkInDate} onChange={(e) => set("checkInDate")(e.target.value)} />
         </div>
         <div />
       </div>
@@ -1549,14 +1552,16 @@ const handleAdd = async () => {
 
   const stayLabel = (s?: TenantStay | string | null) => (s === "DAILY" ? "Daily" : "Monthly");
 
+  /* Text colors are the *-700/800 shades so they clear WCAG AA (4.5:1)
+     against their pale backgrounds (Lighthouse "color-contrast"). */
   const COLORS = [
-    { color: '#8b5cf6', bg: '#f3e8ff' },
-    { color: '#3b82f6', bg: '#eff6ff' },
-    { color: '#22c55e', bg: '#dcfce7' },
-    { color: '#f97316', bg: '#ffedd5' },
-    { color: '#ec4899', bg: '#fce7f3' },
-    { color: '#64748b', bg: '#f1f5f9' },
-    { color: '#14b8a6', bg: '#ccfbf1' },
+    { color: '#6d28d9', bg: '#f3e8ff' },
+    { color: '#1d4ed8', bg: '#eff6ff' },
+    { color: '#15803d', bg: '#dcfce7' },
+    { color: '#9a3412', bg: '#ffedd5' },
+    { color: '#be185d', bg: '#fce7f3' },
+    { color: '#475569', bg: '#f1f5f9' },
+    { color: '#0f766e', bg: '#ccfbf1' },
   ];
 
   /* ── Render ── */
@@ -1570,9 +1575,9 @@ const handleAdd = async () => {
         .tn-stat-card { background: #fff; border-radius: 16px; padding: 20px 24px; border: 1px solid #f1f5f9; box-shadow: 0 1px 2px rgba(0,0,0,0.02); display: flex; align-items: center; justify-content: space-between; gap: 16px; transition: all 0.2s; }
         .tn-stat-card:hover { box-shadow: 0 4px 12px rgba(16,24,40,0.06); transform: translateY(-1px); }
         .tn-stat-icon-wrapper { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
-        .tn-stat-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tn-stat-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .tn-stat-value { font-size: 26px; font-weight: 700; color: #0f172a; line-height: 1.1; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .tn-stat-subtext { font-size: 12px; font-weight: 500; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
+        .tn-stat-subtext { font-size: 12px; font-weight: 500; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
 
         .tn-main-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
         .tn-main-title { font-size: 18px; font-weight: 700; color: #0f172a; }
@@ -1586,11 +1591,12 @@ const handleAdd = async () => {
         .tn-filters-row { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
         .tn-search-main { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 220px; }
         .tn-search-main input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
-        .tn-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #64748b; cursor: pointer; background: transparent; border: none; padding: 6px 12px; }
+        .tn-search-main input::placeholder { color: #64748b; }
+        .tn-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; background: transparent; border: none; padding: 6px 12px; }
 
         .tn-table-container { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
         .tn-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
-        .tn-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; white-space: nowrap; }
+        .tn-table th { font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; white-space: nowrap; }
         .tn-table td { padding: 16px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; white-space: nowrap; }
         .tn-table tr:last-child td { border-bottom: none; }
         .tn-table tr:hover { background: #fdfcff; }
@@ -1598,7 +1604,7 @@ const handleAdd = async () => {
         .tn-avatar { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; overflow: hidden; }
         .tn-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .tn-name { font-size: 14px; font-weight: 600; color: #0f172a; }
-        .tn-email { font-size: 12px; color: #64748b; margin-top: 2px; }
+        .tn-email { font-size: 12px; color: #475569; margin-top: 2px; }
 
         .tn-room-name { font-size: 13px; font-weight: 600; color: #0f172a; }
         .tn-type-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-top: 6px; }
@@ -1611,15 +1617,15 @@ const handleAdd = async () => {
         .tn-rent { font-size: 13px; font-weight: 600; color: #0f172a; }
 
         .tn-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-        .tn-status-badge.active { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
-        .tn-status-badge.absconded { color: #ef4444; background: #fef2f2; border: 1px solid #fecaca; }
-        .tn-status-badge.checkedout { color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; }
-        .tn-status-badge.pending { color: #d97706; background: #fffbeb; border: 1px solid #fde68a; }
-        .tn-status-badge.other { color: #64748b; background: #f1f5f9; border: 1px solid #e2e8f0; }
-        .tn-status-badge.notice { color: #4f46e5; background: #eef2ff; border: 1px solid #c7d2fe; }
+        .tn-status-badge.active { color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; }
+        .tn-status-badge.absconded { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
+        .tn-status-badge.checkedout { color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; }
+        .tn-status-badge.pending { color: #b45309; background: #fffbeb; border: 1px solid #fde68a; }
+        .tn-status-badge.other { color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; }
+        .tn-status-badge.notice { color: #4338ca; background: #eef2ff; border: 1px solid #c7d2fe; }
 
         .tn-stay-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 6px; }
-        .tn-stay-badge.daily { color: #a16207; background: #fef9c3; border: 1px solid #fde68a; }
+        .tn-stay-badge.daily { color: #854d0e; background: #fef9c3; border: 1px solid #fde68a; }
         .tn-stay-badge.monthly { color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; }
 
         .tn-notice-tag { font-size: 11px; font-weight: 600; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
@@ -1631,13 +1637,13 @@ const handleAdd = async () => {
         .tn-contact svg { width: 14px !important; height: 14px !important; flex-shrink: 0; display: inline-block; }
 
         .tn-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-top: 1px solid #f1f5f9; background: #fff; flex-wrap: wrap; gap: 12px; }
-        .tn-page-info { font-size: 13px; color: #64748b; }
+        .tn-page-info { font-size: 13px; color: #475569; }
         .tn-page-controls { display: flex; align-items: center; gap: 6px; }
         .tn-page-btn { min-width: 32px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
         .tn-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .tn-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .tn-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .tn-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #94a3b8; }
+        .tn-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #64748b; }
 
         .tn-delete-confirm-btn {
           background: #ef4444;
@@ -1655,8 +1661,8 @@ const handleAdd = async () => {
 
         .tn-pending-header { display: flex; align-items: center; gap: 8px; padding: 16px 20px 4px; }
         .tn-pending-title { font-size: 15px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 8px; }
-        .tn-pending-count { color: #d97706; background: #fffbeb; border: 1px solid #fde68a; border-radius: 20px; padding: 1px 10px; font-size: 12px; font-weight: 700; }
-        .tn-notice-count { color: #4f46e5; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 20px; padding: 1px 10px; font-size: 12px; font-weight: 700; }
+        .tn-pending-count { color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 20px; padding: 1px 10px; font-size: 12px; font-weight: 700; }
+        .tn-notice-count { color: #4338ca; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 20px; padding: 1px 10px; font-size: 12px; font-weight: 700; }
       `}</style>
 
       <div className="tn-wrap">
@@ -1667,6 +1673,7 @@ const handleAdd = async () => {
 
           <div className="tn-controls">
             <Input ref={excelInputRef} type="file" accept=".xlsx,.xls" className="hidden"
+              aria-label="Import tenants Excel file"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 const wantsAutoImport = autoImportOnSelectRef.current;
@@ -1677,7 +1684,7 @@ const handleAdd = async () => {
                 if (wantsAutoImport) performExcelImport(file);
               }} />
             <button className="tn-btn-outline" onClick={handleExcelImport}>
-              <Download size={16} className="shrink-0" /> Import Excel
+              <Download size={16} className="shrink-0" aria-hidden="true" /> Import Excel
             </button>
 
             <Dialog open={addOpen} onOpenChange={(open) => {
@@ -1686,16 +1693,16 @@ const handleAdd = async () => {
             }}>
               <DialogTrigger asChild>
                 <button className="tn-btn-primary">
-                  <UserPlus size={16} className="shrink-0" /> Check-In
+                  <UserPlus size={16} className="shrink-0" aria-hidden="true" /> Check-In
                 </button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+              <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden mobile-form-dialog">
                 <div className="relative max-h-[90vh] overflow-y-auto p-6">
                   <DialogClose asChild>
                     <button
                       type="button"
                       aria-label="Close"
-                      className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                      className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
                       onClick={() => { setAddResultFraud(null); setLiveFraud(null); }}
                     >
                       <X className="h-4 w-4 shrink-0" />
@@ -1735,7 +1742,7 @@ const handleAdd = async () => {
           <div className="tn-table-container" style={{ marginBottom: 24 }}>
             <div className="tn-pending-header">
               <div className="tn-pending-title">
-                <ClipboardCheck size={18} className="shrink-0" style={{ color: "#d97706" }} />
+                <ClipboardCheck size={18} className="shrink-0" style={{ color: "#b45309" }} aria-hidden="true" />
                 Pending Approvals
                 <span className="tn-pending-count">{pendingTenants.length}</span>
               </div>
@@ -1756,7 +1763,7 @@ const handleAdd = async () => {
                     <tr key={t.id}>
                       <td>
                         <div className="flex items-center gap-3">
-                          <div className="tn-avatar" style={{ background: '#fffbeb', color: '#d97706' }}>
+                          <div className="tn-avatar" style={{ background: '#fffbeb', color: '#b45309' }}>
                             {t.tenantPhoto ? (
                               <img src={`${getApiOrigin()}${t.tenantPhoto}`} alt={t.name} />
                             ) : getInitials(t.name)}
@@ -1769,7 +1776,7 @@ const handleAdd = async () => {
                       </td>
                       <td>
                         <div className="tn-contact">
-                          <Phone size={14} className="shrink-0" /> {t.phone}
+                          <Phone size={14} className="shrink-0" aria-hidden="true" /> {t.phone}
                         </div>
                       </td>
                       <td>
@@ -1795,7 +1802,7 @@ const handleAdd = async () => {
           <div className="tn-table-container" style={{ marginBottom: 24 }}>
             <div className="tn-pending-header">
               <div className="tn-pending-title">
-                <CalendarClock size={18} className="shrink-0" style={{ color: "#4f46e5" }} />
+                <CalendarClock size={18} className="shrink-0" style={{ color: "#4338ca" }} aria-hidden="true" />
                 Tenants in Notice Period
                 <span className="tn-notice-count">{noticeTotalElements}</span>
               </div>
@@ -1816,13 +1823,13 @@ const handleAdd = async () => {
                 </thead>
                 <tbody>
                   {noticeLoading ? (
-                    <tr><td colSpan={8} className="text-center py-8 text-slate-400">Loading…</td></tr>
+                    <tr><td colSpan={8} className="text-center py-8 text-slate-500">Loading…</td></tr>
                   ) : (
                     noticeTenants.map((t) => (
                       <tr key={t.id}>
                         <td>
                           <div className="flex items-center gap-3">
-                            <div className="tn-avatar" style={{ background: '#eef2ff', color: '#4f46e5' }}>
+                            <div className="tn-avatar" style={{ background: '#eef2ff', color: '#4338ca' }}>
                               {t.tenantPhoto ? (
                                 <img src={`${getApiOrigin()}${t.tenantPhoto}`} alt={t.name} />
                               ) : getInitials(t.name)}
@@ -1857,11 +1864,11 @@ const handleAdd = async () => {
                         <td>
                           <div className="flex justify-center gap-2">
                             {t.checkoutStatus === "NOTICE_COMPLETED" && (
-                              <button className="tn-action-btn" onClick={() => goToCheckout(t)} title="Proceed to Checkout">
+                              <button className="tn-action-btn" onClick={() => goToCheckout(t)} title="Proceed to Checkout" aria-label="Proceed to checkout">
                                 <ArrowRightCircle size={16} color="#2563eb" strokeWidth={2} className="shrink-0" />
                               </button>
                             )}
-                            <button className="tn-action-btn" onClick={() => handleCancelNotice(t)} title="Cancel Notice">
+                            <button className="tn-action-btn" onClick={() => handleCancelNotice(t)} title="Cancel Notice" aria-label="Cancel notice">
                               <Ban size={16} color="#ef4444" strokeWidth={2} className="shrink-0" />
                             </button>
                           </div>
@@ -1878,9 +1885,10 @@ const handleAdd = async () => {
         {/* Filters */}
         <div className="tn-filters-row">
           <div className="tn-search-main">
-            <Search size={16} color="#94a3b8" className="shrink-0" />
+            <Search size={16} color="#64748b" className="shrink-0" aria-hidden="true" />
             <input
               type="text"
+              aria-label="Search tenants or phone number"
               placeholder="Search tenants or Phone number..."
               value={search}
 
@@ -1889,7 +1897,7 @@ const handleAdd = async () => {
           </div>
 
           <Select value={selectedBranch} onValueChange={setSelectedBranch} disabled={isWarden}>
-            <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectTrigger aria-label="Filter by branch" className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Branches" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Branches</SelectItem>
               {branches.map(b => (
@@ -1902,7 +1910,7 @@ const handleAdd = async () => {
 
            {/* ── Room filter, alongside Branch and Status. ── */}
           <Select value={selectedRoom} onValueChange={setSelectedRoom}>
-            <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Rooms" /></SelectTrigger>
+            <SelectTrigger aria-label="Filter by room" className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Rooms" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Rooms</SelectItem>
               {roomFilterOptions.map((r) => (
@@ -1912,7 +1920,7 @@ const handleAdd = async () => {
           </Select>
 
           <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-            <SelectTrigger className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Status" /></SelectTrigger>
+            <SelectTrigger aria-label="Filter by status" className="w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="Active">Active</SelectItem>
@@ -1930,7 +1938,7 @@ const handleAdd = async () => {
             setPage(0);
             loadTenants(isWarden ? String(branchId ?? "all") : "all", 0, "", "all", "all");
           }}>
-            <RefreshCw size={14} className="shrink-0" /> Clear Filters
+            <RefreshCw size={14} className="shrink-0" aria-hidden="true" /> Clear Filters
           </button>
         </div>
 
@@ -1952,9 +1960,9 @@ const handleAdd = async () => {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} className="text-center py-12 text-slate-400">Loading tenants...</td></tr>
+                  <tr><td colSpan={8} className="text-center py-12 text-slate-500">Loading tenants...</td></tr>
                 ) : tenants.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-12 text-slate-400">No tenants found.</td></tr>
+                  <tr><td colSpan={8} className="text-center py-12 text-slate-500">No tenants found.</td></tr>
                 ) : (
                   tenants.map((t) => {
                     const avatarColor = COLORS[t.id % COLORS.length];
@@ -1964,16 +1972,17 @@ const handleAdd = async () => {
 
                     const room = allRoomsRef.current.find((r) => r.id === t.roomId);
                     let typeName = "Standard";
-                    let typeColor = { color: '#64748b', bg: '#f1f5f9' };
+                    let typeColor = { color: '#475569', bg: '#f1f5f9' };
                     if (room) {
                       const rBeds = room.totalBeds || 1;
                       const prefix = rBeds === 1 ? 'Single' : rBeds === 2 ? 'Double' : rBeds === 3 ? 'Triple' : rBeds === 4 ? 'Quad' : `${rBeds} Bed`;
                       const suffix = room.hostelType === 'AC' ? 'AC' : room.hostelType === 'NON_AC' ? 'Non-AC' : room.hostelType;
                       typeName = `${prefix} ${suffix}`;
-                      if (typeName.includes('Single')) typeColor = { color: '#3b82f6', bg: '#eff6ff' };
-                      if (typeName.includes('Double')) typeColor = { color: '#22c55e', bg: '#dcfce7' };
-                      if (typeName.includes('Triple')) typeColor = { color: '#8b5cf6', bg: '#f3e8ff' };
-                      if (typeName.includes('Quad')) typeColor = { color: '#f97316', bg: '#ffedd5' };
+                      // AA-contrast text colors (>= 4.5:1 on their backgrounds)
+                      if (typeName.includes('Single')) typeColor = { color: '#1d4ed8', bg: '#eff6ff' };
+                      if (typeName.includes('Double')) typeColor = { color: '#15803d', bg: '#dcfce7' };
+                      if (typeName.includes('Triple')) typeColor = { color: '#6d28d9', bg: '#f3e8ff' };
+                      if (typeName.includes('Quad'))   typeColor = { color: '#9a3412', bg: '#ffedd5' };
                     }
 
                     const rentDisplay = isDailyStay
@@ -2012,14 +2021,14 @@ const handleAdd = async () => {
                         </td>
                         <td>
                           <div className="tn-contact">
-                            <Phone size={14} className="shrink-0" /> {t.phone}
+                            <Phone size={14} className="shrink-0" aria-hidden="true" /> {t.phone}
                           </div>
                         </td>
                         <td><div className="tn-date">{t.checkInDate}</div></td>
                         <td>
                           <div className="tn-rent">₹{rentDisplay}</div>
                           <div className={`tn-stay-badge ${isDailyStay ? "daily" : "monthly"}`}>
-                            {isDailyStay ? <CalendarDays size={10} className="shrink-0" /> : <CalendarClock size={10} className="shrink-0" />}
+                            {isDailyStay ? <CalendarDays size={10} className="shrink-0" aria-hidden="true" /> : <CalendarClock size={10} className="shrink-0" aria-hidden="true" />}
                             {stayLabel(t.tenantStay)}{isDailyStay && t.noOfDays ? ` · ${t.noOfDays}d` : ""}
                           </div>
                         </td>
@@ -2037,9 +2046,9 @@ const handleAdd = async () => {
                           {t.checkoutStatus && (
                             <div
                               className="tn-notice-tag"
-                              style={{ color: t.checkoutStatus === "NOTICE_COMPLETED" ? "#2563eb" : "#4f46e5" }}
+                              style={{ color: t.checkoutStatus === "NOTICE_COMPLETED" ? "#1d4ed8" : "#4338ca" }}
                             >
-                              <CalendarClock size={12} className="shrink-0" />
+                              <CalendarClock size={12} className="shrink-0" aria-hidden="true" />
                               {t.checkoutStatus === "NOTICE_COMPLETED"
                                 ? "Checkout due"
                                 : `${t.remainingNoticeDays ?? "-"}d left in notice`}
@@ -2048,10 +2057,10 @@ const handleAdd = async () => {
                         </td>
                         <td>
                           <div className="flex justify-center gap-2">
-                            <button className="tn-action-btn" onClick={() => { setViewTenant(t); setViewOpen(true); }} title="View">
+                            <button className="tn-action-btn" onClick={() => { setViewTenant(t); setViewOpen(true); }} title="View" aria-label="View tenant">
                               <Eye size={16} color="#64748b" strokeWidth={2} className="shrink-0" />
                             </button>
-                            <button className="tn-action-btn" onClick={() => {
+                            <button className="tn-action-btn" aria-label="Edit tenant" onClick={() => {
                               const derivedBranchId = room ? getRoomUnitId(room) : NaN;
                               setEditTenant(t);
                               dispatch({ type: "load", payload: {
@@ -2075,11 +2084,11 @@ const handleAdd = async () => {
                             }} title="Edit">
                               <Pencil size={16} color="#64748b" strokeWidth={2} className="shrink-0" />
                             </button>
-                            <button className="tn-action-btn" onClick={() => handleDeleteTenant(t)} title="Delete">
+                            <button className="tn-action-btn" onClick={() => handleDeleteTenant(t)} title="Delete" aria-label="Delete tenant">
                               <Trash2 size={16} color="#ef4444" strokeWidth={2} className="shrink-0" />
                             </button>
                             {t.status === "Active" && (
-                              <button className="tn-action-btn" onClick={() => { setAbscondTarget(t); setAbscondOpen(true); }} title="Mark as Absconded">
+                              <button className="tn-action-btn" onClick={() => { setAbscondTarget(t); setAbscondOpen(true); }} title="Mark as Absconded" aria-label="Mark as absconded">
                                 <ShieldX size={16} color="#f97316" strokeWidth={2} className="shrink-0" />
                               </button>
                             )}
@@ -2090,13 +2099,13 @@ const handleAdd = async () => {
                                 (tenant self-service) exists on the backend. */}
 
                             {t.status === "Active" && !t.checkoutStatus && (
-                              <button className="tn-action-btn" onClick={() => openTransferDialog(t)} title="Transfer Room/Bed">
+                              <button className="tn-action-btn" onClick={() => openTransferDialog(t)} title="Transfer Room/Bed" aria-label="Transfer room or bed">
                                 <ArrowLeftRight size={16} color="#0891b2" strokeWidth={2} className="shrink-0" />
                               </button>
                             )}
 
                             {t.status !== "PENDING" && (
-                              <button className="tn-action-btn" onClick={() => openHistoryDialog(t)} title="Transfer History">
+                              <button className="tn-action-btn" onClick={() => openHistoryDialog(t)} title="Transfer History" aria-label="Transfer history">
                                 <History size={16} color="#64748b" strokeWidth={2} className="shrink-0" />
                               </button>
                             )}
@@ -2124,18 +2133,20 @@ const handleAdd = async () => {
               Showing {totalElements === 0 ? 0 : page * PAGE_SIZE + 1} to {Math.min((page + 1) * PAGE_SIZE, totalElements)} of {totalElements} tenants
             </div>
             <div className="tn-page-controls">
-              <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={page === 0} onClick={() => goToPage(Math.max(page - 1, 0))}>
-                <ChevronLeft className="h-4 w-4 shrink-0" />
+              <Button size="icon" variant="outline" aria-label="Previous page" className="w-8 h-8 rounded-lg" disabled={page === 0} onClick={() => goToPage(Math.max(page - 1, 0))}>
+                <ChevronLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
               </Button>
 
               {pageNumbers.map((p, idx) =>
                 p === "..." ? (
                   <span key={`ellipsis-${idx}`} className="tn-page-ellipsis">
-                    <MoreHorizontal className="h-4 w-4 shrink-0" />
+                    <MoreHorizontal className="h-4 w-4 shrink-0" aria-hidden="true" />
                   </span>
                 ) : (
                   <button
                     key={p}
+                    aria-label={`Page ${p}`}
+                    aria-current={p === currentPage1Based ? "page" : undefined}
                     className={`tn-page-btn ${p === currentPage1Based ? "active" : ""}`}
                     onClick={() => goToPage(p - 1)}
                   >
@@ -2144,8 +2155,8 @@ const handleAdd = async () => {
                 )
               )}
 
-              <Button size="icon" variant="outline" className="w-8 h-8 rounded-lg" disabled={currentPage1Based >= totalPages} onClick={() => goToPage(Math.min(page + 1, totalPages - 1))}>
-                <ChevronRight className="h-4 w-4 shrink-0" />
+              <Button size="icon" variant="outline" aria-label="Next page" className="w-8 h-8 rounded-lg" disabled={currentPage1Based >= totalPages} onClick={() => goToPage(Math.min(page + 1, totalPages - 1))}>
+                <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
               </Button>
             </div>
           </div>
@@ -2155,13 +2166,13 @@ const handleAdd = async () => {
 
       {/* Edit Dialog */}
       <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) { dispatch({ type: "reset" }); setFormErrors({}); } }}>
-        <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+        <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden mobile-form-dialog">
           <div className="relative max-h-[90vh] overflow-y-auto p-6">
             <DialogClose asChild>
               <button
                 type="button"
                 aria-label="Close"
-                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4 shrink-0" />
               </button>
@@ -2194,7 +2205,7 @@ const handleAdd = async () => {
               <button
                 type="button"
                 aria-label="Close"
-                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4 shrink-0" />
               </button>
@@ -2253,7 +2264,7 @@ const handleAdd = async () => {
                     <span className="font-medium">ID Document:</span>{" "}
                     <a href={`${getApiOrigin()}${viewTenant.idProofDocument}`}
                       target="_blank" rel="noopener noreferrer"
-                      className="text-blue-600 underline flex items-center gap-1">
+                      className="text-blue-700 underline flex items-center gap-1">
                       <FileText className="h-3 w-3 shrink-0" /> View / Download
                     </a>
                   </p>
@@ -2314,7 +2325,7 @@ const handleAdd = async () => {
       }}>
         <DialogContent className="rounded-2xl [&>button]:hidden">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-orange-600">
+            <DialogTitle className="flex items-center gap-2 text-orange-700">
               <ShieldX className="h-5 w-5 shrink-0" /> Mark as Absconded
             </DialogTitle>
             <DialogDescription>
@@ -2341,6 +2352,7 @@ const handleAdd = async () => {
                   Reason (optional — defaults to "left without notice")
                 </label>
                 <Input
+                  aria-label="Absconded reason"
                   className="rounded-lg"
                   placeholder="e.g. Bed found empty on 15 Jun, tenant unreachable"
                   value={abscondReason}
@@ -2369,7 +2381,7 @@ const handleAdd = async () => {
               <button
                 type="button"
                 aria-label="Close"
-                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4 shrink-0" />
               </button>
@@ -2396,7 +2408,7 @@ const handleAdd = async () => {
                     disabled={isWarden}
                     onValueChange={(v) => setApproveForm(f => ({ ...f, branchId: Number(v), roomId: "", bedId: "" }))}
                   >
-                    <SelectTrigger className="rounded-lg"><SelectValue placeholder="Branch" /></SelectTrigger>
+                    <SelectTrigger aria-label="Branch" className="rounded-lg"><SelectValue placeholder="Branch" /></SelectTrigger>
                     <SelectContent>
                       {formBranches.map((b) => (
                         <SelectItem key={getBranchRawId(b)} value={String(getBranchRawId(b))}>
@@ -2413,7 +2425,7 @@ const handleAdd = async () => {
                     disabled={!approveForm.branchId}
                     onValueChange={(v) => setApproveForm(f => ({ ...f, roomId: Number(v), bedId: "" }))}
                   >
-                    <SelectTrigger className="rounded-lg"><SelectValue placeholder={approveForm.branchId ? "Room" : "Select branch first"} /></SelectTrigger>
+                    <SelectTrigger aria-label="Room" className="rounded-lg"><SelectValue placeholder={approveForm.branchId ? "Room" : "Select branch first"} /></SelectTrigger>
                     <SelectContent>
                       {rooms
                         .filter((r) => Number(getRoomUnitId(r)) === Number(approveForm.branchId))
@@ -2432,7 +2444,7 @@ const handleAdd = async () => {
                     disabled={!approveForm.roomId}
                     onValueChange={(v) => setApproveForm(f => ({ ...f, bedId: Number(v) }))}
                   >
-                    <SelectTrigger className="rounded-lg"><SelectValue placeholder={approveForm.roomId ? "Bed" : "Select room first"} /></SelectTrigger>
+                    <SelectTrigger aria-label="Bed" className="rounded-lg"><SelectValue placeholder={approveForm.roomId ? "Bed" : "Select room first"} /></SelectTrigger>
                     <SelectContent>
                       {beds
                         .filter((b) => Number(b.roomId) === Number(approveForm.roomId) && !isBedOccupied(b))
@@ -2446,7 +2458,7 @@ const handleAdd = async () => {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Advance</label>
-                  <Input className="rounded-lg" type="number" value={approveForm.advance}
+                  <Input aria-label="Advance" className="rounded-lg" type="number" value={approveForm.advance}
                     onChange={(e) => setApproveForm(f => ({ ...f, advance: e.target.value }))} />
                 </div>
               </div>
@@ -2458,13 +2470,13 @@ const handleAdd = async () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Registration Fees</label>
-                      <Input className="rounded-lg" type="number" placeholder="Registration Fees"
+                      <Input aria-label="Registration fees" className="rounded-lg" type="number" placeholder="Registration Fees"
                         value={approveForm.registrationFees}
                         onChange={(e) => setApproveForm(f => ({ ...f, registrationFees: e.target.value }))} />
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Monthly Rent</label>
-                      <Input className="rounded-lg" type="number" value={approveForm.monthlyRent}
+                      <Input aria-label="Monthly rent" className="rounded-lg" type="number" value={approveForm.monthlyRent}
                         onChange={(e) => setApproveForm(f => ({ ...f, monthlyRent: e.target.value }))} />
                     </div>
                   </div>
@@ -2472,13 +2484,13 @@ const handleAdd = async () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Join EB Reading</label>
-                      <Input className="rounded-lg" type="number" value={approveForm.joinReading}
+                      <Input aria-label="Join EB reading" className="rounded-lg" type="number" value={approveForm.joinReading}
                         onChange={(e) => setApproveForm(f => ({ ...f, joinReading: e.target.value }))} />
                     </div>
                     {approveRoomHostelType === "AC" ? (
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">AC Join Reading</label>
-                        <Input className="rounded-lg" type="number" value={approveForm.acJoinReading}
+                        <Input aria-label="AC join reading" className="rounded-lg" type="number" value={approveForm.acJoinReading}
                           onChange={(e) => setApproveForm(f => ({ ...f, acJoinReading: e.target.value }))} />
                       </div>
                     ) : <div />}
@@ -2506,7 +2518,7 @@ const handleAdd = async () => {
               <button
                 type="button"
                 aria-label="Close"
-                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4 shrink-0" />
               </button>
@@ -2552,7 +2564,7 @@ const handleAdd = async () => {
                     value={transferForm.roomId ? String(transferForm.roomId) : ""}
                     onValueChange={(v) => setTransferForm(f => ({ ...f, roomId: Number(v), bedId: "" }))}
                   >
-                    <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select room" /></SelectTrigger>
+                    <SelectTrigger aria-label="New room" className="rounded-lg"><SelectValue placeholder="Select room" /></SelectTrigger>
                     <SelectContent>
                       {rooms
                         .filter((r) => beds.filter((b) => Number(b.roomId) === Number(r.id) &&
@@ -2560,7 +2572,7 @@ const handleAdd = async () => {
                         .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  {transferErrors.roomId && <p className="text-xs text-red-500">{transferErrors.roomId}</p>}
+                  {transferErrors.roomId && <p className="text-xs text-red-600">{transferErrors.roomId}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">New Bed *</label>
@@ -2569,7 +2581,7 @@ const handleAdd = async () => {
                     disabled={!transferForm.roomId}
                     onValueChange={(v) => setTransferForm(f => ({ ...f, bedId: Number(v) }))}
                   >
-                    <SelectTrigger className="rounded-lg"><SelectValue placeholder={transferForm.roomId ? "Select bed" : "Select room first"} /></SelectTrigger>
+                    <SelectTrigger aria-label="New bed" className="rounded-lg"><SelectValue placeholder={transferForm.roomId ? "Select bed" : "Select room first"} /></SelectTrigger>
                     <SelectContent>
                       {beds
                         .filter((b) => Number(b.roomId) === Number(transferForm.roomId) &&
@@ -2577,22 +2589,22 @@ const handleAdd = async () => {
                         .map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  {transferErrors.bedId && <p className="text-xs text-red-500">{transferErrors.bedId}</p>}
+                  {transferErrors.bedId && <p className="text-xs text-red-600">{transferErrors.bedId}</p>}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">New Rent *</label>
-                  <Input className="rounded-lg" type="number" value={transferForm.newRent}
+                  <Input aria-label="New rent" className="rounded-lg" type="number" value={transferForm.newRent}
                     onChange={(e) => setTransferForm(f => ({ ...f, newRent: e.target.value }))} />
-                  {transferErrors.newRent && <p className="text-xs text-red-500">{transferErrors.newRent}</p>}
+                  {transferErrors.newRent && <p className="text-xs text-red-600">{transferErrors.newRent}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Effective Date *</label>
-                  <Input className="rounded-lg" type="date" value={transferForm.effectiveDate}
+                  <Input aria-label="Effective date" className="rounded-lg" type="date" value={transferForm.effectiveDate}
                     onChange={(e) => setTransferForm(f => ({ ...f, effectiveDate: e.target.value }))} />
-                  {transferErrors.effectiveDate && <p className="text-xs text-red-500">{transferErrors.effectiveDate}</p>}
+                  {transferErrors.effectiveDate && <p className="text-xs text-red-600">{transferErrors.effectiveDate}</p>}
                   <p className="text-xs text-muted-foreground">
                     Today or earlier applies immediately. A future date is scheduled and applied automatically.
                   </p>
@@ -2601,7 +2613,7 @@ const handleAdd = async () => {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Reason / Notes</label>
-                <Textarea className="rounded-lg" rows={2} value={transferForm.reason}
+                <Textarea aria-label="Reason or notes" className="rounded-lg" rows={2} value={transferForm.reason}
                   onChange={(e) => setTransferForm(f => ({ ...f, reason: e.target.value }))}
                   placeholder="Optional — e.g. requested a quieter room" />
               </div>
@@ -2613,27 +2625,27 @@ const handleAdd = async () => {
                 <div className="grid grid-cols-2 gap-4 mt-3">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">Old Room Final Reading</label>
-                    <Input className="rounded-lg" type="number" value={transferForm.oldRoomFinalReading}
+                    <Input aria-label="Old room final reading" className="rounded-lg" type="number" value={transferForm.oldRoomFinalReading}
                       onChange={(e) => setTransferForm(f => ({ ...f, oldRoomFinalReading: e.target.value }))} />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">New Room Join Reading</label>
-                    <Input className="rounded-lg" type="number" value={transferForm.newRoomJoinReading}
+                    <Input aria-label="New room join reading" className="rounded-lg" type="number" value={transferForm.newRoomJoinReading}
                       onChange={(e) => setTransferForm(f => ({ ...f, newRoomJoinReading: e.target.value }))} />
                   </div>
                   {transferRoomHostelType === "AC" && (
                     <>
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">Old Room AC Final Reading</label>
-                        <Input className="rounded-lg" type="number" value={transferForm.oldRoomAcFinalReading}
+                        <Input aria-label="Old room AC final reading" className="rounded-lg" type="number" value={transferForm.oldRoomAcFinalReading}
                           onChange={(e) => setTransferForm(f => ({ ...f, oldRoomAcFinalReading: e.target.value }))} />
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">New Room AC Join Reading</label>
-                        <Input className="rounded-lg" type="number" value={transferForm.newRoomAcJoinReading}
+                        <Input aria-label="New room AC join reading" className="rounded-lg" type="number" value={transferForm.newRoomAcJoinReading}
                           onChange={(e) => setTransferForm(f => ({ ...f, newRoomAcJoinReading: e.target.value }))} />
                         {transferErrors.newRoomAcJoinReading && (
-                          <p className="text-xs text-red-500">{transferErrors.newRoomAcJoinReading}</p>
+                          <p className="text-xs text-red-600">{transferErrors.newRoomAcJoinReading}</p>
                         )}
                       </div>
                     </>
@@ -2665,7 +2677,7 @@ const handleAdd = async () => {
               <button
                 type="button"
                 aria-label="Close"
-                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4 shrink-0" />
               </button>
@@ -2690,7 +2702,7 @@ const handleAdd = async () => {
                     <div className="flex items-center justify-between">
                       <div className="font-medium">
                         Room {h.previousRoomNumber ?? "-"} (Bed {h.previousBedNumber ?? "-"})
-                        {" "}<ArrowLeftRight className="inline h-3.5 w-3.5 mx-1 shrink-0" />{" "}
+                        {" "}<ArrowLeftRight className="inline h-3.5 w-3.5 mx-1 shrink-0" aria-hidden="true" />{" "}
                         Room {h.newRoomNumber ?? "-"} (Bed {h.newBedNumber ?? "-"})
                       </div>
                       <span className={`tn-status-badge ${h.status === "COMPLETED" ? "active" : h.status === "PENDING" ? "notice" : "checkedout"}`}>

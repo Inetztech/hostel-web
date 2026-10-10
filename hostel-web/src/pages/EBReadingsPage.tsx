@@ -50,7 +50,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import { toast } from "sonner";
-import { Plus, Download, RefreshCw, Send, Trash2, ChevronLeft, ChevronRight, X, MoreHorizontal } from "lucide-react";
+import { Plus, Download, RefreshCw, Send, Trash2, ChevronLeft, ChevronRight, X, MoreHorizontal, Zap } from "lucide-react";
+import { usePropertyType } from "@/lib/propertyType";
 
 const isMonthlyTenant = (t: any) => (t?.tenantStay ?? "MONTHLY") !== "DAILY";
 
@@ -61,6 +62,13 @@ const EBReadingsPage = () => {
   // ── role is uppercased for all comparisons ────────────────────────────
   const role     = getUserRole()?.toUpperCase();
   const branchId = getBranchId(); // number | null
+
+  // Business Model property type (ROOM / FLAT / null = not configured).
+  // Only controls which selector the Add EB Reading form shows - the EB
+  // calculation itself (EBServiceImpl) is untouched.
+  const { propertyType, loading: propertyTypeLoading } = usePropertyType();
+  const isFlatMode = propertyType === "FLAT";
+  const isRoomMode = propertyType === "ROOM";
 
   const isAdmin   = role === "ADMIN" || role === "WARDEN";
   const hasAccess = isAdmin;
@@ -872,6 +880,12 @@ const getFlatStartingReading = useCallback(
     try {
       const branchIdNum = formBranchId ? Number(formBranchId) : undefined;
 
+      // Flat-based hostel: a reading is always entered against a flat.
+      if (isFlatMode && (!formFlatId || formFlatId === "all")) {
+        toast.error("Select a flat first");
+        return;
+      }
+
       if (formFlatId && formFlatId !== "all") {
         // ── SHARED FLAT METER ──
         // One physical meter for the whole flat: every room in the flat
@@ -1200,6 +1214,17 @@ const handleDeleteReadingClick = (row: any) => {
   // the numbered page list below.
   const totalPages = Math.max(1, Math.ceil(filteredTenantRows.length / pageSize));
 
+  // Go back to page 1 whenever the filters change, and never sit on a
+  // page that no longer exists (e.g. after deleting the last row of the
+  // last page).
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [selectedBranch, selectedRoomId, selMonth, selYear]);
+
+  useEffect(() => {
+    if (currentPage > totalPages - 1) setCurrentPage(totalPages - 1);
+  }, [currentPage, totalPages]);
+
   const getPageNumbers = (current: number, total: number): (number | "...")[] => {
     if (total <= 7) {
       return Array.from({ length: total }, (_, i) => i + 1);
@@ -1222,6 +1247,14 @@ const handleDeleteReadingClick = (row: any) => {
   /* ══════════════════════════════════════════════════════════
      RENDER
   ══════════════════════════════════════════════════════════ */
+  if (propertyTypeLoading) {
+    return (
+      <div role="status" className="flex items-center justify-center py-24 text-sm text-slate-500">
+        Loading…
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-full bg-[#fcfcfc] text-gray-900 font-sans pb-10">
       <style>{`
@@ -1232,33 +1265,40 @@ const handleDeleteReadingClick = (row: any) => {
         @media (min-width: 1536px) { .eb-layout { flex-direction: row; } .eb-content { flex: 1; min-width: 0; } .eb-sidebar { width: 340px; flex-shrink: 0; } }
 
         .eb-panel { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; margin-bottom: 24px; }
-        .eb-panel-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
+        .eb-panel-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #f1f5f9; }
         .eb-panel-title { font-size: 16px; font-weight: 700; color: #0f172a; }
 
         .eb-table { width: 100%; border-collapse: collapse; min-width: 900px; }
-        .eb-table th { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
+        /* A11Y: header text darkened from #64748b to #475569 so it clears
+           the 4.5:1 contrast ratio on the #fafafa header background. */
+        .eb-table th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
         .eb-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
         .eb-table tr:hover { background: #fdfcff; }
 
         .eb-room-name { font-size: 13px; font-weight: 600; color: #0f172a; }
-        .eb-tenant-name { font-size: 12px; color: #64748b; margin-top: 2px; }
+        .eb-tenant-name { font-size: 12px; color: #475569; margin-top: 2px; }
         .eb-reading-val { font-size: 13px; font-weight: 600; color: #0f172a; }
         .eb-amount { font-size: 13px; font-weight: 600; color: #0f172a; }
+        .eb-empty { color: #475569; }
 
+        /* A11Y: every status badge text colour was re-picked so it meets
+           4.5:1 against its own tinted background (orange #f97316 and
+           green #16a34a were both below that). */
         .eb-status { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
-        .eb-status.collected { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
-        .eb-status.pending { color: #f97316; background: #fff7ed; border: 1px solid #fed7aa; }
-        .eb-status.not-read { color: #64748b; background: #f1f5f9; border: 1px solid #e2e8f0; }
+        .eb-status.collected { color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; }
+        .eb-status.pending { color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa; }
+        .eb-status.not-read { color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; }
         .eb-status.prepaid { color: #0369a1; background: #f0f9ff; border: 1px solid #bae6fd; }
-        .eb-status.due { color: #f97316; background: #fff7ed; border: 1px solid #fed7aa; }
-        .eb-status.refund { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
+        .eb-status.due { color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa; }
+        .eb-status.refund { color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; }
         .eb-status.settled { color: #0369a1; background: #f0f9ff; border: 1px solid #bae6fd; }
-        .eb-status.pay { color: #f97316; background: #fff7ed; border: 1px solid #fed7aa; }
+        .eb-status.pay { color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa; }
 
         .eb-row-informational td { background: #fcfdff; }
         .eb-daily-tag { display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; color: #0369a1; background: #f0f9ff; border: 1px solid #bae6fd; letter-spacing: 0.3px; }
 
-        .eb-action-btn { width: 28px; height: 28px; min-width: 28px; border-radius: 6px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; flex-shrink: 0; padding: 0; line-height: 0; font-size: 12px; font-weight: 600; }
+        .eb-action-btn { width: 28px; height: 28px; min-width: 28px; border-radius: 6px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; flex-shrink: 0; padding: 0; line-height: 0; font-size: 12px; font-weight: 600; }
+        .eb-action-btn:focus-visible { outline: 2px solid #5200FF; outline-offset: 2px; }
         .eb-action-btn svg {
           display: inline-block !important;
           visibility: visible !important;
@@ -1267,8 +1307,8 @@ const handleDeleteReadingClick = (row: any) => {
           height: 14px !important;
           min-width: 14px !important;
           min-height: 14px !important;
-          stroke: #64748b !important;
-          color: #64748b !important;
+          stroke: #475569 !important;
+          color: #475569 !important;
           flex-shrink: 0 !important;
           pointer-events: none;
         }
@@ -1279,13 +1319,30 @@ const handleDeleteReadingClick = (row: any) => {
 
         .eb-pagination-row { flex-wrap: wrap; }
         .eb-page-ellipsis { cursor: default; background: transparent; border-color: transparent; }
-        .eb-page-ellipsis svg { stroke: #94a3b8 !important; color: #94a3b8 !important; }
+        .eb-page-ellipsis svg { stroke: #64748b !important; color: #64748b !important; }
 
         .eb-chart-container { padding: 20px; }
 
         .eb-flat-room-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; background: #fafafa; }
         .eb-flat-room-card + .eb-flat-room-card { margin-top: 14px; }
         .eb-flat-room-title { font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 12px; }
+
+        .eb-dlg-head { display: flex; align-items: center; gap: 12px; padding-right: 36px; margin-bottom: 18px; }
+        .eb-dlg-icon { width: 40px; height: 40px; border-radius: 12px; background: #f1ebff; color: #5200FF; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .eb-dlg-title { font-size: 18px; font-weight: 700; color: #0f172a; line-height: 1.2; }
+        .eb-dlg-sub { font-size: 12.5px; color: #64748b; margin-top: 2px; }
+        .eb-dlg-section { border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px; background: #fff; }
+        .eb-dlg-section + .eb-dlg-section { margin-top: 14px; }
+        .eb-dlg-section-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 14px; }
+        .eb-dlg-step { width: 20px; height: 20px; border-radius: 999px; background: #5200FF; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+        .eb-dlg-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .eb-dlg-meter { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; background: #fafafa; }
+        .eb-dlg-meter + .eb-dlg-meter { margin-top: 12px; }
+        .eb-dlg-empty { border: 1.5px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; font-size: 13px; color: #64748b; background: #f8fafc; }
+        .eb-dlg-seg { display: inline-flex; padding: 3px; border-radius: 10px; background: #f1f5f9; gap: 2px; }
+        .eb-dlg-seg button { border: 0; background: transparent; padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; }
+        .eb-dlg-seg button[aria-pressed="true"] { background: #fff; color: #5200FF; box-shadow: 0 1px 2px rgba(15,23,42,.12); }
+        @media (max-width: 520px) { .eb-dlg-grid-2 { grid-template-columns: 1fr; } }
       `}</style>
 
       <div className="eb-wrap">
@@ -1293,21 +1350,21 @@ const handleDeleteReadingClick = (row: any) => {
           <div>
             <div className="eb-panel">
               <div className="eb-panel-header">
-                <div className="eb-panel-title">EB Readings List</div>
+                <h1 className="eb-panel-title">EB Readings List</h1>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={handleDownloadExcel} className="h-8">
-                    <Download size={14} className="mr-2" /> Export
+                    <Download size={14} className="mr-2" aria-hidden="true" /> Export
                   </Button>
                   {hasAccess && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button size="sm" className="h-8 bg-[#5200FF] hover:bg-[#4200cc] text-white">
-                          <Plus size={14} className="mr-2" /> Add EB Reading
+                          <Plus size={14} className="mr-2" aria-hidden="true" /> Add EB Reading
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={openAddDialog}>Single Room Reading</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setUploadOpen(true)}>Upload Excel Reading</DropdownMenuItem>
+                        <DropdownMenuItem onClick={openAddDialog}>{isFlatMode ? "Single Flat Reading" : "Single Room Reading"}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setUploadOpen(true)}>{isFlatMode ? "Upload Bulk Flat Reading" : "Upload Bulk Room Reading"}</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
@@ -1315,10 +1372,12 @@ const handleDeleteReadingClick = (row: any) => {
               </div>
 
               {/* Filters */}
-              <div className="flex items-center gap-3 p-4 border-b border-[#f1f5f9] bg-[#fafafa]">
+              <div className="flex flex-wrap items-center gap-3 p-4 border-b border-[#f1f5f9] bg-[#fafafa]">
                 <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[180px]">
                   <Select value={selectedBranch} onValueChange={setSelectedBranch} disabled={!hasAccess || !canPickBranch}>
-                    <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full">
+                    {/* A11Y: Radix renders the trigger as a <button role="combobox">
+                        with no text label of its own, so Lighthouse flags it. */}
+                    <SelectTrigger aria-label="Filter by branch" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full">
                       <SelectValue placeholder="All Branches" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1330,9 +1389,9 @@ const handleDeleteReadingClick = (row: any) => {
                   </Select>
                 </div>
 
-                <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[150px]">
+                <div className={`${isFlatMode ? "hidden" : "flex"} bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[150px]`}>
                   <Select value={selectedRoomId} onValueChange={setSelectedRoomId}>
-                    <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full">
+                    <SelectTrigger aria-label="Filter by room" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full">
                       <SelectValue placeholder="All Rooms" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1353,7 +1412,7 @@ const handleDeleteReadingClick = (row: any) => {
                       setSelMonth(m);
                     }}
                   >
-                    <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full">
+                    <SelectTrigger aria-label="Filter by month and year" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full">
                       <SelectValue placeholder="Select month" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1364,33 +1423,40 @@ const handleDeleteReadingClick = (row: any) => {
                   </Select>
                 </div>
 
-                <button className="flex items-center gap-1.5 text-sm text-[#64748b] font-medium hover:text-[#0f172a]" onClick={() => {
-                  setSelectedBranch(defaultBranch);
-                  setSelectedRoomId("all");
-                  setSelMonth(now.getMonth() + 1);
-                  setSelYear(now.getFullYear());
-                }}>
-                  <RefreshCw size={14} /> Clear
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 text-sm text-[#475569] font-medium hover:text-[#0f172a]"
+                  onClick={() => {
+                    setSelectedBranch(defaultBranch);
+                    setSelectedRoomId("all");
+                    setSelMonth(now.getMonth() + 1);
+                    setSelYear(now.getFullYear());
+                  }}
+                >
+                  <RefreshCw size={14} aria-hidden="true" /> Clear
                 </button>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="eb-table">
+                  <caption className="sr-only">EB readings for the selected month</caption>
                   <thead>
                     <tr>
-                      <th>ROOM / BED</th>
-                      <th>PREV READING</th>
-                      <th>CURR READING</th>
-                      <th>UNITS</th>
-                      <th>AMOUNT (₹)</th>
-                      <th>STATUS</th>
-                      <th>ACTIONS</th>
+                      <th scope="col">ROOM / BED</th>
+                      <th scope="col">PREV READING</th>
+                      <th scope="col">CURR READING</th>
+                      <th scope="col">UNITS</th>
+                      <th scope="col">AMOUNT (₹)</th>
+                      <th scope="col">STATUS</th>
+                      <th scope="col">ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="text-center py-12 text-slate-400">No EB readings found.</td>
+                        {/* A11Y: was text-slate-400 (#94a3b8, ~2.6:1 on white);
+                            now #475569 (~7.5:1). */}
+                        <td colSpan={7} className="text-center py-12 eb-empty">No EB readings found.</td>
                       </tr>
                     ) : (
                       paginatedRows.map((row, i) => {
@@ -1463,7 +1529,7 @@ const handleDeleteReadingClick = (row: any) => {
                               )}
                             </td>
                             <td>
-                              <div className={`eb-status ${status.toLowerCase()}`}>
+                              <div className={`eb-status ${status.toLowerCase().replace(/\s+/g, "-")}`}>
                                 {informational
                                   ? (status === "Pay" ? "Pay" : status === "Refund" ? "Refund" : "Settled")
                                   : status}
@@ -1473,17 +1539,29 @@ const handleDeleteReadingClick = (row: any) => {
                               <div className="flex gap-2">
                                 {/* No bill to send for a settled daily stay. */}
                                 {!informational && (
-                                  <button className="eb-action-btn" onClick={() => handleSendWhatsApp(row.roomId)} title="Send Bill">
-                                    <Send size={14} />
+                                  <button
+                                    type="button"
+                                    className="eb-action-btn"
+                                    onClick={() => handleSendWhatsApp(row.roomId)}
+                                    title="Send Bill"
+                                    aria-label={`Send bill for room ${rName} on WhatsApp`}
+                                  >
+                                    <Send size={14} aria-hidden="true" />
                                   </button>
                                 )}
                                 {hasAccess && (
                                   <button
+                                    type="button"
                                     className="eb-action-btn"
                                     onClick={() => handleDeleteReadingClick(row)}
                                     title={informational ? "Remove record" : "Delete"}
+                                    aria-label={
+                                      informational
+                                        ? `Remove checkout record for room ${rName}`
+                                        : `Delete EB reading for room ${rName}`
+                                    }
                                   >
-                                    <Trash2 size={14} />
+                                    <Trash2 size={14} aria-hidden="true" />
                                   </button>
                                 )}
                               </div>
@@ -1496,28 +1574,35 @@ const handleDeleteReadingClick = (row: any) => {
                 </table>
               </div>
 
-              <div className="flex items-center justify-between px-5 py-4 border-t border-[#f1f5f9]">
-                <div className="text-[13px] text-[#64748b]">
+              <div className="eb-mobile-pagination flex items-center justify-between px-5 py-4 border-t border-[#f1f5f9]">
+                <div className="text-[13px] text-[#475569]" aria-live="polite">
                   Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to {Math.min((currentPage + 1) * pageSize, filteredTenantRows.length)} of {filteredTenantRows.length} readings
                 </div>
-                <div className="flex gap-2 eb-pagination-row">
+                {/* A11Y: pagination wrapped in a labelled <nav>; the icon-only
+                    prev/next buttons and numbered buttons now have names. */}
+                <nav aria-label="Pagination" className="flex gap-2 eb-pagination-row">
                   <button
+                    type="button"
                     className="eb-action-btn w-8"
+                    aria-label="Previous page"
                     disabled={currentPage === 0}
                     onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                   >
-                    <ChevronLeft size={14} />
+                    <ChevronLeft size={14} aria-hidden="true" />
                   </button>
 
                   {pageNumbers.map((p, idx) =>
                     p === "..." ? (
-                      <span key={`ellipsis-${idx}`} className="eb-action-btn w-8 eb-page-ellipsis">
+                      <span key={`ellipsis-${idx}`} className="eb-action-btn w-8 eb-page-ellipsis" aria-hidden="true">
                         <MoreHorizontal size={14} />
                       </span>
                     ) : (
                       <button
+                        type="button"
                         key={p}
                         className={`eb-action-btn w-8 ${p === currentPage + 1 ? "active" : ""}`}
+                        aria-label={`Page ${p}`}
+                        aria-current={p === currentPage + 1 ? "page" : undefined}
                         onClick={() => setCurrentPage(p - 1)}
                       >
                         {p}
@@ -1526,13 +1611,15 @@ const handleDeleteReadingClick = (row: any) => {
                   )}
 
                   <button
+                    type="button"
                     className="eb-action-btn w-8"
+                    aria-label="Next page"
                     disabled={currentPage + 1 >= totalPages}
                     onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                   >
-                    <ChevronRight size={14} />
+                    <ChevronRight size={14} aria-hidden="true" />
                   </button>
-                </div>
+                </nav>
               </div>
             </div>
           </div>
@@ -1542,26 +1629,39 @@ const handleDeleteReadingClick = (row: any) => {
           <>
 
             <Dialog open={addOpen} onOpenChange={open => { setAddOpen(open); if (!open) resetAddDialog(); }}>
-              <DialogContent className="sm:max-w-[860px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
-                <div className="relative max-h-[90vh] overflow-y-auto p-6">
+              <DialogContent onOpenAutoFocus={e => e.preventDefault()} className="eb-add-mobile-dialog sm:max-w-[760px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+                <div className="eb-add-mobile-scroll relative max-h-[90vh] overflow-y-auto p-6">
                   <DialogClose asChild>
                     <button
                       type="button"
                       aria-label="Close"
-                      className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                      className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
                     >
-                      <X className="h-4 w-4 shrink-0" />
+                      <X className="h-4 w-4 shrink-0" aria-hidden="true" />
                     </button>
                   </DialogClose>
 
-                  <DialogHeader>
-                    <DialogTitle>Add EB Reading</DialogTitle>
-                    <DialogDescription>Enter the electricity meter readings for this month.</DialogDescription>
+                  <DialogHeader className="space-y-0">
+                    <div className="eb-dlg-head">
+                      <div className="eb-dlg-icon"><Zap className="h-5 w-5" aria-hidden="true" /></div>
+                      <div>
+                        <DialogTitle className="eb-dlg-title">Add EB Reading</DialogTitle>
+                        <DialogDescription className="eb-dlg-sub">
+                          {isFlatMode
+                            ? "Enter the shared meter reading for a flat."
+                            : isRoomMode
+                              ? "Enter the meter reading for a room."
+                              : "Enter the electricity meter readings for this month."}
+                        </DialogDescription>
+                      </div>
+                    </div>
                   </DialogHeader>
 
-                  <div className="grid gap-4 mt-2">
-                    {/* Branch + Flat side by side */}
-                    <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    {/* Section 1 — Branch + Flat side by side (Room-based hostel: Branch only) */}
+                    <div className="eb-dlg-section">
+                      <div className="eb-dlg-section-title"><span className="eb-dlg-step">1</span>{isRoomMode ? "Branch" : "Branch & Flat"}</div>
+                    <div className={isRoomMode ? "grid grid-cols-1 gap-4" : "eb-dlg-grid-2"}>
                       <div className="space-y-1.5">
                         <Label className="text-xs font-medium text-muted-foreground">Branch</Label>
                         {canPickBranch ? (
@@ -1577,7 +1677,7 @@ const handleDeleteReadingClick = (row: any) => {
                               setFlatSearch("");
                             }}
                           >
-                            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Select Branch" /></SelectTrigger>
+                            <SelectTrigger aria-label="Branch" className="rounded-lg"><SelectValue placeholder="Select Branch" /></SelectTrigger>
                             <SelectContent>
                               {branches.map(b => (
                                 <SelectItem key={b.id} value={String(b.id)}>{b.unitName}</SelectItem>
@@ -1593,19 +1693,19 @@ const handleDeleteReadingClick = (row: any) => {
                         )}
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div className={isRoomMode ? "hidden" : "space-y-1.5"}>
                         <Label className="text-xs font-medium text-muted-foreground">Flat</Label>
                         <Select
                           value={formFlatId}
                           onValueChange={val => { setFormFlatId(val); setFlatSearch(""); }}
                           disabled={canPickBranch && !formBranchId}
                         >
-                          <SelectTrigger className="rounded-lg">
+                          <SelectTrigger aria-label="Flat" className="rounded-lg">
                             <SelectValue placeholder={canPickBranch && !formBranchId ? "Select branch first" : "Select Flat"} />
                           </SelectTrigger>
                           <SelectContent>
                             <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
-                              <Input placeholder="Search flat..." value={flatSearch}
+                              <Input placeholder="Search flat..." aria-label="Search flat" value={flatSearch}
                                 onChange={e => setFlatSearch(e.target.value)}
                                 onKeyDown={e => e.stopPropagation()}
                                 className="h-8 text-sm rounded-lg" autoFocus />
@@ -1627,14 +1727,17 @@ const handleDeleteReadingClick = (row: any) => {
                         </Select>
                       </div>
                     </div>
+                    </div>
 
+                    <div className="eb-dlg-section">
+                      <div className="eb-dlg-section-title"><span className="eb-dlg-step">2</span>Meter reading</div>
                     {(formFlatId && formFlatId !== "all") ? (
-                      <div className="space-y-0 max-h-[420px] overflow-y-auto pr-1">
+                      <div className="space-y-0 max-h-[360px] overflow-y-auto pr-1">
                         {/* ── SHARED FLAT METER ──
                             One physical EB meter for the whole flat — one
                             Previous/Current pair, applied to every room
                             listed below once saved. */}
-                        <div className="eb-flat-room-card">
+                        <div className="eb-dlg-meter">
                           <div className="eb-flat-room-title">
                             Shared Flat Meter
                             {roomsInFormFlat.length > 0 && (
@@ -1643,14 +1746,15 @@ const handleDeleteReadingClick = (row: any) => {
                               </span>
                             )}
                           </div>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="eb-dlg-grid-2">
                             <div className="space-y-1.5">
-                              <Label className="text-xs font-medium text-muted-foreground">Previous</Label>
-                              <Input className="rounded-lg bg-white" value={flatSharedPrev} readOnly />
+                              <Label htmlFor="eb-flat-prev" className="text-xs font-medium text-muted-foreground">Previous</Label>
+                              <Input id="eb-flat-prev" className="rounded-lg bg-white" value={flatSharedPrev} readOnly />
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="text-xs font-medium text-muted-foreground">Current</Label>
+                              <Label htmlFor="eb-flat-curr" className="text-xs font-medium text-muted-foreground">Current</Label>
                               <Input
+                                id="eb-flat-curr"
                                 className="rounded-lg bg-white"
                                 placeholder="Enter current reading"
                                 value={flatSharedCurr}
@@ -1665,16 +1769,17 @@ const handleDeleteReadingClick = (row: any) => {
 
                         {/* AC units stay per-room even inside a shared-meter flat. */}
                         {flatAcRows.map(row => (
-                          <div key={row.roomId} className="eb-flat-room-card">
+                          <div key={row.roomId} className="eb-dlg-meter">
                             <div className="eb-flat-room-title">Room {row.roomNumber} — AC Meter</div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="eb-dlg-grid-2">
                               <div className="space-y-1.5">
-                                <Label className="text-xs font-medium text-muted-foreground">AC Previous</Label>
-                                <Input className="rounded-lg bg-white" value={row.acPreviousReading} readOnly />
+                                <Label htmlFor={`eb-ac-prev-${row.roomId}`} className="text-xs font-medium text-muted-foreground">AC Previous</Label>
+                                <Input id={`eb-ac-prev-${row.roomId}`} className="rounded-lg bg-white" value={row.acPreviousReading} readOnly />
                               </div>
                               <div className="space-y-1.5">
-                                <Label className="text-xs font-medium text-muted-foreground">AC Current</Label>
+                                <Label htmlFor={`eb-ac-curr-${row.roomId}`} className="text-xs font-medium text-muted-foreground">AC Current</Label>
                                 <Input
+                                  id={`eb-ac-curr-${row.roomId}`}
                                   className="rounded-lg bg-white"
                                   placeholder="Enter AC current reading"
                                   value={row.acCurrentReading}
@@ -1685,6 +1790,8 @@ const handleDeleteReadingClick = (row: any) => {
                           </div>
                         ))}
                       </div>
+                    ) : isFlatMode ? (
+                      <div className="eb-dlg-empty">Select a flat above to enter its shared meter reading.</div>
                     ) : (
                       <>
                         <div className="space-y-1.5">
@@ -1694,12 +1801,12 @@ const handleDeleteReadingClick = (row: any) => {
                             onValueChange={val => { setFormRoomId(val); setRoomSearch(""); }}
                             disabled={canPickBranch && !formBranchId}
                           >
-                            <SelectTrigger className="rounded-lg">
+                            <SelectTrigger aria-label="Room" className="rounded-lg">
                               <SelectValue placeholder={canPickBranch && !formBranchId ? "Select branch first" : "Select room"} />
                             </SelectTrigger>
                             <SelectContent>
                               <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
-                                <Input placeholder="Search room..." value={roomSearch}
+                                <Input placeholder="Search room..." aria-label="Search room" value={roomSearch}
                                   onChange={e => setRoomSearch(e.target.value)}
                                   onKeyDown={e => e.stopPropagation()}
                                   className="h-8 text-sm rounded-lg" autoFocus />
@@ -1727,10 +1834,11 @@ const handleDeleteReadingClick = (row: any) => {
                             getRoomStartingReading) — no tenant selection is
                             ever needed here, regardless of how many tenants
                             are active in the room. */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="eb-dlg-grid-2">
                           <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-muted-foreground">Previous</Label>
+                            <Label htmlFor="eb-room-prev" className="text-xs font-medium text-muted-foreground">Previous</Label>
                             <Input
+                              id="eb-room-prev"
                               className="rounded-lg"
                               placeholder="Previous"
                               value={formPrevReading}
@@ -1738,21 +1846,21 @@ const handleDeleteReadingClick = (row: any) => {
                             />
                           </div>
                           <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-muted-foreground">Current</Label>
-                            <Input className="rounded-lg" placeholder="Current" value={formCurrReading}
+                            <Label htmlFor="eb-room-curr" className="text-xs font-medium text-muted-foreground">Current</Label>
+                            <Input id="eb-room-curr" className="rounded-lg" placeholder="Current" value={formCurrReading}
                               onChange={e => setFormCurrReading(e.target.value)} />
                           </div>
                         </div>
 
                         {selectedRoomObj?.hostelType === "AC" && (
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="eb-dlg-grid-2">
                             <div className="space-y-1.5">
-                              <Label className="text-xs font-medium text-muted-foreground">AC Previous</Label>
-                              <Input className="rounded-lg" type="number" placeholder="Previous" value={formAcPrev} readOnly />
+                              <Label htmlFor="eb-room-ac-prev" className="text-xs font-medium text-muted-foreground">AC Previous</Label>
+                              <Input id="eb-room-ac-prev" className="rounded-lg" type="number" placeholder="Previous" value={formAcPrev} readOnly />
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="text-xs font-medium text-muted-foreground">AC Current</Label>
-                              <Input className="rounded-lg" type="number" placeholder="Current" value={formAcCurr}
+                              <Label htmlFor="eb-room-ac-curr" className="text-xs font-medium text-muted-foreground">AC Current</Label>
+                              <Input id="eb-room-ac-curr" className="rounded-lg" type="number" placeholder="Current" value={formAcCurr}
                                 onChange={e => setFormAcCurr(e.target.value)} />
                             </div>
                           </div>
@@ -1760,33 +1868,36 @@ const handleDeleteReadingClick = (row: any) => {
                       </>
                     )}
 
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs font-medium text-muted-foreground">Mode:</Label>
-                      <Button size="sm" className="rounded-lg" variant={manualMode ? "secondary" : "outline"} onClick={() => setManualMode(false)}>Automatic</Button>
-                      <Button size="sm" className="rounded-lg" variant={manualMode ? "outline" : "secondary"} onClick={() => setManualMode(true)}>Manual</Button>
                     </div>
 
+                    <div className="eb-dlg-section">
+                      <div className="eb-dlg-section-title"><span className="eb-dlg-step">3</span>Unit rate</div>
+                      <div className="eb-dlg-seg" role="group" aria-label="Rate mode">
+                        <button type="button" aria-pressed={!manualMode} onClick={() => setManualMode(false)}>Automatic</button>
+                        <button type="button" aria-pressed={manualMode} onClick={() => setManualMode(true)}>Manual</button>
+                      </div>
                     {manualMode && (
-                      <div className="space-y-2">
-                        <Label className="text-xs font-medium text-muted-foreground">Unit Rate (₹)</Label>
+                      <div className="space-y-2 mt-3">
+                        <Label htmlFor="eb-unit-rate" className="text-xs font-medium text-muted-foreground">Unit Rate (₹)</Label>
                         {(!formFlatId || formFlatId === "all") ? (
-                          <Input className="rounded-lg" type="number" value={roomManualRates[formRoomId] ?? ""}
+                          <Input id="eb-unit-rate" className="rounded-lg" type="number" value={roomManualRates[formRoomId] ?? ""}
                             onChange={e => setRoomManualRates(prev => ({ ...prev, [formRoomId]: Number(e.target.value) }))}
                             placeholder="Enter rate for this room" />
                         ) : (
                           // One meter, one rate — applies to the whole flat.
-                          <Input className="rounded-lg" type="number" value={manualRate}
+                          <Input id="eb-unit-rate" className="rounded-lg" type="number" value={manualRate}
                             onChange={e => setManualRate(Number(e.target.value))}
                             placeholder="Enter unit rate for this flat's shared meter" />
                         )}
                       </div>
                     )}
+                    </div>
                   </div>
 
                   <DialogFooter className="mt-4">
                     <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
-                    <Button className="rounded-lg" onClick={handleAdd} disabled={isSaving}>
-                      {isSaving ? "Saving..." : "Save"}
+                    <Button className="rounded-lg bg-[#5200FF] text-white hover:bg-[#4200cc]" onClick={handleAdd} disabled={isSaving}>
+                      {isSaving ? "Saving..." : "Save Reading"}
                     </Button>
                   </DialogFooter>
                 </div>
@@ -1804,9 +1915,9 @@ const handleDeleteReadingClick = (row: any) => {
               <button
                 type="button"
                 aria-label="Close"
-                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
-                <X className="h-4 w-4 shrink-0" />
+                <X className="h-4 w-4 shrink-0" aria-hidden="true" />
               </button>
             </DialogClose>
             <DialogHeader>
@@ -1842,16 +1953,20 @@ const handleDeleteReadingClick = (row: any) => {
               <button
                 type="button"
                 aria-label="Close"
-                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
-                <X className="h-4 w-4 shrink-0" />
+                <X className="h-4 w-4 shrink-0" aria-hidden="true" />
               </button>
             </DialogClose>
             <DialogHeader>
-              <DialogTitle>Upload EB Excel</DialogTitle>
-              <DialogDescription>Upload Excel file with RoomNumber, Previous, Current, AcPrevious, AcCurrent, EbRate columns</DialogDescription>
+              <DialogTitle>{isFlatMode ? "Upload Bulk Flat Reading" : "Upload Bulk Room Reading"}</DialogTitle>
+              <DialogDescription>
+                {isFlatMode
+                  ? "Upload an Excel file with RoomNumber, Previous, Current, AcPrevious, AcCurrent, EbRate columns. Every room of the same flat must carry the same Previous/Current (shared flat meter)."
+                  : "Upload an Excel file with RoomNumber, Previous, Current, AcPrevious, AcCurrent, EbRate columns."}
+              </DialogDescription>
             </DialogHeader>
-            <Input className="rounded-lg" type="file" accept=".xlsx, .xls" onChange={handleFileUpload} />
+            <Input className="rounded-lg" type="file" accept=".xlsx, .xls" aria-label="Upload EB readings Excel file" onChange={handleFileUpload} />
             <DialogFooter>
               <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
             </DialogFooter>

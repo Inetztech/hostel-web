@@ -32,21 +32,22 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 const PHONE_PATTERN = /^[6-9]\d{9}$/;
 
+/* A11Y: badge text darkened from -600 to -700 for AA contrast on the -50 backgrounds. */
 const StatusBadge = ({ status }: { status: CleaningStatus }) => {
   if (status === "CLEANED")
-    return <span className="inline-flex px-2 py-0.5 text-[11px] font-medium bg-emerald-50 text-emerald-600 rounded">Completed</span>;
+    return <span className="inline-flex px-2 py-0.5 text-[11px] font-medium bg-emerald-50 text-emerald-700 rounded">Completed</span>;
   if (status === "IN_PROGRESS")
-    return <span className="inline-flex px-2 py-0.5 text-[11px] font-medium bg-rose-50 text-rose-600 rounded">In Progress</span>;
-  return <span className="inline-flex px-2 py-0.5 text-[11px] font-medium bg-orange-50 text-orange-600 rounded">Pending</span>;
+    return <span className="inline-flex px-2 py-0.5 text-[11px] font-medium bg-rose-50 text-rose-700 rounded">In Progress</span>;
+  return <span className="inline-flex px-2 py-0.5 text-[11px] font-medium bg-orange-50 text-orange-700 rounded">Pending</span>;
 };
 
 const Avatar = ({ name }: { name: string }) => {
   const initial = (name || "?").charAt(0).toUpperCase();
-  const colors = ["bg-blue-100 text-blue-700", "bg-purple-100 text-purple-700", "bg-pink-100 text-pink-700", "bg-amber-100 text-amber-700", "bg-emerald-100 text-emerald-700"];
+  const colors = ["bg-blue-100 text-blue-700", "bg-purple-100 text-purple-700", "bg-pink-100 text-pink-700", "bg-amber-100 text-amber-800", "bg-emerald-100 text-emerald-800"];
   const color = colors[(name || "?").charCodeAt(0) % colors.length];
 
   return (
-    <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${color}`}>
+    <div aria-hidden="true" className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${color}`}>
       {initial}
     </div>
   );
@@ -117,11 +118,8 @@ export default function MaintenancePage() {
   const loadData = async (showLoader = true) => {
     if (showLoader) setLoading(true);
 
-    // CHANGED: branches now loaded via fetchAllPages instead of a bare
-    // fetchBranches(0, 10). The old call only ever fetched the first
-    // backend page (10 branches), which capped both the "Add Cleaner"
-    // branch dropdown and the branch filter above the task table at 10
-    // branches even when many more exist.
+    // Branches are loaded via fetchAllPages so the "Add Cleaner" dropdown and
+    // the branch filter are not capped at the first backend page (10 branches).
     const [statsRes, cleanersRes, tasksRes, branchesRes, scheduleRes] = await Promise.allSettled([
       getMaintenanceDashboard(),
       fetchAllPages<Cleaner>((pg, size) => getMaintenanceCleaners(pg, size)),
@@ -460,8 +458,8 @@ export default function MaintenancePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-500 text-sm">
-        <RefreshCw className="h-5 w-5 animate-spin mr-2" /> Loading data...
+      <div role="status" className="flex items-center justify-center h-64 text-gray-600 text-sm">
+        <RefreshCw className="h-5 w-5 animate-spin mr-2" aria-hidden="true" /> Loading data...
       </div>
     );
   }
@@ -477,74 +475,102 @@ export default function MaintenancePage() {
     { label: "Cleaners", value: derivedStats.cleaners, sub: "Active Cleaners", icon: Users, color: "text-blue-600", bg: "bg-blue-50", ring: "ring-blue-100" },
   ];
 
-  return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+  /* A11Y: shared classes. text-gray-400 (~2.5:1) replaced with text-gray-600 (~7:1). */
+  const THEAD_CLASS = "bg-gray-50/50 text-[10px] uppercase font-semibold text-gray-600";
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+  /* Filter dropdowns: full width of their grid cell on phones (40px tall), auto width on desktop. */
+  const SELECT_CLASS =
+    "appearance-none w-full h-10 lg:h-auto lg:w-auto bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 lg:min-w-[140px]";
+  const PAGE_BTN_CLASS =
+    "h-8 px-2 flex items-center justify-center gap-1 rounded border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-40";
+
+  return (
+    <div className="maintenance-page space-y-4 md:space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+
+      {/* Forces 2 columns on mobile / 5 on desktop, overriding any global
+          1-column rule on .maintenance-stats-grid (e.g. in index.css). */}
+      <style>{`
+        .maintenance-page .maintenance-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        @media (min-width: 768px) {
+          .maintenance-page .maintenance-stats-grid { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; }
+        }
+      `}</style>
+
+      <div className="maintenance-stats-grid grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
         {statsArray.map((stat, i) => (
-          <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex flex-col justify-between hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)] transition-all">
+          <div
+            key={i}
+            className={`bg-white rounded-2xl border border-gray-100 p-3 md:p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex flex-col justify-between hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)] transition-all min-w-0 ${
+              i === statsArray.length - 1 ? "col-span-2 md:col-span-1" : ""
+            }`}
+          >
             <div className="flex items-start justify-between">
-              <div className={`h-10 w-10 rounded-xl flex items-center justify-center ring-1 ${stat.bg} ${stat.color} ${stat.ring}`}>
-                <stat.icon className="h-5 w-5" />
+              <div aria-hidden="true" className={`h-8 w-8 md:h-10 md:w-10 rounded-xl flex items-center justify-center ring-1 ${stat.bg} ${stat.color} ${stat.ring}`}>
+                <stat.icon className="h-4 w-4 md:h-5 md:w-5" />
               </div>
             </div>
-            <div className="mt-4">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{stat.label}</p>
+            <div className="mt-2 md:mt-4">
+              <p className="text-[11px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider">{stat.label}</p>
               <div className="flex items-end gap-2 mt-1">
-                <p className="text-2xl font-bold text-gray-900 tabular-nums leading-none">{stat.value}</p>
+                <p className="text-xl md:text-2xl font-bold text-gray-900 tabular-nums leading-none">{stat.value}</p>
               </div>
-              <p className="text-[11px] text-gray-500 mt-1.5 font-medium">{stat.sub}</p>
+              <p className="text-[11px] text-gray-600 mt-1 md:mt-1.5 font-medium">{stat.sub}</p>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-[0_1px_2px_rgba(16,24,40,0.04)] overflow-hidden flex flex-col">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">Cleaners</h2>
-            <button onClick={() => setIsAddCleanerOpen(true)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
-              <Plus className="h-3.5 w-3.5" />
+            <button type="button" onClick={() => setIsAddCleanerOpen(true)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               Add Cleaner
             </button>
           </div>
           <div className="overflow-x-auto flex-1">
             <table className="w-full text-left text-sm whitespace-normal break-words">
-              <thead className="bg-gray-50/50 text-[10px] uppercase font-semibold text-gray-400">
+              <caption className="sr-only">Cleaners</caption>
+              <thead className={THEAD_CLASS}>
                 <tr>
-                  <th className="px-5 py-3">Cleaner</th>
-                  <th className="px-4 py-3">Phone Number</th>
-                  <th className="px-4 py-3">Branch</th>
-                  <th className="px-4 py-3">Assigned Rooms</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-5 py-3 text-right">Actions</th>
+                  <th scope="col" className="px-5 py-3">Cleaner</th>
+                  <th scope="col" className="px-4 py-3">Phone Number</th>
+                  <th scope="col" className="px-4 py-3">Branch</th>
+                  <th scope="col" className="px-4 py-3">Assigned Rooms</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-5 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {cleaners.length === 0 && (
-                  <tr><td colSpan={6} className="px-5 py-6 text-center text-gray-400 text-[12px]">No cleaners yet</td></tr>
+                  <tr><td colSpan={6} className="px-5 py-6 text-center text-gray-600 text-[12px]">No cleaners yet</td></tr>
                 )}
                 {visibleCleaners.map((c) => (
                   <tr key={c.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-3 flex items-center gap-2">
-                      <Avatar name={c.name} />
-                      <span className="font-medium text-gray-800 text-[13px]">{c.name}</span>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <Avatar name={c.name} />
+                        <span className="font-medium text-gray-800 text-[13px]">{c.name}</span>
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-[12px]">{c.phone || "—"}</td>
-                    <td className="px-4 py-3 text-gray-500 text-[12px]">{c.branchName || "—"}</td>
-                    <td className="px-4 py-3 text-blue-600 font-medium text-[12px]">{c.assignedRooms}</td>
+                    <td className="px-4 py-3 text-gray-600 text-[12px]">{c.phone || "—"}</td>
+                    <td className="px-4 py-3 text-gray-600 text-[12px]">{c.branchName || "—"}</td>
+                    <td className="px-4 py-3 text-blue-700 font-medium text-[12px]">{c.assignedRooms}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-[11px] font-medium ${c.active ? "text-emerald-600" : "text-gray-400"}`}>
+                      <span className={`text-[11px] font-medium ${c.active ? "text-emerald-700" : "text-gray-600"}`}>
                         {c.active ? "Active" : "Inactive"}
                       </span>
                     </td>
                     <td className="px-5 py-3 text-right">
                       <button
+                        type="button"
                         onClick={() => handleDeleteCleaner(c.id, c.name)}
                         className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors p-1.5 border border-rose-200 rounded-md bg-white shadow-sm"
                         title="Remove cleaner"
+                        aria-label={`Remove cleaner ${c.name}`}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     </td>
                   </tr>
@@ -553,9 +579,10 @@ export default function MaintenancePage() {
             </table>
           </div>
           <div className="px-5 py-3 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
-            <span className="text-[11px] text-gray-500 font-medium">Total Cleaners: {cleaners.length}</span>
+            <span className="text-[11px] text-gray-600 font-medium">Total Cleaners: {cleaners.length}</span>
             {cleaners.length > 5 && (
               <button
+                type="button"
                 onClick={() => setShowAllCleaners((v) => !v)}
                 className="text-[12px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md transition-colors border border-blue-100"
               >
@@ -571,43 +598,48 @@ export default function MaintenancePage() {
           </div>
           <div className="overflow-x-auto flex-1">
             <table className="w-full text-left text-sm whitespace-normal break-words">
-              <thead className="bg-gray-50/50 text-[10px] uppercase font-semibold text-gray-400">
+              <caption className="sr-only">Today's cleaning schedule</caption>
+              <thead className={THEAD_CLASS}>
                 <tr>
-                  <th className="px-5 py-3">Room</th>
-                  <th className="px-4 py-3">Branch</th>
-                  <th className="px-4 py-3">Cleaner</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-5 py-3 text-right">Actions</th>
+                  <th scope="col" className="px-5 py-3">Room</th>
+                  <th scope="col" className="px-4 py-3">Branch</th>
+                  <th scope="col" className="px-4 py-3">Cleaner</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-5 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {todaySchedule.length === 0 && (
-                  <tr><td colSpan={5} className="px-5 py-6 text-center text-gray-400 text-[12px]">Nothing scheduled for today</td></tr>
+                  <tr><td colSpan={5} className="px-5 py-6 text-center text-gray-600 text-[12px]">Nothing scheduled for today</td></tr>
                 )}
                 {visibleSchedule.map((s) => (
                   <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-3 text-blue-600 font-medium text-[12px]">{s.roomNumber || s.roomId}</td>
-                    <td className="px-4 py-3 text-gray-500 text-[12px]">{s.branchName || "—"}</td>
-                    <td className="px-4 py-3 flex items-center gap-2">
-                      <Avatar name={s.cleanerName || "?"} />
-                      <span className="font-medium text-gray-800 text-[13px]">{s.cleanerName || "Unassigned"}</span>
+                    <td className="px-5 py-3 text-blue-700 font-medium text-[12px]">{s.roomNumber || s.roomId}</td>
+                    <td className="px-4 py-3 text-gray-600 text-[12px]">{s.branchName || "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Avatar name={s.cleanerName || "?"} />
+                        <span className="font-medium text-gray-800 text-[13px]">{s.cleanerName || "Unassigned"}</span>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={s.status} />
                     </td>
                     <td className="px-5 py-3 text-right">
                       {s.status === "CLEANED" ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-600 text-[11px] font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Done
+                        <span className="inline-flex items-center gap-1 text-emerald-700 text-[11px] font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Done
                         </span>
                       ) : (
                         <button
+                          type="button"
                           onClick={() => handleAdvanceStatus(s)}
                           disabled={updatingTaskId === s.id}
                           className="text-gray-600 hover:text-blue-700 hover:bg-blue-50 transition-colors p-1.5 border border-gray-200 hover:border-blue-200 rounded-md bg-white shadow-sm disabled:opacity-50"
                           title={s.status === "PENDING" ? "Mark as In Progress" : "Mark as Completed"}
+                          aria-label={`${s.status === "PENDING" ? "Mark as In Progress" : "Mark as Completed"}: room ${s.roomNumber || s.roomId}`}
                         >
-                          <RefreshCw className={`w-4 h-4 ${updatingTaskId === s.id ? "animate-spin" : ""}`} />
+                          <RefreshCw className={`w-4 h-4 ${updatingTaskId === s.id ? "animate-spin" : ""}`} aria-hidden="true" />
                         </button>
                       )}
                     </td>
@@ -619,10 +651,11 @@ export default function MaintenancePage() {
           {todaySchedule.length > 5 && (
             <div className="px-5 py-3 bg-gray-50/50 border-t border-gray-100 flex justify-center">
               <button
+                type="button"
                 onClick={() => setShowFullSchedule((v) => !v)}
                 className="text-[12px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 flex items-center gap-1.5 w-full justify-center py-2 rounded-lg border border-blue-200 transition-colors shadow-sm"
               >
-                <Eye className="h-4 w-4" />
+                <Eye className="h-4 w-4" aria-hidden="true" />
                 {showFullSchedule ? "Show Less" : "View Full Schedule"}
               </button>
             </div>
@@ -632,86 +665,114 @@ export default function MaintenancePage() {
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
 
-        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        {/* ================= FILTERS =================
+            Phone:   row 1 = Search | Clear Filters
+                     row 2 = All Branches | All Status
+                     row 3 = All Cleaners (full width)
+            Desktop (lg+): one wrapping row, Clear Filters last.
+            NOTE: role="group" (not "search") and no `grid-cols-2` class, because
+            index.css has global !important rules for [role="search"] and
+            .grid.grid-cols-2 that would break this layout. */}
+        <div
+          role="group"
+          aria-label="Filter cleaning tasks"
+          className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 px-3 py-3 border-b border-gray-100 lg:flex lg:flex-wrap lg:items-center lg:gap-3 lg:px-5 lg:py-4"
+        >
+          {/* Search */}
+          <div className="relative min-w-0 lg:flex-1 lg:min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" aria-hidden="true" />
             <input
               type="text"
               placeholder="Search room..."
+              aria-label="Search room"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+              className="w-full h-10 lg:h-auto pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
             />
           </div>
-          <div className="relative">
+
+          {/* Clear Filters (2nd on phone, last on desktop) */}
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="flex items-center justify-center gap-1.5 min-w-0 h-10 lg:h-auto px-2 lg:px-3 lg:py-2 whitespace-nowrap text-[13px] lg:text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors shadow-sm lg:order-last"
+          >
+            <RefreshCw className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Clear Filters
+          </button>
+
+          {/* Branch */}
+          <div className="relative min-w-0">
             <select
+              aria-label="Filter by branch"
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value === "ALL" ? "ALL" : Number(e.target.value))}
-              className="appearance-none bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-w-[140px]"
+              className={SELECT_CLASS}
             >
               <option value="ALL">All Branches</option>
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>{b.unitName}</option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" aria-hidden="true" />
           </div>
-          <div className="relative">
+
+          {/* Status */}
+          <div className="relative min-w-0">
             <select
+              aria-label="Filter by status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as "ALL" | CleaningStatus)}
-              className="appearance-none bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-w-[140px]"
+              className={SELECT_CLASS}
             >
               <option value="ALL">All Status</option>
               <option value="PENDING">Pending</option>
               <option value="IN_PROGRESS">In Progress</option>
               <option value="CLEANED">Completed</option>
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" aria-hidden="true" />
           </div>
-          <div className="relative">
+
+          {/* Cleaner (full width on phone) */}
+          <div className="relative min-w-0 col-span-2 lg:col-span-1">
             <select
+              aria-label="Filter by cleaner"
               value={cleanerFilter}
               onChange={(e) => setCleanerFilter(e.target.value === "ALL" ? "ALL" : Number(e.target.value))}
-              className="appearance-none bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-w-[140px]"
+              className={SELECT_CLASS}
             >
               <option value="ALL">All Cleaners</option>
               {cleaners.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" aria-hidden="true" />
           </div>
-          <button
-            onClick={clearFilters}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors shadow-sm"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Clear Filters
-          </button>
         </div>
 
         {selectedTaskIds.length > 0 && (
-          <div className="px-5 py-2.5 border-b border-blue-100 bg-blue-50/60 flex items-center justify-between">
-            <span className="text-[12px] font-medium text-blue-700">
+          <div className="px-3 lg:px-5 py-2.5 border-b border-blue-100 bg-blue-50/60 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[12px] font-medium text-blue-700" aria-live="polite">
               {selectedTaskIds.length} room{selectedTaskIds.length > 1 ? "s" : ""} selected
             </span>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => setSelectedTaskIds([])}
-                className="text-[12px] font-medium text-gray-600 hover:text-gray-800 px-2 py-1"
+                className="text-[12px] font-medium text-gray-700 hover:text-gray-900 px-2 py-1"
               >
                 Clear selection
               </button>
               <button
+                type="button"
                 onClick={handleBulkMarkCompleted}
                 disabled={bulkUpdating}
-                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-60"
+                className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-60"
               >
                 {bulkUpdating ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                 ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
                 {bulkUpdating ? "Updating..." : "Mark as Completed"}
               </button>
@@ -719,11 +780,12 @@ export default function MaintenancePage() {
           </div>
         )}
 
-        <div className="overflow-x-hidden w-full">
+        <div className="maintenance-table-scroll overflow-x-auto w-full">
           <table className="w-full text-left text-sm whitespace-normal break-words table-fixed">
-            <thead className="bg-gray-50/50 text-[10px] uppercase font-semibold text-gray-400 border-b border-gray-100">
+            <caption className="sr-only">Cleaning tasks</caption>
+            <thead className={`${THEAD_CLASS} border-b border-gray-100`}>
               <tr>
-                <th className="px-4 py-3 w-8">
+                <th scope="col" className="px-4 py-3 w-8">
                   <input
                     type="checkbox"
                     checked={allPageTasksSelected}
@@ -732,18 +794,18 @@ export default function MaintenancePage() {
                     aria-label="Select all rooms on this page"
                   />
                 </th>
-                <th className="px-5 py-3">Room No.</th>
-                <th className="px-4 py-3">Branch</th>
-                <th className="px-4 py-3">Cleaner</th>
-                <th className="px-4 py-3">Cleaning Status</th>
-                <th className="px-4 py-3">Scheduled Date</th>
-                <th className="px-4 py-3">Completed At</th>
-                <th className="px-5 py-3 text-right">Actions</th>
+                <th scope="col" className="px-5 py-3">Room No.</th>
+                <th scope="col" className="px-4 py-3">Branch</th>
+                <th scope="col" className="px-4 py-3">Cleaner</th>
+                <th scope="col" className="px-4 py-3">Cleaning Status</th>
+                <th scope="col" className="px-4 py-3">Scheduled Date</th>
+                <th scope="col" className="px-4 py-3">Completed At</th>
+                <th scope="col" className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {pagedTasks.length === 0 && (
-                <tr><td colSpan={8} className="px-5 py-8 text-center text-gray-400 text-[12px]">No cleaning tasks found</td></tr>
+                <tr><td colSpan={8} className="px-5 py-8 text-center text-gray-600 text-[12px]">No cleaning tasks found</td></tr>
               )}
               {pagedTasks.map((r) => (
                 <tr key={r.id} className={`hover:bg-gray-50/50 transition-colors ${selectedTaskIds.includes(r.id) ? "bg-blue-50/40" : ""}`}>
@@ -757,31 +819,31 @@ export default function MaintenancePage() {
                     />
                   </td>
                   <td className="px-5 py-3 font-semibold text-gray-900 text-[13px]">{r.roomNumber || r.roomId}</td>
-                  <td className="px-4 py-3 text-gray-500 text-[12px]">{r.branchName || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 text-[12px]">{r.branchName || "—"}</td>
                   <td className="px-4 py-3 font-medium text-gray-700 text-[12px]">{r.cleanerName || "Unassigned"}</td>
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                  <td className="px-4 py-3 text-gray-500 text-[12px]">{r.scheduledDate}{r.scheduledTime ? ` · ${r.scheduledTime}` : ""}</td>
-                  <td className="px-4 py-3 text-gray-500 text-[12px]">{r.completedAt ? new Date(r.completedAt).toLocaleString() : "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 text-[12px]">{r.scheduledDate}{r.scheduledTime ? ` · ${r.scheduledTime}` : ""}</td>
+                  <td className="px-4 py-3 text-gray-600 text-[12px]">{r.completedAt ? new Date(r.completedAt).toLocaleString() : "—"}</td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button
+                        type="button"
                         onClick={() => handleAdvanceStatus(r)}
                         disabled={updatingTaskId === r.id}
                         className="text-gray-600 hover:text-blue-700 hover:bg-blue-50 transition-colors p-1.5 border border-gray-200 hover:border-blue-200 rounded-md bg-white shadow-sm disabled:opacity-50"
                         title="Advance status"
+                        aria-label={`Advance status of room ${r.roomNumber || r.roomId}`}
                       >
-                        {updatingTaskId === r.id ? (
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-4 h-4" />
-                        )}
+                        <RefreshCw className={`w-4 h-4 ${updatingTaskId === r.id ? "animate-spin" : ""}`} aria-hidden="true" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDeleteTask(r.id, r.roomNumber || r.roomId)}
                         className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors p-1.5 border border-rose-200 rounded-md bg-white shadow-sm"
                         title="Delete task"
+                        aria-label={`Delete cleaning task for room ${r.roomNumber || r.roomId}`}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
                   </td>
@@ -792,36 +854,42 @@ export default function MaintenancePage() {
         </div>
 
         <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between bg-white rounded-b-2xl">
-          <span className="text-[12px] text-gray-500">
+          <span className="text-[12px] text-gray-600" aria-live="polite">
             Showing {filteredTasks.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1} to{" "}
             {Math.min(currentPage * PAGE_SIZE, filteredTasks.length)} of {filteredTasks.length} rooms
           </span>
-          <div className="flex items-center gap-1">
+          {/* A11Y: the Previous/Next labels are hidden below the sm breakpoint, leaving
+              icon-only buttons with no accessible name. aria-label fixes that. */}
+          <nav aria-label="Pagination" className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="h-8 px-2 flex items-center justify-center gap-1 rounded border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-40"
+              aria-label="Previous page"
+              className={PAGE_BTN_CLASS}
             >
-              <ChevronLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">Previous</span>
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline" aria-hidden="true">Previous</span>
             </button>
-            <span className="px-3 text-sm font-medium text-gray-700">
+            <span className="px-3 text-sm font-medium text-gray-700" aria-current="page">
               {currentPage} / {totalPages}
             </span>
             <button
+              type="button"
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
-              className="h-8 px-2 flex items-center justify-center gap-1 rounded border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-40"
+              aria-label="Next page"
+              className={PAGE_BTN_CLASS}
             >
-              <span className="hidden sm:inline">Next</span>
-              <ChevronRight className="h-4 w-4" />
+              <span className="hidden sm:inline" aria-hidden="true">Next</span>
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
-          </div>
+          </nav>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50/50 border border-blue-100 rounded-lg text-blue-600 text-[12px]">
-        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50/50 border border-blue-100 rounded-lg text-blue-700 text-[12px]">
+        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <span>Cleaning status is updated by the assigned cleaner. Please ensure rooms are inspected after cleaning.</span>
@@ -829,52 +897,63 @@ export default function MaintenancePage() {
 
       {isAddCleanerOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-cleaner-title"
+            className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col"
+          >
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
-              <h3 className="text-lg font-semibold text-gray-900">Add New Cleaner</h3>
+              <h3 id="add-cleaner-title" className="text-lg font-semibold text-gray-900">Add New Cleaner</h3>
               <button
+                type="button"
                 onClick={closeAddCleanerModal}
-                className="text-gray-400 hover:bg-gray-100 hover:text-gray-600 p-1.5 rounded-lg transition-colors"
+                aria-label="Close add cleaner dialog"
+                className="text-gray-500 hover:bg-gray-100 hover:text-gray-700 p-1.5 rounded-lg transition-colors"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" aria-hidden="true" />
               </button>
             </div>
 
             <form onSubmit={handleAddCleaner} className="p-6 overflow-y-auto">
               {modalError && (
-                <div className="flex items-start gap-2 px-3 py-2.5 mb-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-[12px]">
-                  <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                <div role="alert" className="flex items-start gap-2 px-3 py-2.5 mb-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-[12px]">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
                   <span>{modalError}</span>
                 </div>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
+                  <label htmlFor="cleaner-name" className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
                   <input
+                    id="cleaner-name"
                     type="text"
                     required
                     value={newCleanerName}
                     onChange={e => setNewCleanerName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
                     placeholder="e.g. Ramesh Kumar"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone Number</label>
+                  <label htmlFor="cleaner-phone" className="block text-sm font-medium text-gray-700 mb-1.5">Phone Number</label>
                   <input
+                    id="cleaner-phone"
                     type="tel"
                     required
                     inputMode="numeric"
                     maxLength={10}
                     value={newCleanerPhone}
+                    aria-invalid={phoneError ? true : undefined}
+                    aria-describedby={phoneError ? "cleaner-phone-error" : undefined}
                     onChange={(e) => {
                       const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 10);
                       setNewCleanerPhone(digitsOnly);
                       setPhoneError(null);
                     }}
-                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 transition-colors ${
+                    className={`w-full px-3 py-2 border rounded-lg text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 transition-colors ${
                       phoneError
                         ? "border-rose-300 focus:ring-rose-500/20 focus:border-rose-500"
                         : "border-gray-200 focus:ring-blue-500/20 focus:border-blue-500"
@@ -882,13 +961,14 @@ export default function MaintenancePage() {
                     placeholder="e.g. 9876543210"
                   />
                   {phoneError && (
-                    <p className="text-[11px] text-rose-600 mt-1 font-medium">{phoneError}</p>
+                    <p id="cleaner-phone-error" role="alert" className="text-[11px] text-rose-700 mt-1 font-medium">{phoneError}</p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Branch</label>
+                  <label htmlFor="cleaner-branch" className="block text-sm font-medium text-gray-700 mb-1.5">Branch</label>
                   <select
+                    id="cleaner-branch"
                     required
                     value={newCleanerBranch}
                     onChange={e => setNewCleanerBranch(e.target.value)}
@@ -907,41 +987,46 @@ export default function MaintenancePage() {
                       type="button"
                       role="switch"
                       aria-checked={newCleanerActive}
+                      aria-labelledby="cleaner-active-label"
                       onClick={() => setNewCleanerActive(!newCleanerActive)}
                       className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${newCleanerActive ? 'bg-blue-600' : 'bg-gray-200'}`}
                     >
                       <span aria-hidden="true" className={`pointer-events-none absolute left-0.5 inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${newCleanerActive ? 'translate-x-4' : 'translate-x-0'}`} />
                     </button>
-                    <span className="text-sm font-medium text-gray-700">Active (Available for cleaning)</span>
+                    <span id="cleaner-active-label" className="text-sm font-medium text-gray-700">Active (Available for cleaning)</span>
                   </div>
                 </div>
 
                 {newCleanerBranch && (
                   <div className="md:col-span-2">
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Assign Rooms <span className="text-gray-400 font-normal">(optional)</span>
-                      </label>
+                      <span id="assign-rooms-label" className="block text-sm font-medium text-gray-700">
+                        Assign Rooms <span className="text-gray-600 font-normal">(optional)</span>
+                      </span>
                       {!loadingBranchRooms && branchRooms.length > 0 && (
                         <button
                           type="button"
                           onClick={toggleSelectAllRooms}
-                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                          className="text-[11px] font-semibold text-blue-700 hover:text-blue-800 hover:underline"
                         >
                           {allBranchRoomsSelected ? "Unselect All" : "Select All"}
                         </button>
                       )}
                     </div>
-                    <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 divide-y divide-gray-100 sm:divide-y-0">
+                    <div
+                      role="group"
+                      aria-labelledby="assign-rooms-label"
+                      className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 divide-y divide-gray-100 sm:divide-y-0"
+                    >
                       {loadingBranchRooms && (
-                        <div className="col-span-full flex items-center justify-center gap-2 py-4 text-gray-400 text-xs">
-                          <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading rooms...
+                        <div role="status" className="col-span-full flex items-center justify-center gap-2 py-4 text-gray-600 text-xs">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Loading rooms...
                         </div>
                       )}
                       {!loadingBranchRooms && branchRooms.length === 0 && (
-                        <div className="col-span-full py-4 text-center text-gray-400 text-xs px-3">
+                        <div className="col-span-full py-4 text-center text-gray-600 text-xs px-3">
                           No rooms found for{" "}
-                          <span className="font-medium text-gray-500">
+                          <span className="font-medium text-gray-700">
                             {branches.find((b) => String(b.id) === newCleanerBranch)?.unitName || "this branch"}
                           </span>
                           . Add rooms to this branch first, or double-check the branch has rooms under it.
@@ -959,14 +1044,14 @@ export default function MaintenancePage() {
                             className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30"
                           />
                           <span className="font-medium text-gray-800">{room.roomNumber}</span>
-                          <span className="text-gray-400 text-xs">
+                          <span className="text-gray-600 text-xs">
                             {room.hostelType} · {room.totalBeds} beds
                           </span>
                         </label>
                       ))}
                     </div>
                     {selectedRoomIds.length > 0 && (
-                      <p className="text-[11px] text-blue-600 mt-1.5 font-medium">
+                      <p className="text-[11px] text-blue-700 mt-1.5 font-medium" aria-live="polite">
                         {selectedRoomIds.length} room{selectedRoomIds.length > 1 ? "s" : ""} selected
                       </p>
                     )}
@@ -988,9 +1073,9 @@ export default function MaintenancePage() {
                   className="flex-1 flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
-                    <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                    <RefreshCw className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
                   ) : (
-                    <Check className="h-4 w-4 mr-1.5" />
+                    <Check className="h-4 w-4 mr-1.5" aria-hidden="true" />
                   )}
                   {submitting ? 'Saving...' : 'Save Cleaner'}
                 </button>
@@ -1001,26 +1086,30 @@ export default function MaintenancePage() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-[200] animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div
+          role={toast.type === "error" ? "alert" : "status"}
+          className="fixed bottom-6 right-6 z-[200] animate-in fade-in slide-in-from-bottom-2 duration-200"
+        >
           <div
             className={`flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${
               toast.type === "success"
-                ? "bg-emerald-600 text-white"
-                : "bg-rose-600 text-white"
+                ? "bg-emerald-700 text-white"
+                : "bg-rose-700 text-white"
             }`}
           >
             {toast.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+              <CheckCircle2 className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
             ) : (
-              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
             )}
             <span>{toast.message}</span>
             <button
+              type="button"
               onClick={() => setToast(null)}
-              className="ml-1 text-white/80 hover:text-white"
-              aria-label="Dismiss"
+              className="ml-1 text-white/90 hover:text-white"
+              aria-label="Dismiss notification"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -1028,11 +1117,17 @@ export default function MaintenancePage() {
 
       {confirmState && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="confirm-title"
+            aria-describedby={confirmState.description ? "confirm-desc" : undefined}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200"
+          >
             <div className="px-6 py-6">
-              <p className="text-lg font-bold text-gray-900">{confirmState.title}</p>
+              <p id="confirm-title" className="text-lg font-bold text-gray-900">{confirmState.title}</p>
               {confirmState.description && (
-                <p className="text-sm text-gray-500 mt-1.5">{confirmState.description}</p>
+                <p id="confirm-desc" className="text-sm text-gray-600 mt-1.5">{confirmState.description}</p>
               )}
             </div>
             <div className="px-6 pb-6 flex justify-end gap-3">

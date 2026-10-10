@@ -25,7 +25,7 @@ import {
 import { toast } from "sonner";
 import {
   Building2, Search, Plus,
-  Pencil, Trash2, Phone, ChevronLeft, ChevronRight, MoreHorizontal, X,
+  Pencil, Trash2, Phone, ChevronLeft, ChevronRight, MoreHorizontal, X, RefreshCw,
 } from "lucide-react";
 
 interface BranchForm {
@@ -297,7 +297,8 @@ const BranchPage = () => {
 
         .branch-contact { font-size: 13px; font-weight: 500; color: #475569; display: flex; align-items: center; gap: 8px; }
         .branch-beds { font-size: 14px; font-weight: 600; color: #0f172a; }
-        .branch-beds-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+        /* #94a3b8 -> #64748b: fixes low-contrast text */
+        .branch-beds-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
 
         .branch-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #f1f5f9; background: #fff; flex-wrap: wrap; gap: 12px; }
         .branch-page-info { font-size: 13px; color: #64748b; }
@@ -306,7 +307,7 @@ const BranchPage = () => {
         .branch-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .branch-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .branch-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .branch-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #94a3b8; }
+        .branch-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #64748b; }
       `}</style>
 
       <div className="branch-wrap">
@@ -318,17 +319,17 @@ const BranchPage = () => {
             <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setForm(EMPTY_FORM); }}>
               <DialogTrigger asChild>
                 <button className="branch-btn-primary" disabled={!myHostelId} title={!myHostelId ? "No hostel assigned to your account yet" : undefined}>
-                  <Plus size={16} /> Add Branch
+                  <Plus size={16} aria-hidden="true" /> Add Branch
                 </button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden">
+              <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden mobile-form-dialog branch-mobile-dialog">
                 <DialogHeader>
                   <DialogTitle>Add Branch</DialogTitle>
                   <DialogDescription>
                     Create a new branch under <span className="font-medium">{myHostelName ?? "your hostel"}</span>
                   </DialogDescription>
                 </DialogHeader>
-                <BranchFormFields form={form} hostelName={myHostelName ?? "Assigned Hostel"} onChange={setForm} />
+                <BranchFormFields idPrefix="add" form={form} hostelName={myHostelName ?? "Assigned Hostel"} onChange={setForm} />
                 <DialogFooter>
                   <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
                   <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Create</Button>
@@ -340,19 +341,28 @@ const BranchPage = () => {
 
         <div className="flex gap-4 mb-4">
           <div className="branch-search">
-            <Search size={16} color="#94a3b8" />
+            <Search size={16} color="#94a3b8" aria-hidden="true" />
             <input
               type="text"
+              aria-label="Search branches or address"
               placeholder="Search branches or address..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
             {searchTerm && (
-              <button onClick={() => setSearchTerm("")} className="text-gray-400 hover:text-gray-600">
-                <X size={14} />
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearchTerm("")}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={14} aria-hidden="true" />
               </button>
             )}
           </div>
+          <button type="button" className="branch-mobile-clear" onClick={() => setSearchTerm("")}>
+            <RefreshCw size={14} aria-hidden="true" /> Clear Filters
+          </button>
         </div>
 
         {!myHostelId && (
@@ -376,11 +386,12 @@ const BranchPage = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="text-center py-12 text-slate-400">Loading branches...</td>
+                    {/* text-slate-400 -> text-slate-600: contrast fix */}
+                    <td colSpan={5} className="text-center py-12 text-slate-600">Loading branches...</td>
                   </tr>
                 ) : branches.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-center py-12 text-slate-400">No branches found.</td>
+                    <td colSpan={5} className="text-center py-12 text-slate-600">No branches found.</td>
                   </tr>
                 ) : (
                   branches.map(branch => {
@@ -389,7 +400,7 @@ const BranchPage = () => {
                       <tr key={branch.id}>
                         <td>
                           <div className="flex items-center gap-3">
-                            <div className="branch-icon-box" style={{ background: color.bg }}>
+                            <div className="branch-icon-box" style={{ background: color.bg }} aria-hidden="true">
                               <Building2 size={18} color={color.color} />
                             </div>
                             <div>
@@ -400,7 +411,7 @@ const BranchPage = () => {
                         </td>
                         <td>
                           <div className="branch-contact">
-                            <Phone size={14} color="#94a3b8" /> {branch.phone || 'No phone'}
+                            <Phone size={14} color="#94a3b8" aria-hidden="true" /> {branch.phone || 'No phone'}
                           </div>
                         </td>
                         <td>
@@ -415,25 +426,32 @@ const BranchPage = () => {
                         </td>
                         <td>
                           <div className="flex gap-2">
+                            {/* Lighthouse: "Buttons do not have an accessible name" — icon-only edit/delete */}
                             <Button
+                              type="button"
                               size="icon"
                               variant="outline"
+                              aria-label={`Edit ${branch.unitName}`}
+                              title="Edit"
                               className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
                               onClick={() => {
                                 setEditBranch({ ...branch });
                                 setEditOpen(true);
                               }}
                             >
-                              <Pencil className="h-3.5 w-3.5 text-slate-500" />
+                              <Pencil className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                             </Button>
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <Button
+                                  type="button"
                                   size="icon"
                                   variant="outline"
+                                  aria-label={`Delete ${branch.unitName}`}
+                                  title="Delete"
                                   className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
                                 >
-                                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                  <Trash2 className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />
                                 </Button>
                               </AlertDialogTrigger>
                               <AlertDialogContent className="rounded-2xl">
@@ -462,25 +480,30 @@ const BranchPage = () => {
               Showing {branches.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} branches
             </div>
 
-            <div className="branch-page-controls">
+            <nav aria-label="Pagination" className="branch-page-controls">
               <Button
+                type="button"
                 size="icon"
                 variant="outline"
+                aria-label="Previous page"
                 className="w-8 h-8 rounded-lg"
                 disabled={page === 0}
                 onClick={() => setPage(p => Math.max(p - 1, 0))}
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
               </Button>
 
               {pageNumbers.map((p, idx) =>
                 p === "..." ? (
-                  <span key={`ellipsis-${idx}`} className="branch-page-ellipsis">
+                  <span key={`ellipsis-${idx}`} className="branch-page-ellipsis" aria-hidden="true">
                     <MoreHorizontal className="h-4 w-4" />
                   </span>
                 ) : (
                   <button
+                    type="button"
                     key={p}
+                    aria-label={`Page ${p}`}
+                    aria-current={p === currentPage1Based ? "page" : undefined}
                     className={`branch-page-btn ${p === currentPage1Based ? "active" : ""}`}
                     onClick={() => setPage(p - 1)}
                   >
@@ -490,26 +513,29 @@ const BranchPage = () => {
               )}
 
               <Button
+                type="button"
                 size="icon"
                 variant="outline"
+                aria-label="Next page"
                 className="w-8 h-8 rounded-lg"
                 disabled={currentPage1Based >= totalPages}
                 onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))}
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </Button>
-            </div>
+            </nav>
           </div>
         </div>
 
         <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditBranch(null); }}>
-          <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden">
+          <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden mobile-form-dialog branch-mobile-dialog">
             <DialogHeader>
               <DialogTitle>Edit Branch</DialogTitle>
               <DialogDescription>Update branch details</DialogDescription>
             </DialogHeader>
             {editBranch && (
               <BranchFormFields
+                idPrefix="edit"
                 form={{
                   unitName: editBranch.unitName,
                   state: editBranch.state ?? "",
@@ -545,8 +571,8 @@ const BranchPage = () => {
 };
 
 const BranchFormFields = ({
-  form, hostelName, onChange,
-}: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void }) => {
+  form, hostelName, onChange, idPrefix,
+}: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void; idPrefix: string }) => {
   const handleStateChange = (value: string) => {
     onChange({ ...form, state: value, district: "", area: "", location: "" });
   };
@@ -564,13 +590,14 @@ const BranchFormFields = ({
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
-        <Input value={hostelName} disabled className="bg-slate-50 cursor-not-allowed rounded-lg" />
+        <Label htmlFor={`${idPrefix}-hostel`} className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
+        <Input id={`${idPrefix}-hostel`} value={hostelName} disabled className="bg-slate-50 cursor-not-allowed rounded-lg" />
       </div>
 
       <div className="space-y-1.5">
-        <Label>Branch Name <span className="text-red-500">*</span></Label>
+        <Label htmlFor={`${idPrefix}-name`}>Branch Name <span className="text-red-500">*</span></Label>
         <Input
+          id={`${idPrefix}-name`}
           placeholder="e.g. North Wing, Block A"
           value={form.unitName}
           className="rounded-lg"
@@ -582,7 +609,7 @@ const BranchFormFields = ({
         <div className="space-y-1.5">
           <Label>State</Label>
           <Select value={form.state} onValueChange={handleStateChange}>
-            <SelectTrigger className="rounded-lg">
+            <SelectTrigger className="rounded-lg" aria-label="State">
               <SelectValue placeholder="Select state" />
             </SelectTrigger>
             <SelectContent>
@@ -619,8 +646,11 @@ const BranchFormFields = ({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>Contact Phone <span className="text-red-500">*</span></Label>
+          <Label htmlFor={`${idPrefix}-phone`}>Contact Phone <span className="text-red-500">*</span></Label>
           <Input
+            id={`${idPrefix}-phone`}
+            type="tel"
+            inputMode="numeric"
             placeholder="Contact Phone (10 digits)"
             value={form.phone}
             maxLength={10}
@@ -633,8 +663,9 @@ const BranchFormFields = ({
         </div>
 
         <div className="space-y-1.5">
-          <Label>Bed Capacity <span className="text-red-500">*</span></Label>
+          <Label htmlFor={`${idPrefix}-capacity`}>Bed Capacity <span className="text-red-500">*</span></Label>
           <Input
+            id={`${idPrefix}-capacity`}
             type="number"
             min={0}
             placeholder="e.g. 20"

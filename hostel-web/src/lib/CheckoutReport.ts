@@ -1,10 +1,5 @@
 import api from "@/lib/api";
 
-/**
- * Pulls a readable message out of a failed blob request. With
- * responseType "blob" axios hands the error body back as a Blob, so the
- * backend's JSON ({ message } / { error }) has to be read from it.
- */
 async function extractErrorMessage(err: any): Promise<string> {
   const data = err?.response?.data;
 

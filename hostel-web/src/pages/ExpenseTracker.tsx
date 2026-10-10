@@ -73,9 +73,9 @@ const ExpensePage = () => {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
-  const [selectedBranch, setSelectedBranch] = useState(
-    role !== "ADMIN" && branchId ? String(branchId) : "all",
-  );
+  const defaultBranch = role !== "ADMIN" && branchId ? String(branchId) : "all";
+
+  const [selectedBranch, setSelectedBranch] = useState(defaultBranch);
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState<number>(new Date().getMonth() + 1);
   const [year, setYear] = useState<number>(new Date().getFullYear());
@@ -177,6 +177,15 @@ const ExpensePage = () => {
     [loadData],
   );
 
+  // Resets every filter on this page back to its default (this month, this
+  // year, no search, and the user's default branch scope).
+  const handleClearFilters = useCallback(() => {
+    setSearch("");
+    setMonth(new Date().getMonth() + 1);
+    setYear(new Date().getFullYear());
+    setSelectedBranch(defaultBranch);
+  }, [defaultBranch]);
+
   const filteredRows = useMemo(() => {
     const term = search.toLowerCase().trim();
     return expenses.filter((e) => {
@@ -238,12 +247,19 @@ const ExpensePage = () => {
       {/* Top Filter and Action Bar */}
       <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="outline" className="h-10 w-10 p-0 border-gray-200 bg-white shadow-sm">
-            <Filter className="h-4 w-4 text-gray-500" />
+          {/* A11Y: icon-only button had no accessible name (Lighthouse:
+              "Buttons do not have an accessible name"). */}
+          <Button
+            type="button"
+            variant="outline"
+            aria-label="Filters"
+            className="h-10 w-10 p-0 border-gray-200 bg-white shadow-sm"
+          >
+            <Filter className="h-4 w-4 text-gray-600" aria-hidden="true" />
           </Button>
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex items-center">
             <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
-              <SelectTrigger className="w-28 h-10 border-0 shadow-none text-[13px] font-medium focus:ring-0">
+              <SelectTrigger aria-label="Filter by month" className="w-28 h-10 border-0 shadow-none text-[13px] font-medium focus:ring-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -257,7 +273,7 @@ const ExpensePage = () => {
 
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex items-center">
             <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-              <SelectTrigger className="w-28 h-10 border-0 shadow-none text-[13px] font-medium focus:ring-0">
+              <SelectTrigger aria-label="Filter by year" className="w-28 h-10 border-0 shadow-none text-[13px] font-medium focus:ring-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -269,17 +285,23 @@ const ExpensePage = () => {
           </div>
 
           <div className="relative w-64 shadow-sm">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-500" aria-hidden="true" />
             <input
               type="text"
               placeholder="Search expense..."
+              aria-label="Search expenses"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-8 border border-gray-200 rounded-lg h-10 text-[13px] w-full bg-white focus:outline-none focus:border-indigo-500"
+              className="pl-9 pr-8 border border-gray-200 rounded-lg h-10 text-[13px] w-full bg-white placeholder:text-gray-500 focus:outline-none focus:border-indigo-500"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600">
-                <X className="h-4 w-4" />
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-3 text-gray-500 hover:text-gray-700"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -293,60 +315,73 @@ const ExpensePage = () => {
             }}
             className="h-10 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-5 font-bold shadow-sm"
           >
-            <Plus className="h-4 w-4 mr-2" /> Log Expense
+            <Plus className="h-4 w-4 mr-2" aria-hidden="true" /> Log Expense
           </Button>
           <Button
             onClick={() => setIsExportOpen(true)}
             variant="outline"
             className="h-10 border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50 font-bold shadow-sm px-5"
           >
-            <FileSpreadsheet className="h-4 w-4 mr-2 text-emerald-600" /> Export Excel
+            <FileSpreadsheet className="h-4 w-4 mr-2 text-emerald-600" aria-hidden="true" /> Export Excel
           </Button>
         </div>
       </div>
 
-      <ExpenseReportWidget data={filteredRows} />
+      <ExpenseReportWidget
+          data={filteredRows}
+          periodLabel={month === 0 ? `All of ${year}` : `${MONTHS[month - 1]} ${year}`}
+        />
 
       <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm mt-4">
         <div className="flex justify-end items-center gap-3 mb-4">
-          <Button variant="outline" size="sm" className="h-9 text-xs font-bold border-gray-200 text-gray-700 rounded-lg shadow-sm">
-            <RotateCcw className="h-3.5 w-3.5 mr-2" /> Clear Filters
+          {/* This button previously had no onClick, so it did nothing. */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleClearFilters}
+            className="h-9 text-xs font-bold border-gray-200 text-gray-700 rounded-lg shadow-sm"
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-2" aria-hidden="true" /> Clear Filters
           </Button>
-          <Button variant="outline" size="sm" className="h-9 text-xs font-bold border-gray-200 text-gray-700 rounded-lg shadow-sm">
-            <Columns className="h-3.5 w-3.5 mr-2" /> Columns <ArrowDown className="h-3 w-3 ml-1 text-gray-400" />
+          <Button type="button" variant="outline" size="sm" className="h-9 text-xs font-bold border-gray-200 text-gray-700 rounded-lg shadow-sm">
+            <Columns className="h-3.5 w-3.5 mr-2" aria-hidden="true" /> Columns <ArrowDown className="h-3 w-3 ml-1 text-gray-500" aria-hidden="true" />
           </Button>
         </div>
         
         <div className="overflow-x-auto -mx-6 px-6">
           <style>{`
             .cp-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
-            .cp-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
+            /* A11Y: header text darkened from #64748b to #475569 for contrast on #fafafa. */
+            .cp-table th { font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
             .cp-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
             .cp-table tr:hover { background: #fdfcff; }
-            .ex-action-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; padding: 0; }
+            .ex-action-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; padding: 0; }
             .ex-action-btn:hover { background: #f8fafc; color: #0f172a; }
+            .ex-action-btn:focus-visible, .ex-page-btn:focus-visible { outline: 2px solid #5200FF; outline-offset: 2px; }
             .ex-action-btn svg { width: 16px !important; height: 16px !important; flex-shrink: 0; display: inline-block; }
-            .ex-page-btn { min-width: 32px; height: 32px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; border: 1px solid #e2e8f0; background: #fff; color: #64748b; }
+            .ex-page-btn { min-width: 32px; height: 32px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; border: 1px solid #e2e8f0; background: #fff; color: #475569; }
             .ex-page-btn:hover:not(:disabled) { background: #f8fafc; }
             .ex-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
             .ex-page-btn.active { background: #5200FF; border-color: #5200FF; color: #fff; font-weight: 600; }
-            .ex-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #94a3b8; }
+            .ex-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #64748b; }
           `}</style>
           <table className="cp-table">
+            <caption className="sr-only">Expenses</caption>
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Branch</th>
-                <th>Description</th>
-                <th>Category</th>
-                <th>Amount</th>
-                <th style={{ textAlign: 'center' }}>Actions</th>
+                <th scope="col">Date</th>
+                <th scope="col">Branch</th>
+                <th scope="col">Description</th>
+                <th scope="col">Category</th>
+                <th scope="col">Amount</th>
+                <th scope="col" style={{ textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {paginatedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-[#64748b] text-[18px] font-medium bg-white">
+                  <td colSpan={6} className="text-center py-12 text-[#475569] text-[18px] font-medium bg-white">
                     No expenses found.
                   </td>
                 </tr>
@@ -355,6 +390,7 @@ const ExpensePage = () => {
                   const date = row.expenseDate ? new Date(row.expenseDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
                   const config = getCategoryStyleConfig(row.category);
                   const branchName = branchNameMap.get(String(row.branchId)) || `Branch ${row.branchId}`;
+                  const rowLabel = row.description || config.label;
                   
                   return (
                     <tr key={row.id}>
@@ -363,13 +399,13 @@ const ExpensePage = () => {
                       </td>
                       <td>
                         <div className="flex items-center gap-1.5">
-                          <Building2 className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                          <Building2 className="h-3.5 w-3.5 text-gray-500 shrink-0" aria-hidden="true" />
                           <span className="text-[13px] font-medium text-gray-700">{branchName}</span>
                         </div>
                       </td>
                       <td>
                         <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-full bg-purple-50 flex items-center justify-center shrink-0">
+                          <div className="h-9 w-9 rounded-full bg-purple-50 flex items-center justify-center shrink-0" aria-hidden="true">
                           </div>
                           <span className="text-[13px]  text-gray-900">{row.description || '-'}</span>
                         </div>
@@ -385,21 +421,25 @@ const ExpensePage = () => {
                       <td>
                         <div className="flex items-center justify-center gap-2">
                           <button
+                            type="button"
                             className="ex-action-btn"
                             title="Edit"
+                            aria-label={`Edit expense ${rowLabel}`}
                             onClick={() => {
                               setEditingExpense(row);
                               setIsModalOpen(true);
                             }}
                           >
-                            <Edit size={16} color="#64748b" strokeWidth={2} className="shrink-0" />
+                            <Edit size={16} color="#475569" strokeWidth={2} className="shrink-0" aria-hidden="true" />
                           </button>
                           <button
+                            type="button"
                             className="ex-action-btn"
                             title="Delete"
+                            aria-label={`Delete expense ${rowLabel}`}
                             onClick={() => handleDelete(row.id!)}
                           >
-                            <Trash2 size={16} color="#ef4444" strokeWidth={2} className="shrink-0" />
+                            <Trash2 size={16} color="#dc2626" strokeWidth={2} className="shrink-0" aria-hidden="true" />
                           </button>
                         </div>
                       </td>
@@ -413,28 +453,33 @@ const ExpensePage = () => {
         
         {/* Pagination */}
         <div className="flex items-center justify-between pt-4 mt-2 border-t border-[#f1f5f9] bg-white">
-          <div className="text-[13px] text-[#64748b]">
+          <div className="text-[13px] text-[#475569]" aria-live="polite">
             Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to{" "}
             {Math.min((currentPage + 1) * pageSize, filteredRows.length)} of {filteredRows.length} expenses
           </div>
-          <div className="flex items-center gap-2">
+          <nav aria-label="Pagination" className="flex items-center gap-2">
             <button
+              type="button"
               className="ex-page-btn"
+              aria-label="Previous page"
               disabled={currentPage === 0}
               onClick={() => setCurrentPage((p) => p - 1)}
             >
-              &lt;
+              <span aria-hidden="true">&lt;</span>
             </button>
 
             {pageNumbers.map((p, idx) =>
               p === "ellipsis" ? (
-                <span key={`ellipsis-${idx}`} className="ex-page-ellipsis">
+                <span key={`ellipsis-${idx}`} className="ex-page-ellipsis" aria-hidden="true">
                   …
                 </span>
               ) : (
                 <button
+                  type="button"
                   key={p}
                   className={`ex-page-btn ${p === currentPage + 1 ? "active" : ""}`}
+                  aria-label={`Page ${p}`}
+                  aria-current={p === currentPage + 1 ? "page" : undefined}
                   onClick={() => setCurrentPage(p - 1)}
                 >
                   {p}
@@ -443,13 +488,15 @@ const ExpensePage = () => {
             )}
 
             <button
+              type="button"
               className="ex-page-btn"
+              aria-label="Next page"
               disabled={currentPage + 1 >= totalPages}
               onClick={() => setCurrentPage((p) => p + 1)}
             >
-              &gt;
+              <span aria-hidden="true">&gt;</span>
             </button>
-          </div>
+          </nav>
         </div>
       </div>
 

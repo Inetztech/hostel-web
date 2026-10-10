@@ -73,7 +73,11 @@ export default function Login() {
           font-family: 'Outfit', sans-serif;
           background: #f5ede4;
           overflow: hidden;
+          -webkit-tap-highlight-color: transparent;
         }
+
+        /* Mobile-only brand header — hidden on desktop */
+        .pg-mobile-hero { display: none; }
 
         .pg-left {
           flex: 1;
@@ -404,6 +408,18 @@ export default function Login() {
           border-radius: 4px;
         }
 
+        .forgot-row {
+          text-align: right;
+          margin-top: 10px;
+        }
+
+        .forgot-link {
+          font-size: 12px;
+          font-weight: 500;
+          color: #c47a45;
+          text-decoration: none;
+        }
+
         .error-banner {
           display: flex;
           align-items: flex-start;
@@ -530,33 +546,244 @@ export default function Login() {
 
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* ============================================================
+           MOBILE / TABLET (<= 820px)
+           Layout: dark brand header on top, light form sheet that
+           slides up over it with rounded corners. Inputs are 16px so
+           iOS Safari doesn't zoom on focus; every tap target >= 44px.
+           ============================================================ */
         @media (max-width: 820px) {
+          .pg-root {
+            flex-direction: column;
+            height: 100vh;
+            height: 100dvh;
+            background: #2c1810;
+          }
+
           .pg-left { display: none; }
+
+          /* ── Brand header ── */
+          .pg-mobile-hero {
+            display: block;
+            position: relative;
+            flex-shrink: 0;
+            overflow: hidden;
+            background: #2c1810;
+            padding: calc(26px + env(safe-area-inset-top, 0px)) 28px 64px;
+          }
+          .pg-mobile-hero::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+              radial-gradient(ellipse 80% 90% at 10% 100%, rgba(186,97,42,0.38) 0%, transparent 65%),
+              radial-gradient(ellipse 50% 60% at 95% 0%, rgba(139,62,19,0.3) 0%, transparent 60%);
+            pointer-events: none;
+          }
+          .pg-mobile-hero::after {
+            content: '';
+            position: absolute;
+            right: -36px;
+            top: -28px;
+            width: 190px;
+            height: 250px;
+            border: 1px solid rgba(186,97,42,0.28);
+            border-radius: 95px 95px 0 0;
+            box-shadow: 0 0 0 18px rgba(186,97,42,0.05);
+            pointer-events: none;
+          }
+          .mh-top {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+          }
+          .mh-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: rgba(186,97,42,0.18);
+            border: 1px solid rgba(186,97,42,0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+          }
+          .mh-est {
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: rgba(245,196,147,0.75);
+          }
+          .mh-name {
+            position: relative;
+            z-index: 1;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 40px;
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: -0.5px;
+            color: #f5ede4;
+          }
+          .mh-name em { font-style: italic; color: #e0905a; }
+          .mh-tag {
+            position: relative;
+            z-index: 1;
+            margin-top: 10px;
+            font-size: 12.5px;
+            font-weight: 300;
+            line-height: 1.6;
+            letter-spacing: 0.4px;
+            color: rgba(245,237,228,0.6);
+            max-width: 260px;
+          }
+
+          /* ── Form sheet ── */
           .pg-right {
             width: 100%;
-            padding: 32px 24px;
+            height: auto;
+            flex: 1;
+            min-height: 0;
+            margin-top: -28px;
+            border-radius: 28px 28px 0 0;
+            padding: 32px 24px calc(24px + env(safe-area-inset-bottom, 0px));
             justify-content: flex-start;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            box-shadow: 0 -10px 30px rgba(28,15,8,0.25);
+            z-index: 2;
           }
-          .form-title { font-size: 34px; }
-          .form-subtitle { margin-bottom: 26px; }
-          .field-group { margin-bottom: 16px; }
-          .form-divider { margin: 20px 0 0; }
-          .form-footer { margin-top: 14px; }
+          .pg-right::after { display: none; }
+
+          .form-container {
+            width: 100%;
+            max-width: 440px;
+            margin: auto;
+          }
+
+          .form-eyebrow { margin-bottom: 14px; }
+          .eyebrow-text { font-size: 11px; }
+
+          .form-title {
+            font-size: 36px;
+            margin-bottom: 8px;
+          }
+          .form-title span { display: inline; margin-left: 8px; }
+
+          .form-subtitle {
+            font-size: 14px;
+            margin-bottom: 28px;
+            line-height: 1.5;
+          }
+
+          .field-group { margin-bottom: 18px; }
+
+          .field-label {
+            font-size: 11px;
+            margin-bottom: 8px;
+          }
+
+          .field-input {
+            height: 56px;
+            font-size: 16px;          /* prevents iOS zoom-on-focus */
+            padding: 0 16px;
+            background: #fffaf5;
+            border: 1.5px solid #e0cdbd;
+            border-radius: 14px;
+          }
+          .field-input.has-toggle { padding-right: 56px; }
+          .field-input:focus {
+            background: #fff;
+            border-color: #c47a45;
+            box-shadow: 0 0 0 4px rgba(196,122,69,0.16);
+          }
+          .field-input::placeholder { font-size: 15px; }
+
+          .field-toggle-btn {
+            right: 6px;
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+          }
+          .field-toggle-btn:active { background: rgba(196,122,69,0.12); }
+
+          .forgot-row { margin-top: 4px; }
+          .forgot-link {
+            display: inline-block;
+            font-size: 13px;
+            padding: 10px 0 10px 12px;   /* 44px+ tap area */
+          }
+
+          .error-banner {
+            border-radius: 0 10px 10px 0;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+          }
+
+          .submit-wrap { margin-top: 6px; }
+          .submit-btn {
+            height: 56px;
+            font-size: 15px;
+            border-radius: 14px;
+            box-shadow: 0 8px 18px rgba(44,24,16,0.28);
+            touch-action: manipulation;
+          }
+          .submit-btn:hover:not(:disabled) { transform: none; }
+          .submit-btn:active:not(:disabled) {
+            transform: scale(0.985);
+            background: #3d2218;
+          }
+
+          .form-divider { margin: 26px 0 0; }
+          .form-footer { margin-top: 16px; font-size: 11.5px; }
+        }
+
+        /* Small phones */
+        @media (max-width: 360px) {
+          .pg-mobile-hero { padding-left: 22px; padding-right: 22px; }
+          .mh-name { font-size: 34px; }
+          .pg-right { padding-left: 18px; padding-right: 18px; }
+          .form-title { font-size: 32px; }
+        }
+
+        /* Phones in landscape / very short screens: compact the header */
+        @media (max-width: 820px) and (max-height: 560px) {
+          .pg-mobile-hero { padding-top: calc(14px + env(safe-area-inset-top, 0px)); padding-bottom: 48px; }
+          .mh-top { margin-bottom: 8px; }
+          .mh-name { font-size: 30px; }
+          .mh-tag { display: none; }
+          .form-subtitle { margin-bottom: 18px; }
+          .form-eyebrow { margin-bottom: 8px; }
         }
       `}</style>
 
       <div className="pg-root">
-        <div className="pg-left">
-          <div className="arch-bg" />
-          <div className="arch-bg-2" />
+        {/* Mobile-only brand header (hidden on desktop via CSS) */}
+        <header className="pg-mobile-hero">
+          <div className="mh-top">
+            <div className="mh-icon" aria-hidden="true">🏡</div>
+            <span className="mh-est">Est. 2014</span>
+          </div>
+          <div className="mh-name">
+            Brindha<em>vanam</em>
+          </div>
+          <p className="mh-tag">A home away from home — comfort, community, and care.</p>
+        </header>
 
-          <div className="h-lines">
+        {/* Decorative brand panel (desktop only) */}
+        <div className="pg-left">
+          <div className="arch-bg" aria-hidden="true" />
+          <div className="arch-bg-2" aria-hidden="true" />
+
+          <div className="h-lines" aria-hidden="true">
             {Array.from({ length: 12 }).map((_, i) => <span key={i} />)}
           </div>
 
           <div className="pg-badge">
-            <div className="pg-badge-icon">🏡</div>
+            <div className="pg-badge-icon" aria-hidden="true">🏡</div>
             <span className="pg-badge-text">Est. 2014</span>
           </div>
 
@@ -571,10 +798,12 @@ export default function Login() {
           </div>
         </div>
 
-        <div className="pg-right">
+        {/* Lighthouse: "Document does not have a main landmark" —
+            the form panel is the page's main content, so it is <main>. */}
+        <main className="pg-right">
           <div className="form-container">
             <div className="form-eyebrow">
-              <div className="eyebrow-line" />
+              <div className="eyebrow-line" aria-hidden="true" />
               <span className="eyebrow-text">Staff Portal</span>
             </div>
 
@@ -588,13 +817,17 @@ export default function Login() {
               <div className="field-group">
                 <label className="field-label" htmlFor="email">
                   Email Address
-                  <span className="field-label-dot" />
+                  <span className="field-label-dot" aria-hidden="true" />
                 </label>
                 <div className="field-input-wrap">
                   <input
                     className="field-input"
                     id="email"
                     type="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="name@gmail.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -607,7 +840,7 @@ export default function Login() {
               <div className="field-group">
                 <label className="field-label" htmlFor="password">
                   Password
-                  <span className="field-label-dot" />
+                  <span className="field-label-dot" aria-hidden="true" />
                 </label>
                 <div className="field-input-wrap">
                   <input
@@ -628,27 +861,19 @@ export default function Login() {
                     aria-pressed={showPassword}
                     tabIndex={0}
                   >
-                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                    {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
                   </button>
                 </div>
-                <div style={{ textAlign: "right", marginTop: "10px" }}>
-                  <Link
-                    to="/forgot-password"
-                    style={{
-                      fontSize: "12px",
-                      fontWeight: 500,
-                      color: "#c47a45",
-                      textDecoration: "none",
-                    }}
-                  >
+                <div className="forgot-row">
+                  <Link to="/forgot-password" className="forgot-link">
                     Forgot password?
                   </Link>
                 </div>
               </div>
 
               {error && (
-                <div className="error-banner">
-                  <span className="error-icon">⚠</span>
+                <div className="error-banner" role="alert">
+                  <span className="error-icon" aria-hidden="true">⚠</span>
                   <span className="error-text">{error}</span>
                 </div>
               )}
@@ -658,7 +883,7 @@ export default function Login() {
                   <div className="btn-inner">
                     {loading ? (
                       <>
-                        <span className="spinner" />
+                        <span className="spinner" aria-hidden="true" />
                         Signing in…
                       </>
                     ) : (
@@ -679,7 +904,7 @@ export default function Login() {
               <strong>Brindhavanam PG Hostel</strong> &nbsp;·&nbsp; &copy; {new Date().getFullYear()}
             </div>
           </div>
-        </div>
+        </main>
       </div>
     </>
   );

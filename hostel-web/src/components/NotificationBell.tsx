@@ -62,10 +62,6 @@ export default function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // SUPER_ADMIN sees every notification in the system as an audit feed, not
-  // a personal inbox — the backend rejects read/delete mutations from this
-  // role (it would otherwise silently flip another user's read status), so
-  // the panel here is view-only.
   const isReadOnly = getUserRole()?.toUpperCase() === "SUPER_ADMIN";
 
   const loadUnreadCount = async () => {
@@ -148,43 +144,52 @@ export default function NotificationBell() {
 
   return (
     <div className="relative" ref={panelRef}>
+      {/* Lighthouse: "Buttons do not have an accessible name" — icon-only bell button */}
       <button
+        type="button"
         onClick={() => setOpen((p) => !p)}
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+        aria-haspopup="true"
+        aria-expanded={open}
         className="relative p-2 !bg-transparent !border-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100/60 rounded-full transition-colors group"
       >
-        <Bell className="h-[18px] w-[18px] transition-transform group-hover:rotate-12" />
+        <Bell className="h-[18px] w-[18px] transition-transform group-hover:rotate-12" aria-hidden="true" />
         {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-semibold ring-2 ring-white">
+          <span
+            aria-hidden="true"
+            className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-semibold ring-2 ring-white"
+          >
             {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-[22rem] max-w-[90vw] bg-white rounded-2xl shadow-xl shadow-gray-200/60 border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 z-40">
+        <div className="fixed left-3 right-3 top-[3.75rem] w-auto max-w-none sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-[22rem] sm:max-w-[90vw] bg-white rounded-2xl shadow-xl shadow-gray-200/60 border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 z-[70]">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gradient-to-br from-gray-50 to-white">
             <h3 className="text-sm font-semibold text-gray-800">
               {isReadOnly ? "Notifications (all users)" : "Notifications"}
             </h3>
             {!isReadOnly && unread > 0 && (
               <button
+                type="button"
                 onClick={handleMarkAllRead}
                 className="flex items-center gap-1 !bg-transparent !border-0 !p-0 text-[11px] font-medium !text-blue-600 hover:!text-blue-700"
               >
-                <CheckCheck className="h-3.5 w-3.5" />
+                <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />
                 Mark all read
               </button>
             )}
           </div>
 
-          <div className="max-h-[26rem] overflow-y-auto">
+          <div className="max-h-[calc(100dvh-5rem)] sm:max-h-[26rem] overflow-y-auto overscroll-contain">
             {loading ? (
-              <div className="flex items-center justify-center py-10 text-gray-400">
-                <Loader2 className="h-5 w-5 animate-spin" />
+              <div role="status" aria-label="Loading notifications" className="flex items-center justify-center py-10 text-gray-400">
+                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
               </div>
             ) : items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 px-6 text-center">
-                <Bell className="h-8 w-8 text-gray-200 mb-2" />
+                <Bell className="h-8 w-8 text-gray-200 mb-2" aria-hidden="true" />
                 <p className="text-sm text-gray-400">You're all caught up</p>
               </div>
             ) : (
@@ -201,7 +206,7 @@ export default function NotificationBell() {
                       !n.isRead && "bg-blue-50/40"
                     )}
                   >
-                    <div className={cn("h-8 w-8 rounded-full flex items-center justify-center shrink-0", meta.bg)}>
+                    <div className={cn("h-8 w-8 rounded-full flex items-center justify-center shrink-0", meta.bg)} aria-hidden="true">
                       <Icon className={cn("h-4 w-4", meta.color)} />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -209,7 +214,9 @@ export default function NotificationBell() {
                         <p className={cn("text-[13px] leading-snug", !n.isRead ? "font-semibold text-gray-800" : "font-medium text-gray-600")}>
                           {n.title}
                         </p>
-                        {!n.isRead && <span className="h-1.5 w-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0" />}
+                        {!n.isRead && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0" aria-label="Unread" role="img" />
+                        )}
                       </div>
                       <p className="text-[12px] text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
                       <div className="flex items-center justify-between mt-1.5">
@@ -220,19 +227,23 @@ export default function NotificationBell() {
                           <div className="flex items-center gap-2">
                             {!n.isRead && (
                               <button
+                                type="button"
                                 onClick={(e) => { e.stopPropagation(); handleMarkRead(n); }}
                                 title="Mark as read"
+                                aria-label={`Mark "${n.title}" as read`}
                                 className="text-gray-300 hover:text-blue-500"
                               >
-                                <Check className="h-3.5 w-3.5" />
+                                <Check className="h-3.5 w-3.5" aria-hidden="true" />
                               </button>
                             )}
                             <button
+                              type="button"
                               onClick={(e) => { e.stopPropagation(); handleDelete(n.id); }}
                               title="Delete"
+                              aria-label={`Delete notification "${n.title}"`}
                               className="text-gray-300 hover:text-red-500"
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                             </button>
                           </div>
                         )}

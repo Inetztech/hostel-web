@@ -450,7 +450,7 @@ const UserRegisterPage = () => {
       <div className="flex items-center justify-between pb-3 border-b border-slate-100/80">
         <div>
           <h4 className="text-sm font-bold text-slate-800 tracking-tight">Access Permissions</h4>
-          <p className="text-[11px] text-slate-500 mt-0.5 font-medium">Configure module access capabilities</p>
+          <p className="text-[11px] text-slate-600 mt-0.5 font-medium">Configure module access capabilities</p>
         </div>
         <div className="flex gap-2">
           <button type="button" className="px-3 py-1.5 text-[11px] font-semibold text-[#5200FF] bg-[#5200FF]/10 hover:bg-[#5200FF]/20 rounded-lg transition-colors" onClick={onSelectAll} disabled={isLoading}>
@@ -463,13 +463,13 @@ const UserRegisterPage = () => {
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-8 text-slate-400">
-          <Loader2 className="h-6 w-6 animate-spin text-[#5200FF]/40" />
+        <div role="status" className="flex flex-col items-center justify-center gap-3 py-8 text-slate-600">
+          <Loader2 className="h-6 w-6 animate-spin text-[#5200FF]/40" aria-hidden="true" />
           <span className="text-xs font-medium">Loading modules...</span>
         </div>
       ) : grouped.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-8 text-slate-400">
-          <Settings className="h-8 w-8 mb-2 opacity-20" />
+        <div className="flex flex-col items-center justify-center py-8 text-slate-600">
+          <Settings className="h-8 w-8 mb-2 opacity-20" aria-hidden="true" />
           <span className="text-xs font-medium">No permissions available.</span>
         </div>
       ) : (
@@ -481,7 +481,7 @@ const UserRegisterPage = () => {
             return (
               <div key={moduleName} className="bg-white border border-slate-100 rounded-xl overflow-hidden shadow-sm shadow-slate-100/50 transition-all hover:shadow-md hover:border-slate-200/60">
                 <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/40 border-b border-slate-50">
-                  <div className="flex items-center justify-center h-8 w-8 rounded-lg" style={{ backgroundColor: meta.bg, color: meta.color }}>
+                  <div className="flex items-center justify-center h-8 w-8 rounded-lg" style={{ backgroundColor: meta.bg, color: meta.color }} aria-hidden="true">
                     <Icon className="h-4 w-4 shrink-0" />
                   </div>
                   <span className="text-[13px] font-bold text-slate-800">{moduleName}</span>
@@ -509,7 +509,7 @@ const UserRegisterPage = () => {
                             : 'bg-white border border-slate-300 group-hover:border-slate-400'
                         }`}>
                           {isSelected && (
-                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5} aria-hidden="true">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                             </svg>
                           )}
@@ -545,9 +545,13 @@ const UserRegisterPage = () => {
     [page, totalPages],
   );
 
+  // Lighthouse contrast fix: text colors darkened so each badge meets the
+  // WCAG AA 4.5:1 ratio against its light background.
+  //   WARDEN: #1d4ed8 (blue-700)  on #eff6ff  ≈ 7:1   (was #3b82f6 ≈ 3.4:1)
+  //   TENANT: #166534 (green-800) on #dcfce7  ≈ 6.5:1 (was #22c55e ≈ 2:1)
   const roleBadgeColor = (role?: string) => {
-    if (role === "WARDEN") return { color: '#3b82f6', bg: '#eff6ff' };
-    return { color: '#22c55e', bg: '#dcfce7' }; // TENANT / other
+    if (role === "WARDEN") return { color: '#1d4ed8', bg: '#eff6ff' };
+    return { color: '#166534', bg: '#dcfce7' }; // TENANT / other
   };
 
   /* ================= UI ================= */
@@ -617,7 +621,8 @@ const UserRegisterPage = () => {
         .usr-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .usr-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .usr-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .usr-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #94a3b8; }
+        /* #94a3b8 -> #64748b: fixes the Lighthouse contrast failure */
+        .usr-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #64748b; }
 
         .usr-footer-info { display: flex; align-items: center; gap: 8px; padding: 16px 20px; background: #f8fafc; border-radius: 12px; font-size: 13px; color: #5200FF; margin-top: 24px; font-weight: 500; }
       `}</style>
@@ -640,7 +645,7 @@ const UserRegisterPage = () => {
             >
               <DialogTrigger asChild>
                 <button className="usr-btn-primary">
-                  <Plus size={16} className="shrink-0" /> Add New User
+                  <Plus size={16} className="shrink-0" aria-hidden="true" /> Add New User
                 </button>
               </DialogTrigger>
               {/* FIX: rounded-2xl was on the same element as overflow-y-auto,
@@ -653,7 +658,7 @@ const UserRegisterPage = () => {
                   scrollbar. Widened to sm:max-w-2xl and the fields switched
                   to a 2-column grid (landscape layout) so the form is much
                   shorter and needs far less scrolling in the first place. */}
-              <DialogContent className="sm:max-w-xl md:max-w-3xl rounded-2xl overflow-hidden p-0 max-h-[85vh] flex flex-col">
+              <DialogContent className="mobile-form-dialog sm:max-w-xl md:max-w-3xl rounded-2xl overflow-hidden p-0 max-h-[85vh] flex flex-col">
                 <div className="px-6 pt-6">
                   <DialogHeader>
                     <DialogTitle>Create User</DialogTitle>
@@ -663,9 +668,10 @@ const UserRegisterPage = () => {
 
                 <div className="overflow-y-auto px-6 pb-2 flex-1">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                    <Input name="name" placeholder="Full Name" value={form.name} onChange={handleChange} className="rounded-xl" />
+                    <Input name="name" aria-label="Full name" placeholder="Full Name" value={form.name} onChange={handleChange} className="rounded-xl" />
                     <Input
                       name="phone"
+                      aria-label="Phone number"
                       placeholder="Phone Number (10 digits)"
                       value={form.phone}
                       onChange={handleChange}
@@ -679,14 +685,14 @@ const UserRegisterPage = () => {
                         setForm(prev => ({ ...prev, phone: sanitizePhoneInput(prev.phone + pasted) }));
                       }}
                     />
-                    <Input name="email" placeholder="Email" value={form.email} onChange={handleChange} className="rounded-xl" />
-                    <select name="role" value={form.role} onChange={handleChange} className="border p-2 rounded-xl w-full text-sm">
+                    <Input name="email" aria-label="Email" placeholder="Email" value={form.email} onChange={handleChange} className="rounded-xl" />
+                    <select name="role" aria-label="Role" value={form.role} onChange={handleChange} className="border p-2 rounded-xl w-full text-sm">
                       <option value="">Select Role</option>
                       <option value="WARDEN">WARDEN</option>
                       <option value="TENANT">TENANT</option>
                     </select>
                     {form.role && (
-                      <select name="branchId" value={form.branchId} onChange={handleChange} className="border p-2 rounded-xl w-full text-sm">
+                      <select name="branchId" aria-label="Branch" value={form.branchId} onChange={handleChange} className="border p-2 rounded-xl w-full text-sm">
                         <option value="">Select Branch</option>
                         {branches.map(b => <option key={b.id} value={b.id}>{b.unitName}</option>)}
                       </select>
@@ -728,16 +734,17 @@ const UserRegisterPage = () => {
         {/* Filters */}
         <div className="usr-filters-row">
           <div className="usr-search">
-            <Search size={16} color="#94a3b8" className="shrink-0" />
+            <Search size={16} color="#94a3b8" className="shrink-0" aria-hidden="true" />
             <input
               type="text"
+              aria-label="Search users"
               placeholder="Search users..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <button className="usr-clear-btn" onClick={() => setSearchTerm("")}>
-            <RefreshCw size={14} className="shrink-0" /> Clear Filters
+            <RefreshCw size={14} className="shrink-0" aria-hidden="true" /> Clear Filters
           </button>
         </div>
 
@@ -758,11 +765,12 @@ const UserRegisterPage = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-12 text-slate-400">Loading users...</td>
+                    {/* text-slate-400 -> text-slate-600: Lighthouse contrast failure */}
+                    <td colSpan={6} className="text-center py-12 text-slate-600">Loading users...</td>
                   </tr>
                 ) : filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-12 text-slate-400">No users found.</td>
+                    <td colSpan={6} className="text-center py-12 text-slate-600">No users found.</td>
                   </tr>
                 ) : (
                   filteredUsers.map((user, idx) => {
@@ -773,7 +781,7 @@ const UserRegisterPage = () => {
                       <tr key={user.id}>
                         <td>
                           <div className="flex items-center gap-3">
-                            <div className="usr-avatar" style={{ background: avatarColor.bg, color: avatarColor.color }}>
+                            <div className="usr-avatar" style={{ background: avatarColor.bg, color: avatarColor.color }} aria-hidden="true">
                               {getInitials(user.name)}
                             </div>
                             <div>
@@ -795,28 +803,30 @@ const UserRegisterPage = () => {
                         </td>
                         <td>
                           <div className="usr-status-badge active">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500" aria-hidden="true"></div>
                             Active
                           </div>
                         </td>
                         <td>
                           <div className="flex gap-2">
                             <button
+                              type="button"
                               className="usr-action-btn"
                               onClick={() => openEditDialog(user)}
                               title="Edit"
+                              aria-label={`Edit ${user.email}`}
                             >
-                              <Pencil size={16} className="shrink-0" />
+                              <Pencil size={16} className="shrink-0" aria-hidden="true" />
                             </button>
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
-                                <button className="usr-action-btn" title="Delete">
-                                  <Trash2 size={16} color="#ef4444" className="shrink-0" />
+                                <button type="button" className="usr-action-btn" title="Delete" aria-label={`Delete ${user.email}`}>
+                                  <Trash2 size={16} color="#ef4444" className="shrink-0" aria-hidden="true" />
                                 </button>
                               </AlertDialogTrigger>
                               {/* rounded-2xl matches the rest of the app's
                                   destructive-confirm dialogs */}
-                              <AlertDialogContent className="rounded-2xl">
+                              <AlertDialogContent className="mobile-form-dialog rounded-2xl">
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Delete {user.email}?</AlertDialogTitle>
                                   <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
@@ -842,23 +852,30 @@ const UserRegisterPage = () => {
             <div className="usr-page-info">
               Showing {users.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} users
             </div>
-            <div className="usr-page-controls">
+            {/* Lighthouse: "Buttons do not have an accessible name" — the
+                prev/next buttons were icon-only. They now carry aria-labels. */}
+            <nav aria-label="Pagination" className="usr-page-controls">
               <button
+                type="button"
                 className="usr-page-btn"
+                aria-label="Previous page"
                 disabled={page === 0}
                 onClick={() => setPage(p => p - 1)}
               >
-                <ChevronLeft size={16} className="shrink-0" />
+                <ChevronLeft size={16} className="shrink-0" aria-hidden="true" />
               </button>
 
               {pageNumbers.map((p, idx) =>
                 p === "ellipsis" ? (
-                  <span key={`ellipsis-${idx}`} className="usr-page-ellipsis">
+                  <span key={`ellipsis-${idx}`} className="usr-page-ellipsis" aria-hidden="true">
                     …
                   </span>
                 ) : (
                   <button
+                    type="button"
                     key={p}
+                    aria-label={`Page ${p}`}
+                    aria-current={p === page + 1 ? "page" : undefined}
                     className={`usr-page-btn ${p === page + 1 ? "active" : ""}`}
                     onClick={() => setPage(p - 1)}
                   >
@@ -868,13 +885,15 @@ const UserRegisterPage = () => {
               )}
 
               <button
+                type="button"
                 className="usr-page-btn"
+                aria-label="Next page"
                 disabled={(page + 1) * pageSize >= totalCount}
                 onClick={() => setPage(p => p + 1)}
               >
-                <ChevronRight size={16} className="shrink-0" />
+                <ChevronRight size={16} className="shrink-0" aria-hidden="true" />
               </button>
-            </div>
+            </nav>
           </div>
         </div>
 
@@ -893,7 +912,7 @@ const UserRegisterPage = () => {
             if (!v) { setEditUser(null); setEditSelectedPerms(new Set()); }
           }}
         >
-          <DialogContent className="sm:max-w-xl md:max-w-3xl rounded-2xl overflow-hidden p-0 max-h-[85vh] flex flex-col">
+          <DialogContent className="mobile-form-dialog sm:max-w-xl md:max-w-3xl rounded-2xl overflow-hidden p-0 max-h-[85vh] flex flex-col">
             <div className="px-6 pt-6">
               <DialogHeader>
                 <DialogTitle>Edit User</DialogTitle>
@@ -904,9 +923,10 @@ const UserRegisterPage = () => {
             {editUser && (
               <div className="overflow-y-auto px-6 pb-2 flex-1">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                  <Input name="name" placeholder="Full Name" value={editUser.name || ""} onChange={handleEditChange} className="rounded-xl" />
+                  <Input name="name" aria-label="Full name" placeholder="Full Name" value={editUser.name || ""} onChange={handleEditChange} className="rounded-xl" />
                   <Input
                     name="phone"
+                    aria-label="Phone number"
                     placeholder="Phone Number (10 digits)"
                     value={editUser.phone || ""}
                     onChange={handleEditChange}
@@ -920,15 +940,15 @@ const UserRegisterPage = () => {
                       setEditUser(prev => prev ? { ...prev, phone: sanitizePhoneInput((prev.phone || "") + pasted) } : prev);
                     }}
                   />
-                  <Input name="email" placeholder="Email" value={editUser.email} onChange={handleEditChange} className="rounded-xl" />
-                  <Input name="password" type="password" placeholder="New password (leave blank to keep)" onChange={handleEditChange} className="rounded-xl" />
-                  <select name="role" value={editUser.role} onChange={handleEditChange} className="border p-2 rounded-xl w-full text-sm">
+                  <Input name="email" aria-label="Email" placeholder="Email" value={editUser.email} onChange={handleEditChange} className="rounded-xl" />
+                  <Input name="password" type="password" aria-label="New password" autoComplete="new-password" placeholder="New password (leave blank to keep)" onChange={handleEditChange} className="rounded-xl" />
+                  <select name="role" aria-label="Role" value={editUser.role} onChange={handleEditChange} className="border p-2 rounded-xl w-full text-sm">
                     <option value="">Select Role</option>
                     <option value="WARDEN">WARDEN</option>
                     <option value="TENANT">TENANT</option>
                   </select>
                   {editUser.role && (
-                    <select name="branchId" value={editUser.branchId ?? (editUser as any).branch?.id ?? ""} onChange={handleEditChange} className="border p-2 rounded-xl w-full text-sm">
+                    <select name="branchId" aria-label="Branch" value={editUser.branchId ?? (editUser as any).branch?.id ?? ""} onChange={handleEditChange} className="border p-2 rounded-xl w-full text-sm">
                       <option value="">Select Branch</option>
                       {branches.map(b => <option key={b.id} value={b.id}>{b.unitName}</option>)}
                     </select>

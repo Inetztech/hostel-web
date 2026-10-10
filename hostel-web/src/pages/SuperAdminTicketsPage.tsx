@@ -24,22 +24,23 @@ import {
 
 /* ================= HELPERS ================= */
 
+// All badge pairs below are ≥ 4.5:1 (700-weight text on 100-weight tint).
 const statusColor = (status: string) => {
   switch (status) {
-    case "OPEN":        return "bg-red-100 text-red-700 border-red-200";
-    case "IN_PROGRESS": return "bg-amber-100 text-amber-700 border-amber-200";
-    case "RESOLVED":    return "bg-emerald-100 text-emerald-700 border-emerald-200";
-    case "CLOSED":      return "bg-gray-100 text-gray-600 border-gray-200";
+    case "OPEN":        return "bg-red-100 text-red-800 border-red-200";
+    case "IN_PROGRESS": return "bg-amber-100 text-amber-800 border-amber-200";
+    case "RESOLVED":    return "bg-emerald-100 text-emerald-800 border-emerald-200";
+    case "CLOSED":      return "bg-gray-100 text-gray-700 border-gray-200";
     default:            return "";
   }
 };
 
 const priorityColor = (priority: string) => {
   switch (priority) {
-    case "URGENT": return "bg-red-100 text-red-700 border-red-200";
-    case "HIGH":   return "bg-orange-100 text-orange-700 border-orange-200";
-    case "MEDIUM": return "bg-blue-100 text-blue-700 border-blue-200";
-    case "LOW":    return "bg-gray-100 text-gray-600 border-gray-200";
+    case "URGENT": return "bg-red-100 text-red-800 border-red-200";
+    case "HIGH":   return "bg-orange-100 text-orange-800 border-orange-200";
+    case "MEDIUM": return "bg-blue-100 text-blue-800 border-blue-200";
+    case "LOW":    return "bg-gray-100 text-gray-700 border-gray-200";
     default:       return "";
   }
 };
@@ -51,15 +52,19 @@ const StatCard = ({ label, value, icon: Icon, color }: { label: string; value: n
   <Card>
     <CardContent className="p-4 flex items-center gap-3">
       <div className={`h-9 w-9 rounded-full flex items-center justify-center ${color}`}>
-        <Icon className="h-4 w-4" />
+        <Icon className="h-4 w-4" aria-hidden="true" />
       </div>
       <div>
         <div className="text-xl font-bold leading-none">{value}</div>
-        <div className="text-xs text-muted-foreground mt-1">{label}</div>
+        <div className="text-xs text-slate-600 mt-1">{label}</div>
       </div>
     </CardContent>
   </Card>
 );
+
+// Table header cells: the default `text-muted-foreground` sits on the page's
+// #f8fafc background and falls just under 4.5:1. slate-600 (#475569) passes.
+const TH = "text-slate-600";
 
 const SuperAdminTicketsPage = () => {
   const [tickets, setTickets] = useState<TicketSummary[]>([]);
@@ -134,13 +139,13 @@ const SuperAdminTicketsPage = () => {
       {/* HEADER */}
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <TicketIcon className="h-6 w-6 text-violet-500" /> Support Tickets
+          <TicketIcon className="h-6 w-6 text-violet-500" aria-hidden="true" /> Support Tickets
         </h1>
       </div>
 
       {/* STATS — "Closed" card removed; grid now holds 5 cards instead of 6. */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="ticket-stats-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <StatCard label="Total"       value={stats.total}      icon={ListChecks}    color="bg-violet-100 text-violet-600" />
           <StatCard label="Open"        value={stats.open}       icon={Inbox}         color="bg-red-100 text-red-600" />
           <StatCard label="In Progress" value={stats.inProgress} icon={Clock3}        color="bg-amber-100 text-amber-600" />
@@ -153,12 +158,13 @@ const SuperAdminTicketsPage = () => {
       <div className="flex flex-wrap gap-3 items-center">
         <Input
           placeholder="Search by ticket, subject, hostel or admin…"
+          aria-label="Search tickets by ticket number, subject, hostel or admin"
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           className="max-w-xs"
         />
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectTrigger className="w-44" aria-label="Filter by status"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Statuses</SelectItem>
             {TICKET_STATUS_OPTIONS.map((o) => (
@@ -167,7 +173,7 @@ const SuperAdminTicketsPage = () => {
           </SelectContent>
         </Select>
         <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v as any)}>
-          <SelectTrigger className="w-64"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectTrigger className="w-64" aria-label="Filter by category"><SelectValue placeholder="Category" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Categories</SelectItem>
             {TICKET_CATEGORY_OPTIONS.map((o) => (
@@ -177,30 +183,30 @@ const SuperAdminTicketsPage = () => {
         </Select>
       </div>
 
-      {/* TABLE */}
-      <div className="rounded-md border">
+      {/* TABLE — bg-white so muted text is measured against white, not the #f8fafc page background */}
+      <div className="rounded-md border bg-white">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Ticket</TableHead>
-              <TableHead>Hostel / Admin</TableHead>
-              <TableHead>Subject</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Priority</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className={TH}>Ticket</TableHead>
+              <TableHead className={TH}>Hostel / Admin</TableHead>
+              <TableHead className={TH}>Subject</TableHead>
+              <TableHead className={TH}>Category</TableHead>
+              <TableHead className={TH}>Priority</TableHead>
+              <TableHead className={TH}>Status</TableHead>
+              <TableHead className={TH}>Created</TableHead>
+              <TableHead className={`${TH} text-right`}>Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && (
-              <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center py-8 text-slate-600">Loading…</TableCell></TableRow>
             )}
             {!loading && filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-10 text-slate-600">
                   <div className="flex flex-col items-center gap-2">
-                    <Inbox className="h-8 w-8 text-gray-300" />
+                    <Inbox className="h-8 w-8 text-gray-400" aria-hidden="true" />
                     No tickets found.
                   </div>
                 </TableCell>
@@ -211,12 +217,16 @@ const SuperAdminTicketsPage = () => {
                 <TableCell className="font-mono text-xs">{t.ticketNumber}</TableCell>
                 <TableCell className="text-xs">
                   <div className="font-medium text-foreground">{t.hostelName ?? "—"}</div>
-                  <div className="text-muted-foreground">{t.raisedByName}</div>
+                  <div className="text-slate-600">{t.raisedByName}</div>
                 </TableCell>
                 <TableCell className="max-w-[220px] truncate">
                   {t.subject}
                   {t.category === "BED_LIMIT_INCREASE" && (
-                    <BedDouble className="inline h-3.5 w-3.5 ml-1.5 text-teal-500" />
+                    <BedDouble
+                      className="inline h-3.5 w-3.5 ml-1.5 text-teal-600"
+                      role="img"
+                      aria-label="Bed limit increase request"
+                    />
                   )}
                 </TableCell>
                 <TableCell className="text-xs">{t.categoryLabel}</TableCell>
@@ -224,7 +234,12 @@ const SuperAdminTicketsPage = () => {
                 <TableCell><Badge variant="outline" className={statusColor(t.status)}>{t.statusLabel}</Badge></TableCell>
                 <TableCell className="text-xs">{fmtDate(t.createdAt)}</TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openDetail(t.id); }}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-label={`Review ticket ${t.ticketNumber}`}
+                    onClick={(e) => { e.stopPropagation(); openDetail(t.id); }}
+                  >
                     Review
                   </Button>
                 </TableCell>

@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Must match the event name AppLayout listens for.
+const PROFILE_UPDATED_EVENT = "hms:profile-updated";
+
 const roleMeta: Record<string, { label: string; bg: string; text: string; ring: string; dot: string; accent: string }> = {
   SUPER_ADMIN: { label: "Super Admin", bg: "bg-violet-50",  text: "text-violet-700",  ring: "ring-violet-200",  dot: "bg-violet-500",  accent: "from-violet-500 to-purple-600" },
   ADMIN:       { label: "Admin",       bg: "bg-blue-50",    text: "text-blue-700",    ring: "ring-blue-200",    dot: "bg-blue-500",    accent: "from-blue-500 to-indigo-600" },
@@ -108,6 +111,7 @@ export default function ProfilePage() {
 
   const initials = (name || meta.label)
     .split(/\s+/)
+    .filter(Boolean)
     .map((w: string) => w[0] ?? "")
     .join("")
     .slice(0, 2)
@@ -121,8 +125,19 @@ export default function ProfilePage() {
         name: editName.trim(),
         phone: editPhone.trim(),
       });
-      setName(updated.name ?? editName.trim());
-      setPhone(updated.phone ?? editPhone.trim());
+      const newName  = updated.name  ?? editName.trim();
+      const newPhone = updated.phone ?? editPhone.trim();
+
+      setName(newName);
+      setPhone(newPhone);
+
+      // Keep the cached session name in sync and tell AppLayout (sidebar /
+      // header / profile dropdown) to refresh its name + initials right away.
+      sessionStorage.setItem("userName", newName);
+      window.dispatchEvent(
+        new CustomEvent(PROFILE_UPDATED_EVENT, { detail: { name: newName, phone: newPhone } })
+      );
+
       setEditing(false);
       setSaveMsg("success");
       setTimeout(() => setSaveMsg(""), 3000);
@@ -272,8 +287,8 @@ export default function ProfilePage() {
 
       {isAdmin && (
         <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm">
-          <div className="p-6 border-b border-gray-50 flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3">
+          <div className="mobile-action-header p-6 border-b border-gray-50 flex items-center justify-between gap-3 flex-wrap">
+            <div className="mobile-action-title flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
                 <CreditCard className="h-5 w-5" />
               </div>
@@ -284,7 +299,7 @@ export default function ProfilePage() {
             </div>
             <button
               onClick={() => navigate("/subscription")}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-indigo-200 text-indigo-600 text-sm font-semibold hover:bg-indigo-50 transition-colors bg-white shadow-sm"
+              className="mobile-action-button flex items-center gap-2 px-4 py-2.5 rounded-lg border border-indigo-200 text-indigo-600 text-sm font-semibold hover:bg-indigo-50 transition-colors bg-white shadow-sm"
             >
               <RefreshCw className="h-4 w-4" /> Manage Subscription
             </button>

@@ -115,11 +115,9 @@ const FoodTimetablePage = () => {
   }, [branches]);
 
   /* ── LOAD BRANCHES ──
-     NOTE: branches are needed to resolve the BRANCH column for every
-     role, not just Admin/Super Admin — a Tenant/Warden viewing this
-     table still needs branchMap to display the real unit name instead
-     of falling back to "Branch #<id>". Also switched to fetchAllPages
-     so branches beyond the first page of 10 still resolve correctly. */
+     Branches are needed to resolve the BRANCH column for every role, not
+     just Admin/Super Admin. fetchAllPages so branches beyond the first
+     page of 10 still resolve correctly. */
   useEffect(() => {
     if (didLoadBranches.current) return;
     didLoadBranches.current = true;
@@ -155,11 +153,8 @@ const FoodTimetablePage = () => {
   );
 
   /* ── PAGINATION ──
-     orderedSchedules can span every branch's full week, which grows
-     quickly once there are several branches. Paginate client-side the
-     same way AnnouncementPage does — prev/numbered/next control, 10
-     rows per page. Reset to page 0 whenever the branch filter changes
-     so you never land on a now-empty page after switching branches. */
+     Client-side, 10 rows per page. Reset to page 0 whenever the branch
+     filter changes so you never land on a now-empty page. */
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 10;
 
@@ -176,6 +171,20 @@ const FoodTimetablePage = () => {
     [orderedSchedules, currentPage]
   );
 
+  const totalPages = Math.max(1, Math.ceil(orderedSchedules.length / pageSize));
+
+  const pageItems = useMemo(() => {
+    const pages: (number | "...")[] = [];
+    for (let i = 0; i < totalPages; i++) {
+      if (i === 0 || i === totalPages - 1 || Math.abs(i - currentPage) <= 1) {
+        pages.push(i);
+      } else if (pages[pages.length - 1] !== "...") {
+        pages.push("...");
+      }
+    }
+    return pages;
+  }, [totalPages, currentPage]);
+
   /* Compute available days specifically for the branch selected inside the Add Modal */
   const modalAvailableDays = useMemo(() => {
     const activeBranchId = modalBranch ? Number(modalBranch) : form.branchId;
@@ -189,8 +198,7 @@ const FoodTimetablePage = () => {
   }, [schedules, modalBranch, form.branchId]);
 
   /* Compute available days for the Edit Modal: days not already used by
-     this schedule's branch, excluding the schedule currently being edited
-     itself (otherwise its own current day would be filtered out). */
+     this schedule's branch, excluding the schedule currently being edited. */
   const editAvailableDays = useMemo(() => {
     if (!editSchedule) return ALL_DAYS;
 
@@ -203,24 +211,15 @@ const FoodTimetablePage = () => {
     return ALL_DAYS.filter((d) => !existingDays.includes(d.toLowerCase()));
   }, [schedules, editSchedule]);
 
-  /* "All 7 days scheduled" only makes sense when a single branch is in
-     view. When selectedBranch === "ALL", branchSchedules is the combined
-     total across every branch, so length >= 7 does NOT mean any one
-     branch actually has a full week — it could be 4 days on Branch A +
-     3 days on Branch B. In that case we can't know which branch the Add
-     button would even target, so we don't hide it. */
+  /* "All 7 days scheduled" only makes sense when a single branch is in view. */
   const allDaysScheduled = useMemo(() => {
     if (selectedBranch === "ALL") return false;
     return branchSchedules.length >= 7;
   }, [selectedBranch, branchSchedules]);
 
   /* ── LOAD ──
-     NOTE: getFoodSchedules() is now paginated (page/size params,
-     returns { content, totalElements }). This screen needs the FULL
-     dataset in memory at once — branch filtering, the "all 7 days
-     scheduled" check, and modalAvailableDays all operate over every
-     schedule across every branch — so we pull every page and flatten
-     via fetchAllPages instead of just taking page 0. */
+     getFoodSchedules() is paginated, but this screen needs the FULL
+     dataset in memory at once, so we pull every page via fetchAllPages. */
   const reload = useCallback(async () => {
     try {
       setLoading(true);
@@ -298,6 +297,18 @@ const FoodTimetablePage = () => {
     }
   };
 
+  /* Shared opener for the Add dialog */
+  const openAddDialog = () => {
+    const defaultBranch = selectedBranch !== "ALL" ? selectedBranch : "";
+    setModalBranch(defaultBranch);
+    setForm((f) => ({
+      ...f,
+      dayName: "",
+      branchId: defaultBranch ? Number(defaultBranch) : undefined,
+    }));
+    setAddOpen(true);
+  };
+
   /* ================= UI ================= */
   return (
     <div className="min-h-full bg-[#fcfcfc] text-slate-900 font-sans pb-10">
@@ -313,12 +324,13 @@ const FoodTimetablePage = () => {
         .ft-panel-title { font-size: 16px; font-weight: 700; color: #0f172a; }
 
         .ft-table { width: 100%; border-collapse: collapse; min-width: 640px; }
-        .ft-table th { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; padding: 16px 24px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fff; letter-spacing: 0.5px; }
+        /* A11Y: header text darkened from #94a3b8 (~2.6:1) to #475569 (~7.6:1) on white. */
+        .ft-table th { font-size: 11px; font-weight: 600; color: #475569; text-transform: uppercase; padding: 16px 24px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fff; letter-spacing: 0.5px; }
         .ft-table td { padding: 16px 24px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
         .ft-table tr:hover { background: #fdfcff; }
 
         .ft-day-badge { display: inline-flex; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; color: #1d4ed8; background: #eff6ff; }
-        .ft-branch-badge { display: inline-flex; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #475569; background: #f1f5f9; }
+        .ft-branch-badge { display: inline-flex; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #475569; background: #f1f5f9; max-width: 100%; }
 
         /* ACTION BUTTONS */
         .ft-action-btn { 
@@ -334,46 +346,65 @@ const FoodTimetablePage = () => {
           transition: all 0.2s ease; 
         }
         .ft-action-btn:last-child { margin-right: 0; }
+        .ft-action-btn:focus-visible, .ft-page-btn:focus-visible { outline: 2px solid #5200FF; outline-offset: 2px; }
         
         .ft-action-btn.edit {
-          color: #2563eb !important;
+          color: #1d4ed8 !important;
           border-color: #bfdbfe;
           background-color: #eff6ff;
         }
         .ft-action-btn.edit:hover { 
           background-color: #dbeafe; 
           border-color: #93c5fd; 
-          color: #1d4ed8 !important;
+          color: #1e40af !important;
         }
         
+        /* A11Y: red darkened from #dc2626 to #b91c1c for AA contrast on #fef2f2. */
         .ft-action-btn.del { 
-          color: #dc2626 !important; 
+          color: #b91c1c !important; 
           border-color: #fca5a5;
           background-color: #fef2f2;
         }
         .ft-action-btn.del:hover { 
           background-color: #fee2e2; 
           border-color: #f87171; 
-          color: #b91c1c !important;
+          color: #991b1b !important;
         }
 
         .ft-sidebar-card { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); padding: 24px; }
         .ft-sidebar-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
+
+        /* RESPONSIVE: breakpoint matches Tailwind's "sm" (640px) */
+        @media (max-width: 639px) {
+          .ft-wrap { padding: 12px; }
+          .ft-main { gap: 16px; }
+          .ft-sidebar { gap: 16px; }
+          .ft-panel-header { padding: 16px; }
+          .ft-sidebar-card { padding: 16px; }
+          .ft-desktop-table { display: none; }
+        }
+        @media (min-width: 640px) {
+          .ft-mobile-list { display: none; }
+        }
       `}</style>
 
       <div className="ft-wrap">
+        {/* A11Y: the page had no h1, so the first heading (h3) skipped levels.
+            Visually hidden h1 + h2 card titles gives a proper outline. */}
+        <h1 className="sr-only">Food Timetable</h1>
+
         {/* MAIN LAYOUT */}
         <div className="ft-main flex-col">
 
           {/* TOP HEADER: MEAL TIMINGS */}
           <div className="ft-sidebar w-full">
             <div className="ft-sidebar-card bg-indigo-50/40 border-indigo-100">
-              <h3 className="ft-sidebar-title text-indigo-950 mb-4">Meal Timings</h3>
-              <div className="flex gap-4 items-center flex-wrap">
-                <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0">
-                  <Clock size={18} />
+              <h2 className="ft-sidebar-title text-indigo-950 mb-4">Meal Timings</h2>
+              <div className="flex gap-3 items-start">
+                <div aria-hidden="true" className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
+                  <Clock size={18} aria-hidden="true" />
                 </div>
-                <div className="text-[13px] text-indigo-900/80 leading-relaxed font-medium flex gap-6 flex-wrap">
+                <div className="text-[13px] text-indigo-900 leading-relaxed font-medium flex flex-col sm:flex-row gap-1.5 sm:gap-6 min-w-0">
                   <p><span className="font-bold text-indigo-950">Breakfast:</span> 8:00 AM – 9:30 AM</p>
                   <p><span className="font-bold text-indigo-950">Lunch:</span> 1:00 PM – 2:00 PM</p>
                   <p><span className="font-bold text-indigo-950">Dinner:</span> 8:30 PM – 9:30 PM</p>
@@ -382,16 +413,20 @@ const FoodTimetablePage = () => {
             </div>
           </div>
 
-          {/* RIGHT: TABLE */}
+          {/* TABLE / CARDS */}
           <div className="ft-content w-full">
             <div className="ft-panel-header">
-              <div className="ft-panel-title">Weekly Meal Schedule</div>
-              <div className="flex gap-2 items-center flex-wrap">
+              <h2 className="ft-panel-title">Weekly Meal Schedule</h2>
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-center w-full sm:w-auto">
                 {/* BRANCH SWITCHER WITH ALL BRANCHES OPTION */}
                 {(role === "ADMIN" || role === "SUPER_ADMIN") && (
-                  <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-10 w-[160px]">
+                  <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-10 w-full sm:w-[160px]">
                     <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                      <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                      {/* A11Y: the combobox button had no accessible name. */}
+                      <SelectTrigger
+                        aria-label="Filter by branch"
+                        className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-700"
+                      >
                         <SelectValue placeholder="Select Branch" />
                       </SelectTrigger>
                       <SelectContent>
@@ -407,81 +442,154 @@ const FoodTimetablePage = () => {
                 {hasAccess && !allDaysScheduled && (
                   <Button
                     size="sm"
-                    className="h-10 bg-[#5200FF] hover:bg-[#4200cc] text-white px-4 font-semibold"
-                    onClick={() => {
-                      const defaultBranch = selectedBranch !== "ALL" ? selectedBranch : "";
-                      setModalBranch(defaultBranch);
-                      setForm((f) => ({
-                        ...f,
-                        dayName: "",
-                        branchId: defaultBranch ? Number(defaultBranch) : undefined,
-                      }));
-                      setAddOpen(true);
-                    }}
+                    className="h-10 w-full sm:w-auto bg-[#5200FF] hover:bg-[#4200cc] text-white px-4 font-semibold"
+                    onClick={openAddDialog}
                   >
-                    <Plus className="h-4 w-4 mr-2" /> Add Schedule
+                    <Plus className="h-4 w-4 mr-2" aria-hidden="true" /> Add Schedule
                   </Button>
                 )}
               </div>
             </div>
 
-            {/* TABLE */}
-            <div className="overflow-x-auto">
+            {/* DESKTOP TABLE */}
+            <div className="overflow-x-auto ft-desktop-table">
               <table className="ft-table">
+                <caption className="sr-only">Weekly meal schedule</caption>
                 <thead>
                   <tr>
-                    <th>ID</th>
-                    <th>BRANCH</th>
-                    <th>DAY</th>
-                    <th>BREAKFAST</th>
-                    <th>LUNCH</th>
-                    <th>DINNER</th>
-                    {hasAccess && <th className="text-right">ACTIONS</th>}
+                    <th scope="col">ID</th>
+                    <th scope="col">BRANCH</th>
+                    <th scope="col">DAY</th>
+                    <th scope="col">BREAKFAST</th>
+                    <th scope="col">LUNCH</th>
+                    <th scope="col">DINNER</th>
+                    {hasAccess && <th scope="col" className="text-right">ACTIONS</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={hasAccess ? 7 : 6} className="text-center py-12 text-slate-400">Loading…</td></tr>
+                    <tr><td colSpan={hasAccess ? 7 : 6} role="status" className="text-center py-12 text-slate-600">Loading…</td></tr>
                   ) : paginatedSchedules.length === 0 ? (
-                    <tr><td colSpan={hasAccess ? 7 : 6} className="text-center py-12 text-slate-400">No schedules found.</td></tr>
+                    <tr><td colSpan={hasAccess ? 7 : 6} className="text-center py-12 text-slate-600">No schedules found.</td></tr>
                   ) : (
-                    paginatedSchedules.map((row, i) => (
-                      <tr key={row.id}>
-                        <td className="text-[13px] font-semibold text-slate-500 w-12">{currentPage * pageSize + i + 1}</td>
-                        {/* BRANCH NAME COLUMN */}
-                        <td>
-                          <div className="ft-branch-badge">
-                            {branchMap.get(row.branchId) || row.branchName || `Branch #${row.branchId}`}
-                          </div>
-                        </td>
-                        <td><div className="ft-day-badge">{row.dayName}</div></td>
-                        <td className="text-[13px] font-medium text-slate-700">{row.breakfast}</td>
-                        <td className="text-[13px] font-medium text-slate-700">{row.lunch}</td>
-                        <td className="text-[13px] font-medium text-slate-700">{row.dinner}</td>
+                    paginatedSchedules.map((row, i) => {
+                      const branchLabel =
+                        branchMap.get(row.branchId) || row.branchName || `Branch #${row.branchId}`;
+                      return (
+                        <tr key={row.id}>
+                          <td className="text-[13px] font-semibold text-slate-600 w-12">{currentPage * pageSize + i + 1}</td>
+                          {/* BRANCH NAME COLUMN */}
+                          <td>
+                            <div className="ft-branch-badge">{branchLabel}</div>
+                          </td>
+                          <td><div className="ft-day-badge">{row.dayName}</div></td>
+                          <td className="text-[13px] font-medium text-slate-700">{row.breakfast}</td>
+                          <td className="text-[13px] font-medium text-slate-700">{row.lunch}</td>
+                          <td className="text-[13px] font-medium text-slate-700">{row.dinner}</td>
+                          {hasAccess && (
+                            <td className="text-right whitespace-nowrap">
+                              {/* EDIT BUTTON */}
+                              <button
+                                type="button"
+                                className="ft-action-btn edit"
+                                title="Edit Schedule"
+                                aria-label={`Edit ${row.dayName} schedule for ${branchLabel}`}
+                                onClick={() => { setEditSchedule({ ...row }); setEditOpen(true); }}
+                              >
+                                <Pencil
+                                  size={16}
+                                  aria-hidden="true"
+                                  className="w-4 h-4 stroke-[2.2] shrink-0"
+                                  style={{ stroke: "#1d4ed8", display: "block" }}
+                                />
+                              </button>
+
+                              {/* DELETE BUTTON */}
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="ft-action-btn del"
+                                    title="Delete Schedule"
+                                    aria-label={`Delete ${row.dayName} schedule for ${branchLabel}`}
+                                  >
+                                    <Trash2
+                                      size={16}
+                                      aria-hidden="true"
+                                      className="w-4 h-4 stroke-[2.2] shrink-0"
+                                      style={{ stroke: "#b91c1c", display: "block" }}
+                                    />
+                                  </button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete {row.dayName}'s schedule?</AlertDialogTitle>
+                                    <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}>Delete</AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* MOBILE CARD LIST */}
+            <div className="ft-mobile-list divide-y divide-slate-100">
+              {loading ? (
+                <p role="status" className="text-center py-10 text-slate-600 text-sm">Loading…</p>
+              ) : paginatedSchedules.length === 0 ? (
+                <p className="text-center py-10 text-slate-600 text-sm">No schedules found.</p>
+              ) : (
+                paginatedSchedules.map((row) => {
+                  const branchLabel =
+                    branchMap.get(row.branchId) || row.branchName || `Branch #${row.branchId}`;
+                  return (
+                    <div key={row.id} className="p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          <span className="ft-day-badge">{row.dayName}</span>
+                          <span className="ft-branch-badge">
+                            <span className="truncate">{branchLabel}</span>
+                          </span>
+                        </div>
+
                         {hasAccess && (
-                          <td className="text-right whitespace-nowrap">
-                            {/* EDIT BUTTON */}
+                          <div className="flex shrink-0">
                             <button
                               type="button"
                               className="ft-action-btn edit"
-                              title="Edit Schedule"
+                              aria-label={`Edit ${row.dayName} schedule for ${branchLabel}`}
                               onClick={() => { setEditSchedule({ ...row }); setEditOpen(true); }}
                             >
-                              <Pencil 
-                                size={16} 
-                                className="w-4 h-4 stroke-[2.2] text-blue-600 shrink-0" 
-                                style={{ stroke: "#2563eb", display: "block" }} 
+                              <Pencil
+                                size={16}
+                                aria-hidden="true"
+                                className="w-4 h-4 stroke-[2.2] shrink-0"
+                                style={{ stroke: "#1d4ed8", display: "block" }}
                               />
                             </button>
 
-                            {/* DELETE BUTTON */}
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
-                                <button type="button" className="ft-action-btn del" title="Delete Schedule">
-                                  <Trash2 
-                                    size={16} 
-                                    className="w-4 h-4 stroke-[2.2] text-red-600 shrink-0" 
-                                    style={{ stroke: "#dc2626", display: "block" }} 
+                                <button
+                                  type="button"
+                                  className="ft-action-btn del"
+                                  aria-label={`Delete ${row.dayName} schedule for ${branchLabel}`}
+                                >
+                                  <Trash2
+                                    size={16}
+                                    aria-hidden="true"
+                                    className="w-4 h-4 stroke-[2.2] shrink-0"
+                                    style={{ stroke: "#b91c1c", display: "block" }}
                                   />
                                 </button>
                               </AlertDialogTrigger>
@@ -492,73 +600,80 @@ const FoodTimetablePage = () => {
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}>Delete</AlertDialogAction>
+                                  <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDelete(row.id!); }}>
+                                    Delete
+                                  </AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>
-                          </td>
+                          </div>
                         )}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                      </div>
+
+                      <dl className="grid grid-cols-[88px_1fr] gap-y-1.5 text-[13px]">
+                        <dt className="font-semibold text-slate-600">Breakfast</dt>
+                        <dd className="text-slate-800 break-words">{row.breakfast}</dd>
+                        <dt className="font-semibold text-slate-600">Lunch</dt>
+                        <dd className="text-slate-800 break-words">{row.lunch}</dd>
+                        <dt className="font-semibold text-slate-600">Dinner</dt>
+                        <dd className="text-slate-800 break-words">{row.dinner}</dd>
+                      </dl>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
             {/* PAGINATION */}
             {!loading && orderedSchedules.length > 0 && (
-              <div className="flex items-center justify-between px-6 py-5 border-t border-[#f1f5f9] bg-white rounded-b-2xl">
-                <div className="text-[14px] text-[#64748b] font-medium">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 sm:px-6 py-4 sm:py-5 border-t border-[#f1f5f9] bg-white rounded-b-2xl">
+                <div className="text-[13px] sm:text-[14px] text-[#475569] font-medium text-center sm:text-left" aria-live="polite">
                   Showing {paginatedSchedules.length === 0 ? 0 : currentPage * pageSize + 1} to {Math.min((currentPage + 1) * pageSize, orderedSchedules.length)} of {orderedSchedules.length} schedules
                 </div>
-                <div className="flex gap-1.5">
+                <nav aria-label="Pagination" className="flex flex-wrap justify-center gap-1.5">
                   <button
                     type="button"
-                    className="w-9 h-9 rounded-md border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm text-lg leading-none font-bold"
+                    aria-label="Previous page"
+                    className="ft-page-btn w-9 h-9 rounded-md border border-slate-200 flex items-center justify-center text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm text-lg leading-none font-bold"
                     disabled={currentPage === 0}
                     onClick={() => setCurrentPage(p => p - 1)}
                   >
-                    &#8249;
+                    <span aria-hidden="true">&#8249;</span>
                   </button>
 
-                  {(() => {
-                    const totalPages = Math.ceil(orderedSchedules.length / pageSize) || 1;
-                    const pages: (number | string)[] = [];
-                    for (let i = 0; i < totalPages; i++) {
-                      if (i === 0 || i === totalPages - 1 || Math.abs(i - currentPage) <= 1) {
-                        pages.push(i);
-                      } else if (pages[pages.length - 1] !== '...') {
-                        pages.push('...');
-                      }
-                    }
-
-                    return pages.map((p, idx) => {
-                      if (p === '...') {
-                        return <span key={`dots-${idx}`} className="w-9 h-9 flex items-center justify-center text-slate-400 text-sm font-medium">...</span>;
-                      }
-                      const isCurrent = p === currentPage;
+                  {pageItems.map((p, idx) => {
+                    if (p === "...") {
                       return (
-                        <button
-                          type="button"
-                          key={p}
-                          className={`w-9 h-9 rounded-md flex items-center justify-center font-medium text-[14px] transition-colors shadow-sm ${isCurrent ? 'bg-[#5200FF] text-white border border-[#5200FF]' : 'border border-slate-200 text-slate-600 bg-white hover:bg-slate-50'}`}
-                          onClick={() => setCurrentPage(p as number)}
-                        >
-                          {(p as number) + 1}
-                        </button>
+                        <span key={`dots-${idx}`} aria-hidden="true" className="w-9 h-9 flex items-center justify-center text-slate-600 text-sm font-medium">
+                          ...
+                        </span>
                       );
-                    });
-                  })()}
+                    }
+                    const isCurrent = p === currentPage;
+                    return (
+                      <button
+                        type="button"
+                        key={p}
+                        aria-label={`Page ${p + 1}`}
+                        aria-current={isCurrent ? "page" : undefined}
+                        className={`ft-page-btn w-9 h-9 rounded-md flex items-center justify-center font-medium text-[14px] transition-colors shadow-sm ${isCurrent ? 'bg-[#5200FF] text-white border border-[#5200FF]' : 'border border-slate-200 text-slate-600 bg-white hover:bg-slate-50'}`}
+                        onClick={() => setCurrentPage(p)}
+                      >
+                        {p + 1}
+                      </button>
+                    );
+                  })}
 
                   <button
                     type="button"
-                    className="w-9 h-9 rounded-md border border-slate-200 flex items-center justify-center text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm text-lg leading-none font-bold"
+                    aria-label="Next page"
+                    className="ft-page-btn w-9 h-9 rounded-md border border-slate-200 flex items-center justify-center text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm text-lg leading-none font-bold"
                     disabled={(currentPage + 1) * pageSize >= orderedSchedules.length}
                     onClick={() => setCurrentPage(p => p + 1)}
                   >
-                    &#8250;
+                    <span aria-hidden="true">&#8250;</span>
                   </button>
-                </div>
+                </nav>
               </div>
             )}
           </div>
@@ -580,7 +695,7 @@ const FoodTimetablePage = () => {
               }
             }}
           >
-            <DialogContent className="rounded-3xl max-w-lg">
+            <DialogContent className="rounded-3xl max-w-lg w-[calc(100%-2rem)]">
               <DialogHeader>
                 <DialogTitle className="text-2xl font-bold">Add Food Schedule</DialogTitle>
                 <DialogDescription>
@@ -596,7 +711,7 @@ const FoodTimetablePage = () => {
                       setForm((f) => ({ ...f, branchId: Number(val), dayName: "" }));
                     }}
                   >
-                    <SelectTrigger className="w-full h-11 text-slate-600">
+                    <SelectTrigger aria-label="Branch" className="w-full h-11 text-slate-700">
                       <SelectValue placeholder="Select Branch" />
                     </SelectTrigger>
                     <SelectContent>
@@ -610,7 +725,7 @@ const FoodTimetablePage = () => {
                 )}
 
                 <Select value={form.dayName} onValueChange={(v) => setForm({ ...form, dayName: v })}>
-                  <SelectTrigger className="w-full h-11 text-slate-600">
+                  <SelectTrigger aria-label="Day" className="w-full h-11 text-slate-700">
                     <SelectValue placeholder="Select Day" />
                   </SelectTrigger>
                   <SelectContent>
@@ -620,11 +735,11 @@ const FoodTimetablePage = () => {
                   </SelectContent>
                 </Select>
 
-                <Input placeholder="Breakfast" className="h-11" value={form.breakfast} onChange={(e) => setForm({ ...form, breakfast: e.target.value })} />
-                <Input placeholder="Lunch" className="h-11" value={form.lunch} onChange={(e) => setForm({ ...form, lunch: e.target.value })} />
-                <Input placeholder="Dinner" className="h-11" value={form.dinner} onChange={(e) => setForm({ ...form, dinner: e.target.value })} />
+                <Input placeholder="Breakfast" aria-label="Breakfast" className="h-11" value={form.breakfast} onChange={(e) => setForm({ ...form, breakfast: e.target.value })} />
+                <Input placeholder="Lunch" aria-label="Lunch" className="h-11" value={form.lunch} onChange={(e) => setForm({ ...form, lunch: e.target.value })} />
+                <Input placeholder="Dinner" aria-label="Dinner" className="h-11" value={form.dinner} onChange={(e) => setForm({ ...form, dinner: e.target.value })} />
               </div>
-              <DialogFooter className="mt-4">
+              <DialogFooter className="mt-4 gap-2 sm:gap-0">
                 <DialogClose asChild><Button variant="outline" className="h-10">Cancel</Button></DialogClose>
                 <Button className="bg-[#5200FF] hover:bg-[#4200cc] text-white h-10 px-6 font-semibold" onClick={handleAdd}>Create</Button>
               </DialogFooter>
@@ -635,7 +750,7 @@ const FoodTimetablePage = () => {
         {/* EDIT DIALOG */}
         {hasAccess && (
           <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditSchedule(null); }}>
-            <DialogContent className="rounded-3xl max-w-lg">
+            <DialogContent className="rounded-3xl max-w-lg w-[calc(100%-2rem)]">
               <DialogHeader>
                 <DialogTitle className="text-2xl font-bold">Edit Food Schedule</DialogTitle>
                 <DialogDescription>Update timetable details.</DialogDescription>
@@ -650,7 +765,7 @@ const FoodTimetablePage = () => {
                         setEditSchedule({ ...editSchedule, branchId: Number(val) })
                       }
                     >
-                      <SelectTrigger className="w-full h-11 text-slate-600">
+                      <SelectTrigger aria-label="Branch" className="w-full h-11 text-slate-700">
                         <SelectValue placeholder="Select Branch" />
                       </SelectTrigger>
                       <SelectContent>
@@ -663,14 +778,13 @@ const FoodTimetablePage = () => {
                     </Select>
                   )}
 
-                  {/* DAY SELECTION IN EDIT MODAL — now constrained to unscheduled
-                      days for this branch (plus the schedule's own current day),
-                      matching the Add modal instead of allowing free text. */}
+                  {/* DAY SELECTION IN EDIT MODAL — constrained to unscheduled days
+                      for this branch (plus the schedule's own current day). */}
                   <Select
                     value={editSchedule.dayName}
                     onValueChange={(v) => setEditSchedule({ ...editSchedule, dayName: v })}
                   >
-                    <SelectTrigger className="w-full h-11 text-slate-600">
+                    <SelectTrigger aria-label="Day" className="w-full h-11 text-slate-700">
                       <SelectValue placeholder="Select Day" />
                     </SelectTrigger>
                     <SelectContent>
@@ -680,12 +794,12 @@ const FoodTimetablePage = () => {
                     </SelectContent>
                   </Select>
 
-                  <Input className="h-11" placeholder="Breakfast" value={editSchedule.breakfast} onChange={(e) => setEditSchedule({ ...editSchedule, breakfast: e.target.value })} />
-                  <Input className="h-11" placeholder="Lunch" value={editSchedule.lunch} onChange={(e) => setEditSchedule({ ...editSchedule, lunch: e.target.value })} />
-                  <Input className="h-11" placeholder="Dinner" value={editSchedule.dinner} onChange={(e) => setEditSchedule({ ...editSchedule, dinner: e.target.value })} />
+                  <Input className="h-11" placeholder="Breakfast" aria-label="Breakfast" value={editSchedule.breakfast} onChange={(e) => setEditSchedule({ ...editSchedule, breakfast: e.target.value })} />
+                  <Input className="h-11" placeholder="Lunch" aria-label="Lunch" value={editSchedule.lunch} onChange={(e) => setEditSchedule({ ...editSchedule, lunch: e.target.value })} />
+                  <Input className="h-11" placeholder="Dinner" aria-label="Dinner" value={editSchedule.dinner} onChange={(e) => setEditSchedule({ ...editSchedule, dinner: e.target.value })} />
                 </div>
               )}
-              <DialogFooter className="mt-4">
+              <DialogFooter className="mt-4 gap-2 sm:gap-0">
                 <Button variant="outline" className="h-10" onClick={() => setEditOpen(false)}>Cancel</Button>
                 <Button className="bg-[#5200FF] hover:bg-[#4200cc] text-white h-10 px-6 font-semibold" onClick={handleEdit}>Save</Button>
               </DialogFooter>

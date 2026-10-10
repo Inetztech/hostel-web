@@ -248,8 +248,8 @@ export default function SubscriptionPage() {
 
         {/* Current plan card */}
         <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm">
-          <div className="p-6 border-b border-gray-50 flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
+          <div className="p-6 border-b border-gray-50 flex items-center justify-between flex-wrap gap-3 mobile-action-header">
+            <div className="mobile-action-title flex items-center gap-3">
               <div className={cn(
                 "h-10 w-10 rounded-full flex items-center justify-center shrink-0",
                 expired ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
@@ -267,7 +267,7 @@ export default function SubscriptionPage() {
               <button
                 onClick={() => setShowRenewForm(true)}
                 className={cn(
-                  "flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors shadow-sm",
+                  "mobile-action-button flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors shadow-sm",
                   expired
                     ? "bg-red-600 text-white hover:bg-red-700"
                     : "border border-indigo-200 text-indigo-600 hover:bg-indigo-50 bg-white"
@@ -321,8 +321,8 @@ export default function SubscriptionPage() {
         {/* Add Beds Mid-Cycle — immediate, standalone, no renewal required */}
         {!loading && !expired && subscription && (
           <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm">
-            <div className="p-6 border-b border-gray-50 flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
+            <div className="mobile-action-header p-6 border-b border-gray-50 flex items-center justify-between flex-wrap gap-3">
+              <div className="mobile-action-title flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
                   <BedDouble className="h-5 w-5" />
                 </div>
@@ -336,7 +336,7 @@ export default function SubscriptionPage() {
               {!showAddOnForm && (
                 <button
                   onClick={() => setShowAddOnForm(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border border-indigo-200 text-indigo-600 hover:bg-indigo-50 bg-white transition-colors shadow-sm"
+                  className="mobile-action-button flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border border-indigo-200 text-indigo-600 hover:bg-indigo-50 bg-white transition-colors shadow-sm"
                 >
                   <BedDouble className="h-4 w-4" /> Add Beds Now
                 </button>

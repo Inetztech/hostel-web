@@ -40,6 +40,9 @@ import { toast } from "sonner";
 import { Search, RefreshCw, ChevronRight, MoreHorizontal } from "lucide-react";
 import { computeRentBreakdown, type RentBreakdown } from "@/lib/RentCalculation";
 import { computeRentDue, NO_DUE_CONFIG, NO_DUE_RESULT, type RentDueResult } from "@/lib/rentDue";
+// NEW: per-hostel Rent Billing Mode (CALENDAR_MONTH | JOINING_DATE_CYCLE).
+import { parseLocalDate, fmtDate } from "@/lib/rentCycle";
+import { previewCycleRent, toISODate, type BranchRentConfig } from "@/lib/rentPreview";
 
 
 type EBBillRow = TenantEBBill & {
@@ -72,6 +75,9 @@ type RentRow = {
   unitId: number | undefined;
   amount: number;
   paymentStatus?: string;
+  // NEW: set (JOINING_DATE_CYCLE hostels only) when this row's rent cycle
+  // hasn't started yet, so "Generate" is blocked instead of failing on the server.
+  generateBlockedReason?: string;
   // Daily-stay ("Rent + EB advance paid at check-in") settlement info.
   // Only populated for tenantStay === "DAILY" rows that don't have a Rent
   // record yet — once a Rent record exists for the period, that record is
@@ -109,10 +115,12 @@ function extractFlatNumber(bill: any): string {
 const isInformationalReading = (reading: any) =>
   reading?.tenantId != null && reading?.isCheckout === true;
 
-// NEW: true when the tenant's check-in date is AFTER the last day of the
+// True when the tenant's check-in date is AFTER the last day of the
 // selected month/year, i.e. they were not living here yet. Such a tenant
 // must not be billed (rent or EB) for that month. Parses "YYYY-MM-DD"
 // manually to avoid timezone shifts from `new Date("YYYY-MM-DD")`.
+// (Also correct for JOINING_DATE_CYCLE: a cycle is identified by the
+// calendar month it STARTS in, so a later check-in month has no cycle yet.)
 const checkedInAfterMonth = (
   checkInDate: string | null | undefined,
   month: number,
@@ -179,13 +187,23 @@ const ActionCell = ({
     !rentRecord && bill.isDaily && (bill.ebBalance ?? 0) >= 0;
 
   if (isSettledDailyNoAction) {
-    return <span className="text-[11px] text-slate-400">No action needed</span>;
+    // A11Y: was text-slate-400 (low contrast) — now text-slate-600.
+    return <span className="text-[11px] text-slate-600">No action needed</span>;
   }
 
   return (
     <div className="flex items-center gap-2">
       {!rentRecord && (
-        <Button size="sm" variant="outline" className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-0" onClick={() => onGenerate(bill)}>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label={`Generate rent for ${bill.tenantName}`}
+          className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-0 disabled:opacity-60 disabled:cursor-not-allowed"
+          // NEW: JOINING_DATE_CYCLE hostels can't bill a cycle that hasn't started.
+          disabled={!!bill.generateBlockedReason}
+          title={bill.generateBlockedReason}
+          onClick={() => onGenerate(bill)}
+        >
           Generate
         </Button>
       )}
@@ -196,7 +214,10 @@ const ActionCell = ({
             value={localMode}
             onValueChange={(v: PaymentMode) => setLocalMode(v)}
           >
-            <SelectTrigger className="w-[80px] h-6 text-[10px] border-slate-200 focus:ring-0 shadow-none px-2">
+            <SelectTrigger
+              aria-label={`Payment mode for ${bill.tenantName}`}
+              className="w-[80px] h-6 text-[10px] border-slate-200 focus:ring-0 shadow-none px-2"
+            >
               <SelectValue placeholder="Mode" />
             </SelectTrigger>
             <SelectContent>
@@ -209,6 +230,7 @@ const ActionCell = ({
           <input
             type="number"
             placeholder="Amount"
+            aria-label={`Payment amount for ${bill.tenantName}`}
             value={localAmount}
             onChange={(e) => setLocalAmount(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
@@ -219,6 +241,7 @@ const ActionCell = ({
             <input
               type="text"
               placeholder="Txn ID"
+              aria-label={`Transaction ID for ${bill.tenantName}`}
               value={localTxnId}
               onChange={(e) => setLocalTxnId(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
@@ -226,7 +249,13 @@ const ActionCell = ({
             />
           )}
 
-          <Button size="sm" className="h-6 px-2 text-[10px] bg-green-600 hover:bg-green-700" onClick={handlePay}>
+          {/* A11Y: green-600 with white text is below 4.5:1; green-700 passes. */}
+          <Button
+            size="sm"
+            aria-label={`Record payment for ${bill.tenantName}`}
+            className="h-6 px-2 text-[10px] bg-green-700 hover:bg-green-800"
+            onClick={handlePay}
+          >
             Pay
           </Button>
         </div>
@@ -249,8 +278,11 @@ const RentPage = () => {
   );
   const [selectedRoom, setSelectedRoom] = useState("all");
 
-  // Active Rent Due Model (NO_DUE / FIXED_DUE + ₹ per day), keyed by branch
-  // (unitId). Always read from the backend Business Model — never hard-coded.
+  // Active Business Model (Rent Due Model NO_DUE / FIXED_DUE + ₹ per day AND
+  // Rent Billing Mode CALENDAR_MONTH / JOINING_DATE_CYCLE), keyed by branch
+  // (unitId). Each branch belongs to ONE hostel, so a page listing branches
+  // of several hostels can mix both billing modes — the config is always
+  // resolved per row's branch. Always read from the backend, never hard-coded.
   const [dueConfigByBranch, setDueConfigByBranch] = useState<Map<string, RentDueConfig>>(new Map());
 
   const [ebBillsMap, setEbBillsMap] = useState<Map<string, EBBillRow[]>>(new Map());
@@ -342,12 +374,42 @@ const RentPage = () => {
   const resolveTenantName = (tenantId: number): string =>
     tenantNameMap.get(tenantId) ?? `Tenant ${tenantId}`;
 
+  // NEW: Joining-date-cycle preview for one tenant / period, or null when the
+  // tenant's hostel bills by CALENDAR_MONTH (or the tenant is DAILY / has no
+  // check-in date) — null means "use the existing calendar logic".
+  // The config is looked up by the ROOM'S BRANCH, so two hostels can use
+  // different modes on the same page.
+  const getCyclePreview = (
+    tenantId: number,
+    room?: Room,
+    forMonth = month,
+    forYear = year
+  ) => {
+    const tenant = tenantMap.get(Number(tenantId));
+    if (!tenant || isDailyTenant(tenant) || !tenant.checkInDate) return null;
+    const cfg = dueConfigByBranch.get(String(room?.unitId)) as unknown as BranchRentConfig | undefined;
+    const tenantRent = tenantRentMap.get(Number(tenantId));
+    const flatRent = tenantRent != null ? tenantRent : (room?.rentPerBed ?? 0);
+    return previewCycleRent({
+      monthlyRent: flatRent,
+      checkIn: parseLocalDate(tenant.checkInDate),
+      month: forMonth,
+      year: forYear,
+      config: cfg,
+    });
+  };
+
   // Prefers the tenant's own `monthlyRent` and only falls back to the
-  // room's rentPerBed when the tenant has no rent set. For the tenant's
-  // check-in month the flat monthlyRent is pro-rated by days (see
-  // lib/rentCalculation.ts); later months are billed in full. The backend
-  // independently recomputes the same figure when a Rent record is generated.
+  // room's rentPerBed when the tenant has no rent set.
+  //  • CALENDAR_MONTH hostel: the check-in month's flat monthlyRent is
+  //    pro-rated by days (see lib/rentCalculation.ts); later months are full.
+  //  • JOINING_DATE_CYCLE hostel: every cycle is the full monthlyRent.
+  // The backend independently recomputes the same figure when a Rent record
+  // is generated.
   const resolveTenantRent = (tenantId: number, room?: Room, forMonth = month, forYear = year): number => {
+    const cyc = getCyclePreview(tenantId, room, forMonth, forYear);
+    if (cyc) return cyc.rentAmount;
+
     const tenantRent = tenantRentMap.get(Number(tenantId));
     const flatRent = tenantRent != null ? tenantRent : (room?.rentPerBed ?? 0);
     const tenant = tenantMap.get(Number(tenantId));
@@ -356,7 +418,7 @@ const RentPage = () => {
   };
 
   // Full breakdown (days in month, occupied days, daily rent, etc.)
-  // for the "Rent" cell tooltip/expansion on the Rent page.
+  // for the "Rent" cell tooltip/expansion on the Rent page (calendar mode).
   const resolveTenantRentBreakdown = (
     tenantId: number,
     room?: Room,
@@ -374,6 +436,8 @@ const RentPage = () => {
   //    dueDays (kept current by the backend until the rent is paid).
   //  • Otherwise it's a live preview from the active Business Model — the same
   //    figure the backend stores when the record is generated.
+  //      - JOINING_DATE_CYCLE: due date = the cycle's start date.
+  //      - CALENDAR_MONTH:     due date from the configured due day.
   // NO_DUE always gives ₹0, and so does a DAILY-stay tenant (rent is settled
   // at check-in).
   const resolveTenantDue = (
@@ -391,6 +455,17 @@ const RentPage = () => {
     }
     const tenant = tenantMap.get(Number(tenantId));
     if (!tenant || isDailyTenant(tenant)) return NO_DUE_RESULT;
+
+    const cyc = getCyclePreview(tenantId, room);
+    if (cyc) {
+      return {
+        dueDate: cyc.dueDate ? toISODate(cyc.dueDate) : null,
+        dueDays: cyc.dueDays,
+        dueAmount: cyc.dueAmount,
+        perDay: cyc.duePerDay,
+      } as RentDueResult;
+    }
+
     const cfg = dueConfigByBranch.get(String(room?.unitId)) ?? NO_DUE_CONFIG;
     return computeRentDue(cfg, tenant.checkInDate, month, year);
   };
@@ -596,8 +671,11 @@ const RentPage = () => {
     reload();
   }, []);
 
-  // Load the Rent Due Model for every branch these rooms belong to. A failed
-  // lookup falls back to NO_DUE, i.e. nothing extra is ever charged.
+  // Load the Business Model (Rent Due + Rent Billing Mode) for every branch
+  // these rooms belong to. A failed lookup falls back to NO_DUE + calendar
+  // billing, i.e. nothing extra is ever charged and billing is unchanged.
+  // NOTE: getRentDueConfig must return the raw backend object so that
+  // `rentBillingMode` is preserved (see RentDueConfigDTO).
   useEffect(() => {
     if (rooms.length === 0) return;
     let cancelled = false;
@@ -917,11 +995,10 @@ const RentPage = () => {
         room?.id
       );
 
-      // NEW: a tenant who checks in AFTER the selected month wasn't living
+      // A tenant who checks in AFTER the selected month wasn't living
       // here yet, so no rent/EB row is shown for that month — unless a Rent
       // record was already generated for it (that record stays the source
-      // of truth). This is what removed the July rows for tenants who only
-      // joined in August.
+      // of truth).
       if (!rentRecord && checkedInAfterMonth(tenant?.checkInDate, month, year)) {
         return null;
       }
@@ -976,7 +1053,8 @@ const RentPage = () => {
       }
 
       // Uses the tenant's own monthlyRent (falls back to the room's default
-      // only if unset), pro-rated for the check-in month.
+      // only if unset). Calendar hostels pro-rate the check-in month;
+      // joining-date-cycle hostels bill the full cycle rent.
       const rentPerBed = resolveTenantRent(Number(b.tenantId), room);
 
       const recordTotal  = rentRecord ? Number(rentRecord.totalAmount  || 0) : 0;
@@ -1040,6 +1118,11 @@ const RentPage = () => {
           return flatBill?.flatNumber ?? String(room.flatId);
         })();
 
+      // NEW: joining-date-cycle hostels can't bill a cycle that hasn't started.
+      const cyclePreview = !rentRecord ? getCyclePreview(Number(b.tenantId), room) : null;
+      const generateBlockedReason =
+        cyclePreview && !cyclePreview.billable ? cyclePreview.reason : undefined;
+
       return {
         tenantId:      b.tenantId,
         tenantName:    b.tenantName ?? resolveTenantName(Number(b.tenantId)),
@@ -1065,6 +1148,7 @@ const RentPage = () => {
         // settlement) so "Generate" bills the same combined figure shown.
         amount:        displayEB,
         paymentStatus: rentRecord?.paymentStatus,
+        generateBlockedReason,
       };
       })
       .filter((r): r is RentRow => r !== null);
@@ -1379,6 +1463,10 @@ const RentPage = () => {
     if (isFuturePeriod) {
       return toast.error(`Rent can't be generated for ${MONTHS[month - 1]} ${year} — that month hasn't started yet`);
     }
+    // NEW: joining-date-cycle hostel whose cycle hasn't started yet.
+    if (bill.generateBlockedReason) {
+      return toast.error(bill.generateBlockedReason);
+    }
     let room = getRoomObj(bill.roomNumber);
     if (!room) {
       const tenant = tenants.find((t) => Number(t.id) === bill.tenantId);
@@ -1407,8 +1495,9 @@ const RentPage = () => {
       });
       toast.success(`Rent generated for ${bill.tenantName}`);
       reload();
-    } catch {
-      toast.error("Failed to generate rent");
+    } catch (e: any) {
+      // The server rejects cycles that are before joining / not started yet.
+      toast.error(e?.response?.data?.message || "Failed to generate rent");
     }
   };
 
@@ -1417,6 +1506,10 @@ const RentPage = () => {
       return toast.error(`Rent can't be generated for ${MONTHS[month - 1]} ${year} — that month hasn't started yet`);
     }
     if (!confirm("Generate rent for all tenants?")) return;
+
+    // NEW: tenants skipped because their joining-date cycle hasn't started.
+    let skippedCycle = 0;
+
     const billsToGenerate = ebBills.filter((bill) => {
       const bAny = bill as any;
       let room = getRoomObj(bill.roomNumber);
@@ -1424,10 +1517,20 @@ const RentPage = () => {
         const tenant = tenants.find((t) => Number(t.id) === Number(bAny.tenantId));
         if (tenant) room = getRoomById(tenant.roomId);
       }
-      // NEW: never generate for a tenant who checks in after the selected month.
+      // Never generate for a tenant who checks in after the selected month.
       const billTenant = bAny.tenantId != null ? tenantMap.get(Number(bAny.tenantId)) : undefined;
       if (checkedInAfterMonth(billTenant?.checkInDate, month, year)) return false;
-      return !getRentStatus(bAny.tenantId, bill.roomNumber, room?.id);
+      if (getRentStatus(bAny.tenantId, bill.roomNumber, room?.id)) return false;
+
+      // NEW: skip (don't fail the batch for) cycles that haven't started.
+      if (bAny.tenantId != null) {
+        const cyc = getCyclePreview(Number(bAny.tenantId), room);
+        if (cyc && !cyc.billable) {
+          skippedCycle++;
+          return false;
+        }
+      }
+      return true;
     });
 
     // Tenant IDs whose checkout settlement gets folded into their
@@ -1436,7 +1539,8 @@ const RentPage = () => {
     const mergedInformationalTenantIds = new Set<number>();
 
     try {
-      await Promise.all(
+      // allSettled: one tenant failing must not abort the rest of the batch.
+      const results = await Promise.allSettled(
         billsToGenerate.map(async (bill) => {
           const b = bill as any;
           let room = getRoomObj(bill.roomNumber);
@@ -1483,6 +1587,7 @@ const RentPage = () => {
           });
         })
       );
+      const failed = results.filter((r) => r.status === "rejected").length;
 
       // "Generate All" is driven off ebBills, which never includes a
       // checked-out tenant's informational reading. Sweep those in as a
@@ -1525,7 +1630,14 @@ const RentPage = () => {
         })
       );
 
-      toast.success("All rents generated");
+      const notes: string[] = [];
+      if (skippedCycle > 0) notes.push(`${skippedCycle} skipped (cycle not started)`);
+      if (failed > 0) notes.push(`${failed} failed`);
+      if (notes.length > 0) {
+        toast.warning(`Rents generated — ${notes.join(", ")}`);
+      } else {
+        toast.success("All rents generated");
+      }
       reload();
     } catch {
       toast.error("Failed generating rents");
@@ -1587,6 +1699,16 @@ const RentPage = () => {
   // the numbered page list below.
   const totalPages = Math.max(1, Math.ceil(rowData.length / pageSize));
 
+  // Go back to page 1 whenever a filter changes, and never sit on a page
+  // that no longer exists (e.g. after the row count shrinks).
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [selectedBranch, selectedRoom, month, year, search]);
+
+  useEffect(() => {
+    if (currentPage > totalPages - 1) setCurrentPage(totalPages - 1);
+  }, [currentPage, totalPages]);
+
   // Windowed list of 1-indexed page numbers with "..." collapsing for
   // longer runs — e.g. [1, 2, 3, 4, '...', 53].
   const getPageNumbers = (current: number, total: number): (number | "...")[] => {
@@ -1616,7 +1738,9 @@ const RentPage = () => {
 
         .rt-header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
         .rt-title { font-size: 24px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-        .rt-subtitle { font-size: 13px; color: #64748b; font-weight: 500; }
+        /* A11Y: all #64748b / #94a3b8 greys below were bumped to #475569 or
+           #64748b-on-white so they clear the 4.5:1 contrast ratio. */
+        .rt-subtitle { font-size: 13px; color: #475569; font-weight: 500; }
 
         .rt-layout { display: flex; flex-direction: column; gap: 24px; align-items: stretch; }
         @media (min-width: 1536px) { .rt-layout { flex-direction: row; } .rt-content { flex: 1; min-width: 0; } .rt-sidebar { width: 340px; flex-shrink: 0; } }
@@ -1626,40 +1750,41 @@ const RentPage = () => {
         .rt-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; }
 
         .rt-table { width: 100%; border-collapse: collapse; min-width: 1300px; }
-        .rt-table th { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
+        .rt-table th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
         .rt-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
         .rt-table tr:hover { background: #fdfcff; }
+        .rt-empty { color: #475569; }
 
         .rt-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-right: 12px; flex-shrink: 0; }
         .rt-tenant-name { font-size: 13px; font-weight: 600; color: #0f172a; }
-        .rt-tenant-phone { font-size: 11px; color: #64748b; margin-top: 2px; }
+        .rt-tenant-phone { font-size: 11px; color: #475569; margin-top: 2px; }
 
         .rt-room { font-size: 13px; font-weight: 600; color: #0f172a; }
         .rt-room-type { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 4px; }
         .rt-branch { font-size: 13px; font-weight: 500; color: #0f172a; }
-        .rt-branch-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+        .rt-branch-sub { font-size: 11px; color: #475569; margin-top: 2px; }
         .rt-value { font-size: 13px; font-weight: 600; color: #0f172a; }
-        .rt-value.muted { color: #94a3b8; font-weight: 500; }
+        .rt-value.muted { color: #64748b; font-weight: 500; }
         .rt-date { font-size: 13px; font-weight: 500; color: #475569; }
 
         .rt-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #fff; }
         .rt-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
-        .rt-status.paid { color: #16a34a; }
-        .rt-status.paid::before { background: #16a34a; }
-        .rt-status.pending { color: #f97316; }
-        .rt-status.pending::before { background: #f97316; }
-        .rt-status.overdue { color: #e11d48; }
-        .rt-status.overdue::before { background: #e11d48; }
-        .rt-status.not-due { color: #3b82f6; }
-        .rt-status.not-due::before { background: #3b82f6; }
-        .rt-status.ungenerated { color: #64748b; }
-        .rt-status.ungenerated::before { background: #64748b; }
+        .rt-status.paid { color: #15803d; }
+        .rt-status.paid::before { background: #15803d; }
+        .rt-status.pending { color: #c2410c; }
+        .rt-status.pending::before { background: #c2410c; }
+        .rt-status.overdue { color: #be123c; }
+        .rt-status.overdue::before { background: #be123c; }
+        .rt-status.not-due { color: #1d4ed8; }
+        .rt-status.not-due::before { background: #1d4ed8; }
+        .rt-status.ungenerated { color: #475569; }
+        .rt-status.ungenerated::before { background: #475569; }
 
         /* EB-balance badges for daily-stay tenants */
         .rt-eb-badge { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 20px; display: inline-block; }
-        .rt-eb-badge.refund { color: #16a34a; background: #f0fdf4; }
-        .rt-eb-badge.due    { color: #e11d48; background: #fef2f2; }
-        .rt-eb-badge.even   { color: #64748b; background: #f8fafc; }
+        .rt-eb-badge.refund { color: #15803d; background: #f0fdf4; }
+        .rt-eb-badge.due    { color: #be123c; background: #fef2f2; }
+        .rt-eb-badge.even   { color: #475569; background: #f8fafc; }
 
         .rt-chart-container { padding: 20px; display: flex; flex-direction: column; align-items: center; position: relative; }
 
@@ -1671,20 +1796,21 @@ const RentPage = () => {
         .rt-page-btn {
           width: 32px; height: 32px; min-width: 32px; border-radius: 6px;
           border: 1px solid #e2e8f0; display: flex; align-items: center;
-          justify-content: center; color: #64748b; background: #fff;
+          justify-content: center; color: #475569; background: #fff;
           font-weight: 500; font-size: 14px; cursor: pointer;
         }
         .rt-page-btn:hover:not(:disabled) { background: #f8fafc; }
+        .rt-page-btn:focus-visible { outline: 2px solid #5200FF; outline-offset: 2px; }
         .rt-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .rt-page-btn.active { background: #5200FF; border-color: #5200FF; color: #fff; }
-        .rt-page-ellipsis { cursor: default; color: #94a3b8; }
+        .rt-page-ellipsis { cursor: default; color: #64748b; }
       `}</style>
 
       <div className="rt-wrap">
         <div className="rt-header">
           <div>
             <h1 className="rt-title">Rent Management</h1>
-            <p className="rt-subtitle">Home <ChevronRight size={12} className="inline opacity-50" /> Rent</p>
+            <p className="rt-subtitle">Home <ChevronRight size={12} className="inline opacity-50" aria-hidden="true" /> Rent</p>
           </div>
         </div>
 
@@ -1692,7 +1818,7 @@ const RentPage = () => {
           <div>
             <div className="rt-panel">
               <div className="rt-panel-header">
-                <div className="rt-panel-title">Rent Collection</div>
+                <h2 className="rt-panel-title">Rent Collection</h2>
                 <div className="flex gap-2">
                   {hasAccess && (
                     <Button size="sm" className="h-8 bg-[#5200FF] hover:bg-[#4200cc] text-white" onClick={handleGenerateAll}>
@@ -1702,10 +1828,13 @@ const RentPage = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 p-4 border-b border-[#f1f5f9] bg-white flex-wrap">
+              <div className="rent-mobile-filters flex items-center gap-3 p-4 border-b border-[#f1f5f9] bg-white flex-wrap">
                 <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[150px]">
                   <Select value={selectedBranch} onValueChange={(v) => { setSelectedBranch(v); setSelectedRoom("all"); }} disabled={!hasAccess || (role !== "ADMIN" && role !== "SUPER_ADMIN")}>
-                    <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                    {/* A11Y: Radix renders each trigger as a <button role="combobox">
+                        with no text label of its own, which Lighthouse flags as
+                        "Buttons do not have an accessible name". */}
+                    <SelectTrigger aria-label="Filter by branch" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                       <SelectValue placeholder="All Branches" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1722,7 +1851,7 @@ const RentPage = () => {
                     value={selectedRoom}
                     onValueChange={setSelectedRoom}
                   >
-                    <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                    <SelectTrigger aria-label="Filter by room" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                       <SelectValue placeholder="All Rooms" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1736,7 +1865,7 @@ const RentPage = () => {
 
                 <div className="flex items-center bg-white border border-[#e2e8f0] rounded-md h-9 w-[130px] px-0">
                    <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
-                    <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                    <SelectTrigger aria-label="Filter by month" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1763,7 +1892,7 @@ const RentPage = () => {
                       if (y === currentYear && month > currentMonth) setMonth(currentMonth);
                     }}
                   >
-                    <SelectTrigger className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
+                    <SelectTrigger aria-label="Filter by year" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1775,18 +1904,20 @@ const RentPage = () => {
                 </div>
 
                 <div className="flex bg-white border border-[#e2e8f0] rounded-md h-9 px-3 w-[200px] items-center">
-                  <Search size={14} className="text-slate-400 mr-2" />
+                  <Search size={14} className="text-slate-500 mr-2" aria-hidden="true" />
                   <input
                     type="text"
                     placeholder="Search tenant or room..."
+                    aria-label="Search tenant or room"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="border-0 bg-transparent outline-none text-sm w-full font-medium text-slate-600 placeholder:font-normal"
+                    className="border-0 bg-transparent outline-none text-sm w-full font-medium text-slate-600 placeholder:font-normal placeholder:text-slate-500"
                   />
                 </div>
 
                 <button
-                  className="flex items-center gap-1.5 text-sm text-[#64748b] font-medium hover:text-[#0f172a] ml-auto"
+                  type="button"
+                  className="flex items-center gap-1.5 text-sm text-[#475569] font-medium hover:text-[#0f172a] ml-auto"
                   onClick={() => {
                     setSelectedBranch(role !== "ADMIN" && branchId ? String(branchId) : "all");
                     setSelectedRoom("all");
@@ -1795,31 +1926,32 @@ const RentPage = () => {
                     setYear(new Date().getFullYear());
                   }}
                 >
-                  <RefreshCw size={14} /> Clear Filters
+                  <RefreshCw size={14} aria-hidden="true" /> Clear Filters
                 </button>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="rt-table">
+                  <caption className="sr-only">Rent collection for {MONTHS[month - 1]} {year}</caption>
                   <thead>
                     <tr>
-                      <th>TENANT</th>
-                      <th>ROOM</th>
-                      <th>BRANCH</th>
-                      <th>RENT (₹)</th>
-                      <th>EB (₹)</th>
-                      <th>DAMAGE (₹)</th>
-                      <th>DUE (₹)</th>
-                      <th>EB BALANCE</th>
-                      <th>TOTAL (₹)</th>
-                      <th>STATUS</th>
-                      <th>PENDING (₹)</th>
-                      <th>ACTIONS</th>
+                      <th scope="col">TENANT</th>
+                      <th scope="col">ROOM</th>
+                      <th scope="col">BRANCH</th>
+                      <th scope="col">RENT (₹)</th>
+                      <th scope="col">EB (₹)</th>
+                      <th scope="col">DAMAGE (₹)</th>
+                      <th scope="col">DUE (₹)</th>
+                      <th scope="col">EB BALANCE</th>
+                      <th scope="col">TOTAL (₹)</th>
+                      <th scope="col">STATUS</th>
+                      <th scope="col">PENDING (₹)</th>
+                      <th scope="col">ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedRows.length === 0 ? (
-                      <tr><td colSpan={12} className="text-center py-12 text-slate-400">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
+                      <tr><td colSpan={12} className="text-center py-12 rt-empty">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
                     ) : (
                       paginatedRows.map((row, i) => {
                         // Daily-stay tenants who haven't had a Rent record
@@ -1847,7 +1979,9 @@ const RentPage = () => {
                         }
 
                         const initials = row.tenantName.substring(0, 2).toUpperCase();
-                        const colors = ['bg-indigo-100 text-indigo-600', 'bg-emerald-100 text-emerald-600', 'bg-rose-100 text-rose-600', 'bg-amber-100 text-amber-600'];
+                        // A11Y: the -600 text shades on -100 backgrounds were under
+                        // 4.5:1 (emerald/rose/amber especially); darker shades used.
+                        const colors = ['bg-indigo-100 text-indigo-700', 'bg-emerald-100 text-emerald-700', 'bg-rose-100 text-rose-700', 'bg-amber-100 text-amber-800'];
                         const avatarClass = colors[i % colors.length];
 
                         const roomObj = getRoomObj(row.roomNumber) || getRoomById(row.rentRecord?.roomId ?? 0);
@@ -1857,7 +1991,7 @@ const RentPage = () => {
                           <tr key={row.tenantId + "-" + row.roomNumber}>
                             <td>
                               <div className="flex items-center">
-                                <div className={`rt-avatar ${avatarClass}`}>{initials}</div>
+                                <div className={`rt-avatar ${avatarClass}`} aria-hidden="true">{initials}</div>
                                 <div>
                                   <div className="rt-tenant-name">{row.tenantName}</div>
                                   <div className="rt-tenant-phone">{row.tenantPhone}</div>
@@ -1866,7 +2000,7 @@ const RentPage = () => {
                             </td>
                             <td>
                               <div className="rt-room">{row.roomNumber}</div>
-                              <div className={`rt-room-type ${isAc ? 'bg-green-100 text-green-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                              <div className={`rt-room-type ${isAc ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-700'}`}>
                                 {isAc ? 'AC' : 'Non-AC'}
                               </div>
                             </td>
@@ -1876,13 +2010,26 @@ const RentPage = () => {
 
                             <td>
                               <span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.rentPerBed))}</span>
-                              {/* For the tenant's check-in month, show the pro-ration
-                                  (occupied days / days in that month) behind the rent figure. */}
+                              {/* Sub-label behind the rent figure:
+                                  • JOINING_DATE_CYCLE hostel → the billing cycle's dates
+                                  • CALENDAR_MONTH hostel     → pro-ration for the check-in month */}
                               {!row.isDaily && (() => {
+                                const cyc = getCyclePreview(row.tenantId, roomObj);
+                                if (cyc) {
+                                  if (!cyc.start || !cyc.end) return null;
+                                  return (
+                                    <div
+                                      className="text-[10px] text-indigo-700 mt-0.5"
+                                      title={`Joining-date cycle · ${cyc.days} days · full monthly rent`}
+                                    >
+                                      {fmtDate(cyc.start)} → {fmtDate(cyc.end)}
+                                    </div>
+                                  );
+                                }
                                 const breakdown = resolveTenantRentBreakdown(row.tenantId, roomObj);
                                 if (!breakdown.proRated) return null;
                                 return (
-                                  <div className="text-[10px] text-indigo-500 mt-0.5" title={`Check-in ${breakdown.checkInDate ?? ""} · Daily rent ₹${breakdown.dailyRent.toFixed(2)}`}>
+                                  <div className="text-[10px] text-indigo-700 mt-0.5" title={`Check-in ${breakdown.checkInDate ?? ""} · Daily rent ₹${breakdown.dailyRent.toFixed(2)}`}>
                                     Pro-rated: {breakdown.occupiedDays}/{breakdown.daysInMonth} days
                                   </div>
                                 );
@@ -1902,10 +2049,10 @@ const RentPage = () => {
                                   (i.e. FIXED_DUE with overdue days). */}
                               {(row.dueAmount ?? 0) > 0 ? (
                                 <>
-                                  <span className="rt-value text-rose-600">
+                                  <span className="rt-value text-rose-700">
                                     {new Intl.NumberFormat('en-IN').format(Math.round(row.dueAmount ?? 0))}
                                   </span>
-                                  <div className="text-[10px] text-rose-500 mt-0.5">
+                                  <div className="text-[10px] text-rose-700 mt-0.5">
                                     {row.dueDays} day{row.dueDays === 1 ? "" : "s"} × ₹{new Intl.NumberFormat('en-IN').format(row.duePerDay ?? 0)}
                                   </div>
                                 </>
@@ -1946,30 +2093,35 @@ const RentPage = () => {
                 </table>
               </div>
 
-              <div className="flex items-center justify-between px-5 py-4 border-t border-[#f1f5f9]">
-                <div className="text-[13px] text-[#64748b]">
+              <div className="rent-mobile-pagination flex items-center justify-between px-5 py-4 border-t border-[#f1f5f9]">
+                <div className="text-[13px] text-[#475569]" aria-live="polite">
                   Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to {Math.min((currentPage + 1) * pageSize, rowData.length)} of {rowData.length} records
                 </div>
                 {/* Numbered pagination row (1 2 3 … n). Prev/Next stay on
                     either end and disable correctly at the first/last page. */}
-                <div className="flex gap-2 rt-page-row">
+                <nav aria-label="Pagination" className="flex gap-2 rt-page-row">
                   <button
+                    type="button"
                     className="rt-page-btn"
+                    aria-label="Previous page"
                     disabled={currentPage === 0}
                     onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                   >
-                    &#8249;
+                    <span aria-hidden="true">&#8249;</span>
                   </button>
 
                   {pageNumbers.map((p, idx) =>
                     p === "..." ? (
-                      <span key={`ellipsis-${idx}`} className="rt-page-btn rt-page-ellipsis">
+                      <span key={`ellipsis-${idx}`} className="rt-page-btn rt-page-ellipsis" aria-hidden="true">
                         <MoreHorizontal size={14} />
                       </span>
                     ) : (
                       <button
+                        type="button"
                         key={p}
                         className={`rt-page-btn ${p === currentPage + 1 ? "active" : ""}`}
+                        aria-label={`Page ${p}`}
+                        aria-current={p === currentPage + 1 ? "page" : undefined}
                         onClick={() => setCurrentPage(p - 1)}
                       >
                         {p}
@@ -1978,13 +2130,15 @@ const RentPage = () => {
                   )}
 
                   <button
+                    type="button"
                     className="rt-page-btn"
+                    aria-label="Next page"
                     disabled={currentPage + 1 >= totalPages}
                     onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                   >
-                    &#8250;
+                    <span aria-hidden="true">&#8250;</span>
                   </button>
-                </div>
+                </nav>
               </div>
             </div>
           </div>

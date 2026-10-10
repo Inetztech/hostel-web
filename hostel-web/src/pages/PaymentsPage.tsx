@@ -57,20 +57,20 @@ const fmtDateTime = (v?: string | null) => {
 
 const StatusPill = ({ status }: { status: string }) => {
   if (status === "APPROVED")
-    return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 gap-1 rounded-full"><CheckCircle2 className="h-3 w-3" /> Approved</Badge>;
+    return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 gap-1 rounded-full"><CheckCircle2 className="h-3 w-3" aria-hidden="true" /> Approved</Badge>;
   if (status === "REJECTED")
-    return <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 gap-1 rounded-full"><XCircle className="h-3 w-3" /> Rejected</Badge>;
-  return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 gap-1 rounded-full"><Clock className="h-3 w-3" /> Pending Review</Badge>;
+    return <Badge className="bg-rose-100 text-rose-800 hover:bg-rose-100 gap-1 rounded-full"><XCircle className="h-3 w-3" aria-hidden="true" /> Rejected</Badge>;
+  return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 gap-1 rounded-full"><Clock className="h-3 w-3" aria-hidden="true" /> Pending Review</Badge>;
 };
 
 const ProofThumb = ({ path }: { path?: string }) => {
-  if (!path) return <span className="text-xs text-muted-foreground">—</span>;
+  if (!path) return <span className="text-xs text-slate-600">—</span>;
   const url = `${getApiOrigin()}${path}`;
   const isPdf = path.toLowerCase().endsWith(".pdf");
   return (
     <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
-      {isPdf ? <ImageIcon className="h-3.5 w-3.5" /> : (
-        <img src={url} alt="proof" className="h-9 w-9 rounded-lg object-cover border" />
+      {isPdf ? <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" /> : (
+        <img src={url} alt="" className="h-9 w-9 rounded-lg object-cover border" />
       )}
       View proof
     </a>
@@ -187,7 +187,7 @@ const ReceiptPreviewDialog = ({
       <DialogContent className="sm:max-w-md rounded-[28px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ReceiptIcon className="h-4 w-4 text-primary" /> Payment Receipt
+            <ReceiptIcon className="h-4 w-4 text-primary" aria-hidden="true" /> Payment Receipt
           </DialogTitle>
           <DialogDescription>Receipt {receiptNo} · {MONTHS[payment.rentMonth - 1]} {payment.rentYear}</DialogDescription>
         </DialogHeader>
@@ -196,57 +196,58 @@ const ReceiptPreviewDialog = ({
           <div className="flex items-center justify-between px-4 py-3 bg-[#0f1117] text-white">
             <div className="flex items-center gap-2">
               <div className="h-8 w-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
-                <Building2 className="h-4 w-4 text-blue-400" />
+                <Building2 className="h-4 w-4 text-blue-400" aria-hidden="true" />
               </div>
               <div>
                 <p className="text-xs font-semibold leading-none">Hostel HMS</p>
-                <p className="text-[10px] text-white/40 mt-0.5">Management System</p>
+                {/* A11Y: was text-white/40 (too faint on the dark header). */}
+                <p className="text-[10px] text-white/70 mt-0.5">Management System</p>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-[9.5px] uppercase tracking-wide text-white/40">Receipt No.</p>
+              <p className="text-[9.5px] uppercase tracking-wide text-white/70">Receipt No.</p>
               <p className="text-xs font-semibold">{receiptNo}</p>
             </div>
           </div>
 
           <div className="px-4 py-2.5 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-            <span className="text-xs font-semibold text-emerald-700">Payment Verified &amp; Approved</span>
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" />
+            <span className="text-xs font-semibold text-emerald-800">Payment Verified &amp; Approved</span>
           </div>
 
           <div className="px-5 py-5">
             <div className="text-center pb-4 mb-4 border-b border-dashed">
-              <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Amount Paid</p>
+              <p className="text-[10.5px] uppercase tracking-wider text-slate-600">Amount Paid</p>
               <p className="text-3xl font-extrabold mt-1">{fmt(payment.amount)}</p>
             </div>
 
             <dl className="space-y-2.5 text-sm">
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Tenant Name</dt>
+                <dt className="text-slate-600">Tenant Name</dt>
                 <dd className="font-medium text-right">{payment.tenantName ?? "—"}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Phone Number</dt>
+                <dt className="text-slate-600">Phone Number</dt>
                 <dd className="font-medium text-right">{payment.tenantPhone ?? "—"}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Room / Branch</dt>
+                <dt className="text-slate-600">Room / Branch</dt>
                 <dd className="font-medium text-right">{payment.roomNumber ?? "—"}{payment.branchName ? ` · ${payment.branchName}` : ""}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Payment Mode</dt>
+                <dt className="text-slate-600">Payment Mode</dt>
                 <dd className="font-medium">{payment.paymentMode ?? "—"}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Transaction ID</dt>
+                <dt className="text-slate-600">Transaction ID</dt>
                 <dd className="font-mono text-xs">{payment.transactionId ?? "—"}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Submitted On</dt>
+                <dt className="text-slate-600">Submitted On</dt>
                 <dd className="font-medium text-xs">{fmtDateTime(payment.submittedAt)}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Verified On</dt>
+                <dt className="text-slate-600">Verified On</dt>
                 <dd className="font-medium text-xs">{fmtDateTime(payment.verifiedAt)}</dd>
               </div>
             </dl>
@@ -256,7 +257,7 @@ const ReceiptPreviewDialog = ({
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" className="rounded-xl" onClick={onClose}>Close</Button>
           <Button onClick={() => downloadReceiptPdf(payment)} className="gap-2 rounded-xl">
-            <Download className="h-4 w-4" /> Save as PDF
+            <Download className="h-4 w-4" aria-hidden="true" /> Save as PDF
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -360,13 +361,15 @@ const TenantPayments = () => {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="payment-mobile-header flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl font-semibold">Payments</h1>
-          <p className="text-sm text-muted-foreground">Pay your rent &amp; EB dues and track your payment history</p>
+          {/* A11Y: text-muted-foreground on the #f8fafc page background was
+              flagged by Lighthouse; text-slate-600 passes 4.5:1. */}
+          <p className="text-sm text-slate-600">Pay your rent &amp; EB dues and track your payment history</p>
         </div>
         <Button onClick={() => openPay()} disabled={dueRents.length === 0} className="gap-2 rounded-xl">
-          <CreditCard className="h-4 w-4" /> Pay Now
+          <CreditCard className="h-4 w-4" aria-hidden="true" /> Pay Now
         </Button>
       </div>
 
@@ -381,7 +384,7 @@ const TenantPayments = () => {
 
       <Card className="p-0 overflow-hidden mb-8 rounded-[24px]">
         <div className="px-5 py-3 border-b flex items-center gap-2">
-          <IndianRupee className="h-4 w-4 text-muted-foreground" />
+          <IndianRupee className="h-4 w-4 text-slate-600" aria-hidden="true" />
           <h2 className="text-sm font-semibold">Pending Dues</h2>
         </div>
         <Table>
@@ -396,17 +399,25 @@ const TenantPayments = () => {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="text-center text-slate-600 py-8">Loading…</TableCell></TableRow>
             ) : dueRents.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">You're all caught up — no dues pending</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="text-center text-slate-600 py-8">You're all caught up — no dues pending</TableCell></TableRow>
             ) : dueRents.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">{MONTHS[r.rentMonth - 1]} {r.rentYear}</TableCell>
                 <TableCell>{fmt(r.totalAmount)}</TableCell>
-                <TableCell className="text-emerald-600">{fmt(r.paidAmount)}</TableCell>
-                <TableCell className="text-rose-600 font-semibold">{fmt(r.pendingAmount)}</TableCell>
+                <TableCell className="text-emerald-700">{fmt(r.paidAmount)}</TableCell>
+                <TableCell className="text-rose-700 font-semibold">{fmt(r.pendingAmount)}</TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="outline" className="rounded-lg" onClick={() => openPay(r.id)}>Pay</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-lg"
+                    aria-label={`Pay dues for ${MONTHS[r.rentMonth - 1]} ${r.rentYear}`}
+                    onClick={() => openPay(r.id)}
+                  >
+                    Pay
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -416,7 +427,7 @@ const TenantPayments = () => {
 
       <Card className="p-0 overflow-hidden rounded-[24px]">
         <div className="px-5 py-3 border-b flex items-center gap-2">
-          <History className="h-4 w-4 text-muted-foreground" />
+          <History className="h-4 w-4 text-slate-600" aria-hidden="true" />
           <h2 className="text-sm font-semibold">My Payment History</h2>
         </div>
         <Table>
@@ -434,9 +445,9 @@ const TenantPayments = () => {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-slate-600 py-8">Loading…</TableCell></TableRow>
             ) : history.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No payments submitted yet</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-slate-600 py-8">No payments submitted yet</TableCell></TableRow>
             ) : history.map((h) => (
               <TableRow key={h.id}>
                 <TableCell className="font-medium">{MONTHS[h.rentMonth - 1]} {h.rentYear}</TableCell>
@@ -447,22 +458,23 @@ const TenantPayments = () => {
                 <TableCell>
                   <StatusPill status={h.status} />
                   {h.status === "REJECTED" && h.remarks && (
-                    <div className="text-xs text-rose-500 mt-1 max-w-[180px]">{h.remarks}</div>
+                    <div className="text-xs text-rose-700 mt-1 max-w-[180px]">{h.remarks}</div>
                   )}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">{new Date(h.submittedAt).toLocaleString()}</TableCell>
+                <TableCell className="text-xs text-slate-600">{new Date(h.submittedAt).toLocaleString()}</TableCell>
                 <TableCell className="text-right">
                   {h.status === "APPROVED" ? (
                     <Button
                       size="sm"
                       variant="outline"
                       className="gap-1.5 rounded-lg"
+                      aria-label={`View receipt for ${MONTHS[h.rentMonth - 1]} ${h.rentYear}`}
                       onClick={() => setReceiptTarget(h)}
                     >
-                      <ReceiptIcon className="h-3.5 w-3.5" /> Receipt
+                      <ReceiptIcon className="h-3.5 w-3.5" aria-hidden="true" /> Receipt
                     </Button>
                   ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
+                    <span className="text-xs text-slate-600">—</span>
                   )}
                 </TableCell>
               </TableRow>
@@ -488,7 +500,7 @@ const TenantPayments = () => {
                 const target = dueRents.find((r) => String(r.id) === v);
                 setAmount(target ? String(Math.round(target.pendingAmount ?? 0)) : "");
               }}>
-                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select month" /></SelectTrigger>
+                <SelectTrigger aria-label="Which month are you paying for" className="rounded-xl"><SelectValue placeholder="Select month" /></SelectTrigger>
                 <SelectContent className="rounded-xl">
                   {dueRents.map((r) => (
                     <SelectItem key={r.id} value={String(r.id)}>
@@ -501,13 +513,13 @@ const TenantPayments = () => {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Amount (₹)</Label>
-                <Input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} className="rounded-xl" />
+                <Label htmlFor="pay-amount">Amount (₹)</Label>
+                <Input id="pay-amount" type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} className="rounded-xl" />
               </div>
               <div className="space-y-1.5">
                 <Label>Payment Mode</Label>
                 <Select value={mode} onValueChange={(v) => setMode(v as "CASH" | "UPI")}>
-                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Payment mode" className="rounded-xl"><SelectValue /></SelectTrigger>
                   <SelectContent className="rounded-xl">
                     <SelectItem value="UPI">UPI</SelectItem>
                     <SelectItem value="CASH">Cash</SelectItem>
@@ -517,16 +529,16 @@ const TenantPayments = () => {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Transaction / UTR ID (optional)</Label>
-              <Input value={txnId} onChange={(e) => setTxnId(e.target.value)} placeholder="e.g. UPI reference number" className="rounded-xl" />
+              <Label htmlFor="pay-txn">Transaction / UTR ID (optional)</Label>
+              <Input id="pay-txn" value={txnId} onChange={(e) => setTxnId(e.target.value)} placeholder="e.g. UPI reference number" className="rounded-xl" />
             </div>
 
             <div className="space-y-1.5">
               <Label>Payment Proof (screenshot / receipt)</Label>
-              <label className="flex items-center gap-2 border border-dashed rounded-xl px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors text-sm text-muted-foreground">
-                <Upload className="h-4 w-4" />
+              <label className="flex items-center gap-2 border border-dashed rounded-xl px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors text-sm text-slate-600">
+                <Upload className="h-4 w-4" aria-hidden="true" />
                 {file ? file.name : "Click to upload JPG, PNG or PDF (max 10MB)"}
-                <input type="file" accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf" className="hidden"
+                <input type="file" accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf" className="sr-only"
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
               </label>
             </div>
@@ -637,16 +649,30 @@ const ApproverPayments = () => {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="payment-verification-header flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl font-semibold">Payment Verification</h1>
-          <p className="text-sm text-muted-foreground">Review tenant-submitted payments and proof documents</p>
+          {/* A11Y: this is the exact element Lighthouse flagged
+              (text-muted-foreground on the #f8fafc page background). */}
+          <p className="text-sm text-slate-600">Review tenant-submitted payments and proof documents</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant={tab === "pending" ? "default" : "outline"} size="sm" className="rounded-xl" onClick={() => setTab("pending")}>
+        <div className="payment-mobile-tabs flex gap-2">
+          <Button
+            variant={tab === "pending" ? "default" : "outline"}
+            size="sm"
+            className="rounded-xl"
+            aria-pressed={tab === "pending"}
+            onClick={() => setTab("pending")}
+          >
             Pending ({pendingTotal})
           </Button>
-          <Button variant={tab === "all" ? "default" : "outline"} size="sm" className="rounded-xl" onClick={() => setTab("all")}>
+          <Button
+            variant={tab === "all" ? "default" : "outline"}
+            size="sm"
+            className="rounded-xl"
+            aria-pressed={tab === "all"}
+            onClick={() => setTab("all")}
+          >
             All Transactions ({allTotal})
           </Button>
         </div>
@@ -669,15 +695,15 @@ const ApproverPayments = () => {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="text-center text-slate-600 py-8">Loading…</TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+              <TableRow><TableCell colSpan={9} className="text-center text-slate-600 py-8">
                 {tab === "pending" ? "No payments awaiting verification" : "No transactions yet"}
               </TableCell></TableRow>
             ) : rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">{r.tenantName}</TableCell>
-                <TableCell className="text-muted-foreground">{r.roomNumber ?? "—"} {r.branchName ? `· ${r.branchName}` : ""}</TableCell>
+                <TableCell className="text-slate-600">{r.roomNumber ?? "—"} {r.branchName ? `· ${r.branchName}` : ""}</TableCell>
                 <TableCell>{MONTHS[r.rentMonth - 1]} {r.rentYear}</TableCell>
                 <TableCell className="font-semibold">{fmt(r.amount)}</TableCell>
                 <TableCell>{r.paymentMode}</TableCell>
@@ -686,30 +712,49 @@ const ApproverPayments = () => {
                 <TableCell>
                   <StatusPill status={r.status} />
                   {r.status === "REJECTED" && r.remarks && (
-                    <div className="text-xs text-rose-500 mt-1 max-w-[180px]">{r.remarks}</div>
+                    <div className="text-xs text-rose-700 mt-1 max-w-[180px]">{r.remarks}</div>
                   )}
                   {r.status === "APPROVED" && r.verifiedByName && (
-                    <div className="text-xs text-muted-foreground mt-1">by {r.verifiedByName}</div>
+                    <div className="text-xs text-slate-600 mt-1">by {r.verifiedByName}</div>
                   )}
                 </TableCell>
                 <TableCell className="text-right space-x-2">
                   {tab === "pending" ? (
                     <>
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 rounded-lg" disabled={busyId === r.id}
-                        onClick={() => approve(r.id)}>
-                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
+                      {/* A11Y: emerald-600 with white text is below 4.5:1;
+                          emerald-700 passes. */}
+                      <Button
+                        size="sm"
+                        className="bg-emerald-700 hover:bg-emerald-800 rounded-lg"
+                        disabled={busyId === r.id}
+                        aria-label={`Approve payment from ${r.tenantName}`}
+                        onClick={() => approve(r.id)}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" aria-hidden="true" /> Approve
                       </Button>
-                      <Button size="sm" variant="destructive" className="rounded-lg" disabled={busyId === r.id}
-                        onClick={() => { setRejectTarget(r); setRemarks(""); }}>
-                        <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="rounded-lg"
+                        disabled={busyId === r.id}
+                        aria-label={`Reject payment from ${r.tenantName}`}
+                        onClick={() => { setRejectTarget(r); setRemarks(""); }}
+                      >
+                        <XCircle className="h-3.5 w-3.5 mr-1" aria-hidden="true" /> Reject
                       </Button>
                     </>
                   ) : r.status === "APPROVED" ? (
-                    <Button size="sm" variant="outline" className="gap-1.5 rounded-lg" onClick={() => setReceiptTarget(r)}>
-                      <ReceiptIcon className="h-3.5 w-3.5" /> Receipt
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 rounded-lg"
+                      aria-label={`View receipt for ${r.tenantName}, ${MONTHS[r.rentMonth - 1]} ${r.rentYear}`}
+                      onClick={() => setReceiptTarget(r)}
+                    >
+                      <ReceiptIcon className="h-3.5 w-3.5" aria-hidden="true" /> Receipt
                     </Button>
                   ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
+                    <span className="text-xs text-slate-600">—</span>
                   )}
                 </TableCell>
               </TableRow>
@@ -718,8 +763,8 @@ const ApproverPayments = () => {
         </Table>
 
         {!loading && total > 0 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t text-sm text-muted-foreground">
-            <span>
+          <nav aria-label="Pagination" className="flex items-center justify-between px-5 py-3 border-t text-sm text-slate-600">
+            <span aria-live="polite">
               Page {currentPage + 1} of {totalPages} · {total} total
             </span>
             <div className="flex gap-2">
@@ -730,7 +775,7 @@ const ApproverPayments = () => {
                 onClick={() => goToPage(currentPage - 1)}
                 className="gap-1 rounded-lg"
               >
-                <ChevronLeft className="h-3.5 w-3.5" /> Previous
+                <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" /> Previous
               </Button>
               <Button
                 size="sm"
@@ -739,10 +784,10 @@ const ApproverPayments = () => {
                 onClick={() => goToPage(currentPage + 1)}
                 className="gap-1 rounded-lg"
               >
-                Next <ChevronRight className="h-3.5 w-3.5" />
+                Next <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
               </Button>
             </div>
-          </div>
+          </nav>
         )}
       </Card>
 
@@ -756,7 +801,13 @@ const ApproverPayments = () => {
               Let {rejectTarget?.tenantName} know why this payment couldn't be verified.
             </DialogDescription>
           </DialogHeader>
-          <Textarea placeholder="Reason (e.g. amount mismatch, unreadable screenshot)…" value={remarks} onChange={(e) => setRemarks(e.target.value)} className="rounded-xl" />
+          <Textarea
+            aria-label="Reason for rejecting this payment"
+            placeholder="Reason (e.g. amount mismatch, unreadable screenshot)…"
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            className="rounded-xl"
+          />
           <DialogFooter className="gap-2 sm:gap-2">
             <Button variant="outline" className="rounded-xl" onClick={() => setRejectTarget(null)}>Cancel</Button>
             <Button variant="destructive" className="rounded-xl" onClick={confirmReject} disabled={busyId === rejectTarget?.id}>Reject Payment</Button>

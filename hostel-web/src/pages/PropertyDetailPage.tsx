@@ -51,7 +51,7 @@ const AMENITY_ICON: Record<string, string> = {
 };
 
 interface RoomType {
-  label: string;     
+  label: string;
   sharing: string;
   price: number;
   availableBeds: number;
@@ -140,6 +140,34 @@ export default function PropertyDetailPage() {
     };
   }, [id]);
 
+  // ── SEO: per-property <title> + meta description (SPA, so set at runtime) ──
+  useEffect(() => {
+    if (!hostel) return;
+    const prevTitle = document.title;
+    document.title = `${hostel.name} | Brindhavanam PG Hostels`;
+
+    let meta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    const created = !meta;
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.name = "description";
+      document.head.appendChild(meta);
+    }
+    const prevDesc = meta.content;
+    meta.content = (
+      hostel.description ||
+      `${hostel.name}${hostel.location ? " in " + hostel.location : ""} — view photos, room types and prices, and pre-register online.`
+    ).slice(0, 155);
+
+    return () => {
+      document.title = prevTitle;
+      if (meta) {
+        if (created) meta.remove();
+        else meta.content = prevDesc;
+      }
+    };
+  }, [hostel]);
+
   const gallery = useMemo(() => {
     if (!hostel) return [DEFAULT_IMAGE];
     // gallery already contains every uploaded photo (primary included) once
@@ -204,22 +232,25 @@ export default function PropertyDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
+      <main
+        className="min-h-screen flex flex-col items-center justify-center bg-slate-50/50 text-slate-500"
+        aria-busy="true"
+      >
         <span className="w-10 h-10 border-3 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
-        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
+        <span role="status" className="text-xs font-bold uppercase tracking-widest text-slate-600">
           Loading Property...
         </span>
-      </div>
+      </main>
     );
   }
 
   if (notFound || !hostel) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50/50 text-center px-6">
-        <p className="text-lg font-bold text-slate-800 mb-2">
+      <main className="min-h-screen flex flex-col items-center justify-center bg-slate-50/50 text-center px-6">
+        <h1 className="text-lg font-bold text-slate-800 mb-2">
           We couldn't find that property.
-        </p>
-        <p className="text-sm text-slate-500 mb-6">
+        </h1>
+        <p className="text-sm text-slate-600 mb-6">
           It may have been removed or the link is out of date.
         </p>
         <button
@@ -228,7 +259,7 @@ export default function PropertyDetailPage() {
         >
           Back to Properties
         </button>
-      </div>
+      </main>
     );
   }
 
@@ -236,294 +267,319 @@ export default function PropertyDetailPage() {
     <div className="min-h-screen bg-slate-50/50 font-['Outfit',sans-serif] text-slate-800">
       {/* ── Header ── */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-slate-200/80">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-3.5 group">
-            <div className="w-11 h-11 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-xl text-indigo-600 shadow-sm group-hover:scale-105 transition-transform">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2.5 sm:gap-3.5 group" aria-label="Brindhavanam home">
+            <div
+              className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-xl text-indigo-600 shadow-sm group-hover:scale-105 transition-transform"
+              aria-hidden="true"
+            >
               🏢
             </div>
-            <span className="text-2xl font-black tracking-tight text-slate-900">
+            <span className="text-lg sm:text-2xl font-black tracking-tight text-slate-900">
               Brindha<span className="text-indigo-600">vanam</span>
             </span>
           </Link>
           <button
             onClick={() => navigate("/login")}
-            className="px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-slate-900 hover:bg-indigo-600 text-white transition-all duration-300"
+            className="px-3.5 sm:px-6 py-2.5 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-wider bg-slate-900 hover:bg-indigo-600 text-white transition-all duration-300"
           >
             Portal Login
           </button>
         </div>
       </header>
 
-      {/* ── Breadcrumb ── */}
-      <div className="max-w-7xl mx-auto px-6 pt-6 text-xs font-semibold text-slate-400">
-        <Link to="/" className="hover:text-indigo-600 transition-colors">
-          Home
-        </Link>
-        <span className="mx-2">/</span>
-        <Link to="/#properties" className="hover:text-indigo-600 transition-colors">
-          Properties
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-600">{hostel.name}</span>
-      </div>
+      <main>
+        {/* ── Breadcrumb ── */}
+        <nav
+          aria-label="Breadcrumb"
+          className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 text-xs font-semibold text-slate-600"
+        >
+          <Link to="/" className="hover:text-indigo-600 transition-colors">
+            Home
+          </Link>
+          <span className="mx-2" aria-hidden="true">/</span>
+          <Link to="/#properties" className="hover:text-indigo-600 transition-colors">
+            Properties
+          </Link>
+          <span className="mx-2" aria-hidden="true">/</span>
+          <span className="text-slate-800" aria-current="page">{hostel.name}</span>
+        </nav>
 
-      {/* ── Main Layout: gallery+content left, sticky booking sidebar right ── */}
-      <div className="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left column */}
-        <div className="lg:col-span-7 space-y-10">
-          {/* Gallery */}
-          <div>
-            <div className="relative h-80 sm:h-96 rounded-3xl overflow-hidden bg-slate-100 border border-slate-200/80 group">
-              <img
-                src={gallery[safeActiveImage]}
-                alt={hostel.name}
-                onClick={gallery.length > 1 ? goNextImage : undefined}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src = DEFAULT_IMAGE;
-                }}
-                className={`w-full h-full object-cover ${
-                  gallery.length > 1 ? "cursor-pointer" : ""
-                }`}
-              />
-              {gallery.length > 1 && (
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-slate-950/40 backdrop-blur-sm px-2 py-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-                  {gallery.map((_, i) => (
-                    <span
-                      key={i}
-                      className={`h-1.5 rounded-full transition-all ${
-                        i === safeActiveImage ? "bg-white w-4" : "bg-white/50 w-1.5"
-                      }`}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-            {gallery.length > 1 && (
-              <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
-                {gallery.map((img, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setActiveImage(i)}
-                    className={`w-20 h-14 shrink-0 rounded-xl overflow-hidden border-2 transition-all ${
-                      i === safeActiveImage
-                        ? "border-indigo-600"
-                        : "border-transparent opacity-70 hover:opacity-100"
-                    }`}
+        {/* ── Main Layout: gallery+content left, sticky booking sidebar right ── */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left column */}
+          <div className="lg:col-span-7 space-y-7 sm:space-y-10">
+            {/* Gallery */}
+            <div>
+              <div className="relative h-60 sm:h-96 rounded-3xl overflow-hidden bg-slate-100 border border-slate-200/80 group">
+                <img
+                  src={gallery[safeActiveImage]}
+                  // Not just the hostel name — the <h1> below already says that,
+                  // and identical adjacent text trips Lighthouse's "redundant alt".
+                  alt={`${hostel.name} photo ${safeActiveImage + 1} of ${gallery.length}`}
+                  onClick={gallery.length > 1 ? goNextImage : undefined}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = DEFAULT_IMAGE;
+                  }}
+                  className={`w-full h-full object-cover ${
+                    gallery.length > 1 ? "cursor-pointer" : ""
+                  }`}
+                />
+                {gallery.length > 1 && (
+                  <div
+                    className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-slate-950/40 backdrop-blur-sm px-2 py-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-hidden="true"
                   >
-                    <img
-                      src={img}
-                      alt=""
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).src = DEFAULT_IMAGE;
-                      }}
-                    />
-                  </button>
-                ))}
+                    {gallery.map((_, i) => (
+                      <span
+                        key={i}
+                        className={`h-1.5 rounded-full transition-all ${
+                          i === safeActiveImage ? "bg-white w-4" : "bg-white/50 w-1.5"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            <div className="mt-4">
-              <h1 className="text-3xl font-black text-slate-900 tracking-tight">
-                {hostel.name}
-              </h1>
-              {hostel.address && (
-                <p className="text-sm text-indigo-600 font-semibold mt-1">
-                  📍 {hostel.address}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* About */}
-          <section>
-            <h2 className="text-xs font-extrabold tracking-widest uppercase text-indigo-600 mb-2">
-              About the Property
-            </h2>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              {hostel.description ||
-                "A pristine, secure, and modern living facility outfitted with top-tier amenities."}
-            </p>
-          </section>
-
-          {/* Room Details cards */}
-          {sharingTypes.length > 0 && (
-            <section>
-              <h2 className="text-xs font-extrabold tracking-widest uppercase text-indigo-600 mb-4">
-                Room Details
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {sharingTypes.map((sharing) => {
-                  const cheapest = Math.min(
-                    ...(hostel.roomTypes || [])
-                      .filter((r) => r.sharing === sharing)
-                      .map((r) => r.price)
-                  );
-                  return (
+              {gallery.length > 1 && (
+                <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+                  {gallery.map((img, i) => (
                     <button
-                      key={sharing}
-                      onClick={() => {
-                        setSelectedSharing(sharing);
-                        setSelectedRoom(null);
-                      }}
-                      className={`text-left p-4 rounded-2xl border transition-all ${
-                        selectedSharing === sharing
-                          ? "border-indigo-600 bg-indigo-50/60"
-                          : "border-slate-200 bg-white hover:border-indigo-200"
+                      key={i}
+                      type="button"
+                      onClick={() => setActiveImage(i)}
+                      aria-label={`Show photo ${i + 1} of ${gallery.length}`}
+                      aria-current={i === safeActiveImage}
+                      className={`w-20 h-14 shrink-0 rounded-xl overflow-hidden border-2 transition-all ${
+                        i === safeActiveImage
+                          ? "border-indigo-600"
+                          : "border-transparent opacity-70 hover:opacity-100"
                       }`}
                     >
-                      <p className="text-xs font-bold text-slate-700">{sharing}</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        starting from
-                      </p>
-                      <p className="text-sm font-black text-slate-900">
-                        ₹{cheapest.toLocaleString()}/month
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          {/* Amenities */}
-          {hostel.amenities && hostel.amenities.length > 0 && (
-            <section>
-              <h2 className="text-xs font-extrabold tracking-widest uppercase text-indigo-600 mb-4">
-                Amazing Amenities
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4">
-                {hostel.amenities.map((a) => (
-                  <div key={a} className="flex items-center gap-2.5">
-                    <span className="text-base">{AMENITY_ICON[a] || "•"}</span>
-                    <span className="text-xs font-semibold text-slate-600">
-                      {a}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Nearby Properties */}
-          {nearbyProperties.length > 0 && (
-            <section>
-              <h2 className="text-xs font-extrabold tracking-widest uppercase text-indigo-600 mb-4">
-                Nearby Properties
-              </h2>
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {nearbyProperties.map((h) => (
-                  <button
-                    key={h.id}
-                    onClick={() => navigate(`/property/${h.id}`)}
-                    className="w-40 shrink-0 text-left group"
-                  >
-                    <div className="h-28 rounded-xl overflow-hidden bg-slate-100 border border-slate-200/80">
+                      {/* Decorative: the button's aria-label is the accessible name */}
                       <img
-                        src={h.image || DEFAULT_IMAGE}
-                        alt={h.name}
+                        src={img}
+                        alt=""
+                        className="w-full h-full object-cover"
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).src = DEFAULT_IMAGE;
                         }}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
-                    </div>
-                    <p className="text-xs font-bold text-slate-800 mt-2 truncate">
-                      {h.name}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-
-        {/* ── Right column: sticky booking sidebar ── */}
-        <div className="lg:col-span-5 lg:sticky lg:top-28">
-          <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
-            {sharingTypes.length > 0 && (
-              <div className="p-6 border-b border-slate-100">
-                <h3 className="text-xs font-extrabold tracking-widest uppercase text-slate-500 mb-3">
-                  Select Sharing Type
-                </h3>
-                <div className="flex gap-2 mb-5 flex-wrap">
-                  {sharingTypes.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => {
-                        setSelectedSharing(s);
-                        setSelectedRoom(null);
-                      }}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                        selectedSharing === s
-                          ? "bg-indigo-600 text-white shadow-sm"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
-                    >
-                      {s}
                     </button>
                   ))}
                 </div>
-
-                <h3 className="text-xs font-extrabold tracking-widest uppercase text-slate-500 mb-1">
-                  Select Room Type
-                </h3>
-                <p className="text-[11px] text-slate-400 mb-3">
-                  You can change your room type before onboarding.
-                </p>
-                <div className="space-y-2">
-                  {roomsForSharing.map((room, i) => (
-                    <label
-                      key={i}
-                      className={`flex items-center justify-between px-4 py-3 rounded-xl border cursor-pointer transition-all ${
-                        selectedRoom === room
-                          ? "border-indigo-600 bg-indigo-50/60"
-                          : "border-slate-200 hover:border-indigo-200"
-                      }`}
-                    >
-                      <span className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedRoom === room}
-                          onChange={() =>
-                            setSelectedRoom(selectedRoom === room ? null : room)
-                          }
-                          className="w-4 h-4 accent-indigo-600"
-                        />
-                        <span className="text-xs font-semibold text-slate-700">
-                          {room.sharing}
-                          <span className="block text-[10px] font-normal text-slate-400">
-                            {room.availableBeds} beds available
-                          </span>
-                        </span>
-                      </span>
-                      <span className="text-xs font-bold text-slate-900">
-                        ₹{room.price.toLocaleString()}/month
-                      </span>
-                    </label>
-                  ))}
-                </div>
+              )}
+              <div className="mt-4">
+                <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                  {hostel.name}
+                </h1>
+                {hostel.address && (
+                  <p className="text-sm text-indigo-700 font-semibold mt-1">
+                    <span aria-hidden="true">📍</span> {hostel.address}
+                  </p>
+                )}
               </div>
+            </div>
+
+            {/* About */}
+            <section aria-labelledby="about-heading">
+              <h2 id="about-heading" className="text-sm sm:text-xs font-extrabold tracking-widest uppercase text-indigo-700 mb-2">
+                About the Property
+              </h2>
+              <p className="text-[15px] sm:text-sm text-slate-600 leading-relaxed">
+                {hostel.description ||
+                  "A pristine, secure, and modern living facility outfitted with top-tier amenities."}
+              </p>
+            </section>
+
+            {/* Room Details cards */}
+            {sharingTypes.length > 0 && (
+              <section aria-labelledby="rooms-heading">
+                <h2 id="rooms-heading" className="text-sm sm:text-xs font-extrabold tracking-widest uppercase text-indigo-700 mb-4">
+                  Room Details
+                </h2>
+                <div className="grid grid-cols-1 min-[390px]:grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                  {sharingTypes.map((sharing) => {
+                    const cheapest = Math.min(
+                      ...(hostel.roomTypes || [])
+                        .filter((r) => r.sharing === sharing)
+                        .map((r) => r.price)
+                    );
+                    return (
+                      <button
+                        key={sharing}
+                        type="button"
+                        aria-pressed={selectedSharing === sharing}
+                        onClick={() => {
+                          setSelectedSharing(sharing);
+                          setSelectedRoom(null);
+                        }}
+                        className={`text-left p-4 min-h-[88px] rounded-2xl border transition-all ${
+                          selectedSharing === sharing
+                            ? "border-indigo-600 bg-indigo-50/60"
+                            : "border-slate-200 bg-white hover:border-indigo-200"
+                        }`}
+                      >
+                        <p className="text-sm sm:text-xs font-bold text-slate-700">{sharing}</p>
+                        <p className="text-xs sm:text-[11px] text-slate-600 mt-0.5">
+                          starting from
+                        </p>
+                        <p className="text-base sm:text-sm font-black text-slate-900">
+                          ₹{cheapest.toLocaleString()}/month
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
             )}
 
-            {/* Pre-Register */}
-            <div className="p-6">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-600 mb-5">
-                📝 Pre-Register
-              </h3>
-              <PublicRegisterForm
-                hostelName={hostel.name}
-                roomTypes={hostel.roomTypes}
-                onSubmit={handleRegisterSubmit}
-                onCancel={() => navigate("/")}
-              />
-            </div>
+            {/* Amenities */}
+            {hostel.amenities && hostel.amenities.length > 0 && (
+              <section aria-labelledby="amenities-heading">
+                <h2 id="amenities-heading" className="text-sm sm:text-xs font-extrabold tracking-widest uppercase text-indigo-700 mb-4">
+                  Amazing Amenities
+                </h2>
+                <ul className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 sm:gap-x-6 gap-y-4">
+                  {hostel.amenities.map((a) => (
+                    <li key={a} className="flex items-center gap-2.5">
+                      <span className="text-base" aria-hidden="true">{AMENITY_ICON[a] || "•"}</span>
+                      <span className="text-xs font-semibold text-slate-600">
+                        {a}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* Nearby Properties */}
+            {nearbyProperties.length > 0 && (
+              <section aria-labelledby="nearby-heading">
+                <h2 id="nearby-heading" className="text-sm sm:text-xs font-extrabold tracking-widest uppercase text-indigo-700 mb-4">
+                  Nearby Properties
+                </h2>
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                  {nearbyProperties.map((h) => (
+                    <button
+                      key={h.id}
+                      type="button"
+                      onClick={() => navigate(`/property/${h.id}`)}
+                      className="w-40 shrink-0 text-left group"
+                    >
+                      <div className="h-28 rounded-xl overflow-hidden bg-slate-100 border border-slate-200/80">
+                        {/* alt="" — the hostel name is printed right below, so alt
+                            text would be read twice (Lighthouse: redundant alt). */}
+                        <img
+                          src={h.image || DEFAULT_IMAGE}
+                          alt=""
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = DEFAULT_IMAGE;
+                          }}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                      </div>
+                      <p className="text-xs font-bold text-slate-800 mt-2 truncate">
+                        {h.name}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
 
-          <p className="text-[10px] text-slate-400 text-center mt-4">
-            🔒 All submitted data is encrypted and processed securely.
-          </p>
+          {/* ── Right column: sticky booking sidebar ── */}
+          <aside aria-label="Booking" className="lg:col-span-5 lg:sticky lg:top-28">
+            <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
+              {sharingTypes.length > 0 && (
+                <div className="p-4 sm:p-6 border-b border-slate-100">
+                  <h2 className="text-xs font-extrabold tracking-widest uppercase text-slate-600 mb-3">
+                    Select Sharing Type
+                  </h2>
+                  <div className="flex gap-2 mb-5 flex-wrap">
+                    {sharingTypes.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        aria-pressed={selectedSharing === s}
+                        onClick={() => {
+                          setSelectedSharing(s);
+                          setSelectedRoom(null);
+                        }}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                          selectedSharing === s
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+
+                  <h2 className="text-xs font-extrabold tracking-widest uppercase text-slate-600 mb-1">
+                    Select Room Type
+                  </h2>
+                  <p className="text-[11px] text-slate-600 mb-3">
+                    You can change your room type before onboarding.
+                  </p>
+                  <div className="space-y-2">
+                    {roomsForSharing.map((room, i) => (
+                      <label
+                        key={i}
+                        className={`flex items-center justify-between px-4 py-3 rounded-xl border cursor-pointer transition-all ${
+                          selectedRoom === room
+                            ? "border-indigo-600 bg-indigo-50/60"
+                            : "border-slate-200 hover:border-indigo-200"
+                        }`}
+                      >
+                        <span className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedRoom === room}
+                            onChange={() =>
+                              setSelectedRoom(selectedRoom === room ? null : room)
+                            }
+                            className="w-4 h-4 accent-indigo-600"
+                          />
+                          <span className="text-xs font-semibold text-slate-700">
+                            {room.sharing}
+                            <span className="block text-[10px] font-normal text-slate-600">
+                              {room.availableBeds} beds available
+                            </span>
+                          </span>
+                        </span>
+                        <span className="text-xs font-bold text-slate-900">
+                          ₹{room.price.toLocaleString()}/month
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pre-Register */}
+              <div className="p-3 sm:p-6">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-5">
+                  <span aria-hidden="true">📝</span> Pre-Register
+                </h2>
+                <PublicRegisterForm
+                  hostelName={hostel.name}
+                  roomTypes={hostel.roomTypes}
+                  onSubmit={handleRegisterSubmit}
+                  onCancel={() => navigate("/")}
+                />
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-[10px] text-slate-600 text-center mt-4">
+              <span aria-hidden="true">🔒</span> All submitted data is encrypted and processed securely.
+            </p>
+          </aside>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
