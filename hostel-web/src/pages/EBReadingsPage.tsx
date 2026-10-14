@@ -55,8 +55,22 @@ import { usePropertyType } from "@/lib/propertyType";
 
 const isMonthlyTenant = (t: any) => (t?.tenantStay ?? "MONTHLY") !== "DAILY";
 
-const isInformationalReading = (reading: any) =>
-  reading?.tenantId != null && reading?.isCheckout === true;
+// An "informational" row is a DAILY-stay tenant's checkout record: it is
+// shown as-is (settled units/amount vs advance) and never goes through the
+// bill endpoint.
+//
+// FIX: this used to be true for ANY row with a tenantId + isCheckout, so a
+// MONTHLY tenant's checkout row (e.g. Nivesh) was drawn as a DAILY record
+// with the raw stored units (68u / Rs.884) instead of his real segment bill
+// (40u / Rs.520). A MONTHLY tenant's checkout row is a normal billing row;
+// his bill comes from the flat/room bill like everybody else's. The tenant
+// record is the authority for the stay type, the reading's own tenantStay
+// is the fallback.
+const isInformationalReading = (reading: any, tenant?: any) => {
+  if (reading?.tenantId == null || reading?.isCheckout !== true) return false;
+  const stay = tenant?.tenantStay ?? reading?.tenantStay ?? "MONTHLY";
+  return stay === "DAILY";
+};
 
 const EBReadingsPage = () => {
   // ── role is uppercased for all comparisons ────────────────────────────
@@ -313,39 +327,73 @@ const [flatAcRows, setFlatAcRows] = useState<
   //      EB reading still covers whoever moved in first.
   //   4. DAILY-stay tenants are excluded from that fallback entirely —
   //      their joinReading is a reference snapshot, not a billing anchor.
+
+  // AC "Previous" for ONE room.
+  //
+  // FIX (AC meter jumped 20 -> 60 on a sibling room): AC is metered PER
+  // ROOM, but a flat checkout writes a copy of the checkout row onto
+  // EVERY room of the flat (the main meter is shared). Those sibling
+  // copies used to carry the checked-out tenant's AC value (e.g. Anbu's
+  // 50 -> 60 in W1-ROOM-1), and this function took the maximum
+  // acCurrentReading over every row of the room, checkout rows included,
+  // so W1-ROOM-2's AC Previous became 60 instead of 20.
+  //
+  // Rule now: a CHECKOUT row only moves this room's AC floor when a
+  // tenant of THIS room provably owns it (tenantId belongs to a tenant
+  // whose room is this room). Genuine EB-page rows always count. The
+  // room's own tenants' acCheckoutReading values are an additional,
+  // trustworthy floor. This also protects against sibling rows that were
+  // saved before the backend fix.
   const getRoomStartingACReading = useCallback(
-  (roomId: string | number) => {
-    const genuineRoomReadings = allReadings.filter(
-      r => r.roomId != null && String(r.roomId) === String(roomId) && r.isCheckout !== true
-    );
+    (roomId: string | number) => {
+      const rid = String(roomId);
 
-    // NEW: a checkout row's AC reading (informational or not) is still a
-    // real physical AC-meter snapshot. It must act as a floor so the
-    // next genuine reading can't start below units already accounted for
-    // by a checkout — this mirrors the main-meter fix below.
-    const anyAcReadingsForRoom = allReadings.filter(
-      r => r.roomId != null && String(r.roomId) === String(roomId)
-    );
-    const checkoutAcFloor = anyAcReadingsForRoom.length > 0
-      ? Math.max(...anyAcReadingsForRoom.map(r => Number(r.acCurrentReading ?? 0)))
-      : 0;
-
-    if (genuineRoomReadings.length > 0) {
-      const latest = genuineRoomReadings.reduce((a, b) =>
-        Number(b.id ?? 0) > Number(a.id ?? 0) ? b : a
+      const roomRows = allReadings.filter(
+        r => r.roomId != null && String(r.roomId) === rid
       );
-      return Math.max(Number(latest.acCurrentReading ?? 0), checkoutAcFloor);
-    }
 
-    const roomTenants = monthlyTenants.filter(t => String(t.roomId) === String(roomId));
-    const joinFloor = roomTenants.length > 0
-      ? Math.min(...roomTenants.map(t => Number(t.acJoinReading ?? 0)))
-      : 0;
+      // Tenants of THIS room (monthly only; checked-out ones included).
+      const roomTenants = monthlyTenants.filter(t => String(t.roomId) === rid);
+      const roomTenantIds = new Set(roomTenants.map(t => Number(t.id)));
 
-    return Math.max(joinFloor, checkoutAcFloor);
-  },
-  [allReadings, monthlyTenants]
-);
+      const rowCountsForAc = (r: any) => {
+        if (r.isCheckout !== true) return true;
+        if (r.tenantId == null) return false;
+        return roomTenantIds.has(Number(r.tenantId));
+      };
+
+      const rowAcFloor = roomRows
+        .filter(rowCountsForAc)
+        .reduce((m, r) => Math.max(m, Number(r.acCurrentReading ?? 0)), 0);
+
+      // AC checkout readings recorded on this room's own tenants.
+      const tenantAcFloor = roomTenants.reduce((m, t) => {
+        const co = Number((t as any).acCheckoutReading);
+        const join = Number((t as any).acJoinReading);
+        if (!Number.isFinite(co) || co <= 0) return m;
+        if (Number.isFinite(join) && join > 0 && co <= join) return m;
+        return Math.max(m, co);
+      }, 0);
+
+      const acFloor = Math.max(rowAcFloor, tenantAcFloor);
+
+      const genuineRoomReadings = roomRows.filter(r => r.isCheckout !== true);
+      if (genuineRoomReadings.length > 0) {
+        const latest = genuineRoomReadings.reduce((a, b) =>
+          Number(b.id ?? 0) > Number(a.id ?? 0) ? b : a
+        );
+        return Math.max(Number(latest.acCurrentReading ?? 0), acFloor);
+      }
+
+      const joins = roomTenants
+        .map(t => Number((t as any).acJoinReading))
+        .filter(v => Number.isFinite(v) && v > 0);
+      const joinFloor = joins.length > 0 ? Math.min(...joins) : 0;
+
+      return Math.max(joinFloor, acFloor);
+    },
+    [allReadings, monthlyTenants]
+  );
 
 // getRoomStartingReading — a room's main EB meter "Previous".
 //
@@ -454,9 +502,6 @@ const getFlatStartingReading = useCallback(
   },
   [allReadings, rooms, monthlyTenants]
 );
-
-  const getRoomIdByRoomNumber = (roomNumber: string) =>
-    rooms.find(r => r.roomNumber === roomNumber)?.id;
 
   /* ─── FILTERED ROOMS (page-level view filter, driven by selectedBranch) ── */
   const filteredRooms = useMemo(() => {
@@ -659,25 +704,62 @@ const getFlatStartingReading = useCallback(
      whose only occupant is a daily tenant comes back as an "Unassigned"
      row carrying the room's units — that is intentional: the meter did
      move, but the units are not billed to someone who already paid their
-     EB advance at check-in. */
+     EB advance at check-in.
+
+     FIX (missing tenants after a checkout): a flat bill row used to find
+     its room with `rooms.find(r => r.roomNumber === b.roomNumber)`. Room
+     numbers are not unique across the whole system (the checkout list
+     shows several "Q1-ROOM-1" / "Q1-ROOM-2" entries), so a bill for
+     Q1-ROOM-1 could be pinned to a DIFFERENT room with the same label,
+     in another branch, and then thrown away by the branch filter. Only
+     Q1-HALL (a unique label) survived, which is why just Anbu and Amal
+     were shown. The room is now resolved inside the bill's own flat
+     first, then from the tenant's own room. */
   useEffect(() => {
+    let cancelled = false;
+
     const loadTenantBills = async () => {
       const rows: any[] = [];
       const flatHandled = new Set<number>();
       const roomHandled = new Set<number>();
 
-      // Informational DAILY checkout rows never go through
-      // getTenantWiseEBBill — that endpoint returns the room's MONTHLY
-      // occupants, which is not what these rows represent. They are pushed
-      // straight through and excluded from the grouping loops below so
-      // they can't stand in for a room's real reading and can't be
-      // swallowed by the per-room de-dup logic.
-      const informationalReadings = filteredReadings.filter(r =>
-        isInformationalReading(r)
-      );
-      const billingReadings = filteredReadings.filter(
-        r => !isInformationalReading(r)
-      );
+      // Resolve the room a bill line belongs to.
+      //  1. a room INSIDE the bill's flat with that room number (unique there;
+      //     also correct for a tenant transferred out of that room)
+      //  2. the tenant's own room
+      //  3. any room with that number (last resort)
+      const resolveBillRoomId = (
+        b: any,
+        flatId: number | null | undefined
+      ): number | undefined => {
+        const sameNumber = rooms.filter(rm => rm.roomNumber === b.roomNumber);
+        if (flatId != null) {
+          const inFlat = sameNumber.find(rm => String(rm.flatId) === String(flatId));
+          if (inFlat) return inFlat.id;
+        }
+        if (b.tenantId != null) {
+          const t = tenantById.get(Number(b.tenantId));
+          if (t?.roomId != null) return Number(t.roomId);
+        }
+        return sameNumber[0]?.id;
+      };
+
+      // Informational rows are DAILY tenants' checkout records only. They
+      // never go through getTenantWiseEBBill — that endpoint returns the
+      // room's MONTHLY occupants, which is not what these rows represent.
+      // They are pushed straight through and excluded from the grouping
+      // loops below so they can't stand in for a room's real reading and
+      // can't be swallowed by the per-room de-dup logic. A MONTHLY
+      // tenant's checkout row is NOT informational: it stays in
+      // billingReadings and the tenant gets a normal bill line below.
+      const isInfo = (r: any) =>
+        isInformationalReading(
+          r,
+          r.tenantId != null ? tenantById.get(Number(r.tenantId)) : undefined
+        );
+
+      const informationalReadings = filteredReadings.filter(r => isInfo(r));
+      const billingReadings = filteredReadings.filter(r => !isInfo(r));
 
       for (const r of informationalReadings) {
         const room = rooms.find(rm => rm.id === r.roomId);
@@ -768,15 +850,18 @@ const getFlatStartingReading = useCallback(
           bills
             .filter((b: any) => b.tenantId == null || flatTenantIds.has(Number(b.tenantId)))
             .forEach((b: any) => {
+              const billTenant = b.tenantId != null ? tenantById.get(Number(b.tenantId)) : undefined;
               rows.push({
                 id: r.id,
-                roomId: getRoomIdByRoomNumber(b.roomNumber),
+                roomId: resolveBillRoomId(b, r.flatId),
                 flatId: r.flatId,
                 roomNumber: b.roomNumber,
                 flatNumber: b.flatNumber,
                 branchId: (r as any).branchId ?? null,
                 branchName: (r as any).branchName ?? null,
+                tenantId: b.tenantId ?? null,
                 tenantName: b.tenantName,
+                checkedOut: billTenant?.status === "Checked_Out",
                 previousReading: b.previousReading,
                 currentReading: b.currentReading,
                 acPreviousReading: b.acPreviousReading,
@@ -817,6 +902,7 @@ const getFlatStartingReading = useCallback(
 
           if (matchedBills.length > 0) {
             matchedBills.forEach((b: any) => {
+              const billTenant = b.tenantId != null ? tenantById.get(Number(b.tenantId)) : undefined;
               rows.push({
                 id: r.id,
                 roomId: room.id,
@@ -825,7 +911,9 @@ const getFlatStartingReading = useCallback(
                 flatNumber: b.flatNumber,
                 branchId: (r as any).branchId ?? null,
                 branchName: (r as any).branchName ?? null,
+                tenantId: b.tenantId ?? null,
                 tenantName: b.tenantName,
+                checkedOut: billTenant?.status === "Checked_Out",
                 previousReading: b.previousReading ?? r.previousReading,
                 currentReading: b.currentReading ?? r.currentReading,
                 acPreviousReading: b.acPreviousReading,
@@ -857,11 +945,15 @@ const getFlatStartingReading = useCallback(
           }
         } catch { /* skip failed room */ }
       }
-      setTenantRows(rows);
+
+      // A newer run (filters changed while bills were loading) wins.
+      if (!cancelled) setTenantRows(rows);
     };
 
     if (filteredReadings.length > 0) loadTenantBills();
     else setTenantRows([]);
+
+    return () => { cancelled = true; };
   }, [filteredReadings, roomMap, rooms, monthlyTenants, tenantById, tenants, calculateInformationalShare]);
 
   /* ─── ADD READING ───────────────────────────────────────── */
@@ -1169,8 +1261,11 @@ const handleDeleteReadingClick = (row: any) => {
     let data = tenantRows;
     if (selectedBranch !== "all") {
       data = data.filter(row => {
-        const room = rooms.find(r => r.id === row.roomId);
-        return Number(room?.unitId) === Number(selectedBranch);
+        const room = rooms.find(r => Number(r.id) === Number(row.roomId));
+        // Fall back to the row's own branch when its room could not be
+        // resolved, rather than silently dropping the tenant.
+        const unit = room?.unitId ?? row.branchId;
+        return unit != null ? Number(unit) === Number(selectedBranch) : true;
       });
     }
     if (selectedRoomId !== "all") {
@@ -1460,7 +1555,9 @@ const handleDeleteReadingClick = (row: any) => {
                       </tr>
                     ) : (
                       paginatedRows.map((row, i) => {
-                        const rName = roomMap[row.roomId] || "Unknown";
+                        // Prefer the room the row resolved to; fall back to
+                        // the bill's own room number instead of "Unknown".
+                        const rName = roomMap[row.roomId] || row.roomNumber || "Unknown";
                         const tenantName = row.tenantName || "Unassigned";
                         const prev = Number(row.previousReading ?? 0);
                         const curr = Number(row.currentReading ?? 0);
@@ -1496,7 +1593,7 @@ const handleDeleteReadingClick = (row: any) => {
 
                         return (
                           <tr
-                            key={`${row.id ?? "no-id"}-${row.roomId ?? "no-room"}-${i}`}
+                            key={`${row.id ?? "no-id"}-${row.roomId ?? "no-room"}-${row.tenantId ?? "no-tenant"}-${i}`}
                             className={informational ? "eb-row-informational" : undefined}
                           >
                             <td>
@@ -1506,7 +1603,7 @@ const handleDeleteReadingClick = (row: any) => {
                               </div>
                               <div className="eb-tenant-name">
                                 {tenantName}
-                                {informational && " — checked out"}
+                                {(informational || row.checkedOut) && " — checked out"}
                               </div>
                             </td>
                             <td><span className="eb-reading-val">{prev}</span></td>

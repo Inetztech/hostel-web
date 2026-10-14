@@ -606,6 +606,9 @@ const RentPage = () => {
   // Resolves the ₹ amount for one informational reading — prefers
   // whatever the backend already persisted on the row, falling back to
   // the same proportional-segment math only when neither is present.
+  // NOTE: the fallback uses a default rate (13) when the row has no ebRate,
+  // so it can disagree with the real bill. Never use it for a tenant whose
+  // backend EB bill already exists (see resolveTenantEB).
   const resolveInformationalAmount = useCallback(
     (tenantId: number, r: any): number => {
       const storedUnits  = Number(r.unitsConsumed ?? 0);
@@ -628,6 +631,47 @@ const RentPage = () => {
     },
     [tenants, rooms, calculateInformationalShare]
   );
+
+  // FIX: single place that decides a MONTHLY tenant's EB for the period.
+  //
+  // ROOT CAUSE of "EB Readings page = 520, Rent page = 884 / 1,404":
+  //   • The backend EB bill (getTenantWiseEBBill) for a checked-out tenant is
+  //     already correct (520) and matches the EB Readings page.
+  //   • The checkout reading row has no stored ebAmount / ebRate, so the page
+  //     recomputed it client-side with the default rate 13 -> 884, and then
+  //     either ADDED it (520 + 884 = 1,404) or REPLACED the bill with it (884).
+  //
+  // Rules now:
+  //   • Checked-out tenant, or a reading from the SAME room as the current
+  //     row -> the backend bill already covers that meter window. Use it
+  //     as-is; ignore the checkout reading.
+  //   • Tenant who transferred to a DIFFERENT room mid-period -> the old
+  //     room's checkout share is genuinely extra, so add it.
+  const resolveTenantEB = (
+    tenant: Tenant | undefined,
+    room: Room | undefined,
+    liveEB: number,
+    infoReading: any | undefined,
+    tenantId: number
+  ): { eb: number; usedInfo: boolean } => {
+    if (!infoReading) return { eb: liveEB, usedInfo: false };
+
+    const isCheckedOut = tenant?.status === "Checked_Out";
+    const sameRoom =
+      infoReading.roomId != null &&
+      room != null &&
+      String(infoReading.roomId) === String(room.id);
+
+    if (isCheckedOut || sameRoom) {
+      return { eb: liveEB, usedInfo: false };
+    }
+
+    // Genuine room transfer: add the old room's settlement.
+    return {
+      eb: liveEB + resolveInformationalAmount(tenantId, infoReading),
+      usedInfo: true,
+    };
+  };
 
   const reload = async () => {
     if (loadingRef.current) return;
@@ -1072,13 +1116,15 @@ const RentPage = () => {
 
       let displayEB = rentRecord ? (isPaid ? recordEB : liveEB) : liveEB;
 
-      // Fold in a same-period checkout settlement left behind in a room this
-      // tenant has since transferred out of (see informationalByTenant).
+      // FIX: a same-period checkout settlement is only added for a genuine
+      // room transfer. For a checked-out / same-room tenant the backend bill
+      // is already correct and is used as-is (see resolveTenantEB).
       // Skip once PAID: that figure is already final and collected.
       const infoReading = informationalByTenant.get(Number(b.tenantId));
       if (infoReading && !isPaid) {
-        displayEB += resolveInformationalAmount(Number(b.tenantId), infoReading);
-        mergedInformationalTenantIds.add(Number(b.tenantId));
+        const resolved = resolveTenantEB(tenant, room, displayEB, infoReading, Number(b.tenantId));
+        displayEB = resolved.eb;
+        if (resolved.usedInfo) mergedInformationalTenantIds.add(Number(b.tenantId));
       }
 
       const displayRent   = rentRecord ? recordRent   : rentPerBed;
@@ -1144,8 +1190,7 @@ const RentPage = () => {
           : currentPending,
         rentRecord,
         unitId:        room?.unitId,
-        // The merged displayEB (raw bill amount plus any folded-in checkout
-        // settlement) so "Generate" bills the same combined figure shown.
+        // The resolved displayEB so "Generate" bills the same figure shown.
         amount:        displayEB,
         paymentStatus: rentRecord?.paymentStatus,
         generateBlockedReason,
@@ -1568,14 +1613,13 @@ const RentPage = () => {
             return;
           }
 
-          // Fold in the same same-period checkout settlement the Rent table
-          // already merges into this tenant's displayed EB.
-          let ebAmount = b.amount ?? 0;
+          // FIX: same EB resolution as the Rent table — the backend bill is
+          // used as-is for a checked-out / same-room tenant, and the old
+          // room's settlement is only added for a genuine room transfer.
           const infoReading = informationalByTenant.get(Number(b.tenantId));
-          if (infoReading) {
-            ebAmount += resolveInformationalAmount(Number(b.tenantId), infoReading);
-            mergedInformationalTenantIds.add(Number(b.tenantId));
-          }
+          const resolved = resolveTenantEB(tenant, room, b.amount ?? 0, infoReading, Number(b.tenantId));
+          const ebAmount = resolved.eb;
+          if (resolved.usedInfo) mergedInformationalTenantIds.add(Number(b.tenantId));
 
           await generateRent({
             tenantId:   String(b.tenantId),
