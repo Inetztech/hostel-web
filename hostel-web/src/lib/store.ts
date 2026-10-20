@@ -19,8 +19,22 @@ import {
   SundayMealConfirmation, SundayMealResponseRequest, SundayMealCount,
   HostelImageDTO,PublicRoomTypeSummary,
   RentCalculation,
-  BusinessModel, BusinessModelRequest, RentDueConfig,
+  BusinessModel, BusinessModelRequest, RentDueConfig,OcrExtractResult,
+  IdProofType,
 } from "./types";
+
+
+export const extractTenantDocument = async (
+  file: File,
+  idProofType?: IdProofType | ""
+): Promise<OcrExtractResult> => {
+  guard();
+  const fd = new FormData();
+  fd.append("file", file);
+  if (idProofType) fd.append("idProofType", idProofType);
+  return d(await api.post("/ocr/tenant-document", fd, { timeout: 60000 }));
+};
+
 
 const buildDamageFormData = (data: Partial<DamageRequest>): FormData => {
   const fd = new FormData();

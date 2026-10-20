@@ -11,6 +11,18 @@ export type CleaningStatus = "PENDING" | "IN_PROGRESS" | "CLEANED";
 export type RentBillingMode = "CALENDAR_MONTH" | "JOINING_DATE_CYCLE";
 export type DamageStatus = "PENDING" | "PAID" | "CANCELLED";
 
+export interface OcrExtractResult {
+  detectedDocument: IdProofType | null;
+  idProofType: IdProofType | null;
+  idProofNumber: string | null;
+  fullName: string | null;
+  phone: string | null;
+  email: string | null;
+  photoDataUrl: string | null;
+  warnings: string[];
+}
+
+
 export interface DamageTenantShare {
   id: number;
   tenantId: number;
