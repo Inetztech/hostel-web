@@ -200,12 +200,23 @@ const PendingRentDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden rounded-3xl p-0">
+        {/* The scroller carries its OWN max-height, so it scrolls whether the
+            dialog shell lays out as flex or grid (the shell's `grid` class can
+            beat `flex` and then flex-1 / min-h-0 never constrain the child). */}
+        <div className="pr-scroll max-h-[85vh] overflow-y-auto overscroll-contain p-6 space-y-4">
+        <style>{`
+          .pr-scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+          .pr-scroll::-webkit-scrollbar { width: 6px; }
+          .pr-scroll::-webkit-scrollbar-track { background: transparent; margin: 14px 0; }
+          .pr-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+          .pr-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        `}</style>
         <DialogHeader>
           <DialogTitle>Pending Rent Records</DialogTitle>
         </DialogHeader>
 
-        <div className="bg-muted rounded-md px-4 py-3 text-sm space-y-1 mb-2">
+        <div className="bg-muted rounded-2xl px-4 py-3 text-sm space-y-1 mb-2">
           <div className="flex justify-between">
             <span className="text-slate-600">Name</span>
             <span className="font-medium">{tenant.name}</span>
@@ -243,7 +254,7 @@ const PendingRentDialog = ({
               return (
                 <div
                   key={rent.id}
-                  className="border rounded-lg px-4 py-3 text-sm space-y-2"
+                  className="border rounded-2xl px-4 py-3 text-sm space-y-2"
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-medium">
@@ -367,6 +378,7 @@ const PendingRentDialog = ({
             </div>
           </>
         )}
+      </div>
       </DialogContent>
     </Dialog>
   );
@@ -389,6 +401,9 @@ const CheckoutPage = () => {
   const [finalCurr, setFinalCurr]                 = useState<string>("");
   const [tenantEBDue, setTenantEBDue]             = useState<number>(0);
   const [extraDays, setExtraDays]                 = useState<string>("");
+  // true once the user has typed their own value; until then the field
+  // follows the days used in the check-out month automatically.
+  const [extraDaysEdited, setExtraDaysEdited]   = useState<boolean>(false);
   const [selectedBranch, setSelectedBranch]       = useState(
     getUserRole() === "ADMIN" ? "all" : String(getBranchId() ?? "all")
   );
@@ -607,6 +622,7 @@ const CheckoutPage = () => {
       setFinalPrev("");
       setFinalCurr("");
       setExtraDays("");
+      setExtraDaysEdited(false);
       setOverrideNoticePeriod(false);
       setMeterScope("flat");
       setCheckOutDate(getTodayISO());
@@ -991,11 +1007,34 @@ const CheckoutPage = () => {
     0
   ).getDate();
 
+  // Month of the chosen Check-Out Date (e.g. "October") and how many days the
+  // tenant has used in it (e.g. check-out 23 Oct, already there on the 1st
+  // -> 23 days). Drives the "<Month> Rent Days" field below.
+  const usedMonthLabel = MONTHS[dateForCalc.getMonth()] ?? "Month";
+  const usedDaysInMonth = selectedTenant
+    ? occupancyDaysInMonth(
+        parseLocalDate(selectedTenant.checkInDate as any),
+        parseLocalDate(checkOutDate) ?? dateForCalc,
+        new Date(dateForCalc.getFullYear(), dateForCalc.getMonth(), 1),
+        new Date(dateForCalc.getFullYear(), dateForCalc.getMonth() + 1, 0)
+      )
+    : 0;
+
+  // Keep the field equal to the days used this month until the user edits it.
+  useEffect(() => {
+    if (!selectedTenant || extraDaysEdited) return;
+    setExtraDays(usedDaysInMonth > 0 ? String(usedDaysInMonth) : "");
+  }, [selectedTenant?.id, usedDaysInMonth, extraDaysEdited]);
+
   const effectiveMonthlyRent = useMemo(() => {
     const tenantRent = Number(selectedTenant?.monthlyRent ?? 0);
     if (tenantRent > 0) return tenantRent;
 
-    const roomRent = Number((selectedRoom as any)?.monthlyRent ?? 0);
+    // The Room entity stores the default rent as `rentPerBed` (there is no
+    // `monthlyRent` on a room). Same fallback the Rent page and the backend use.
+    const roomRent = Number(
+      selectedRoom?.rentPerBed ?? (selectedRoom as any)?.monthlyRent ?? 0
+    );
     if (roomRent > 0) return roomRent;
 
     const roommatePool = roomTenants.length > 0 ? roomTenants : flatTenants;
@@ -1602,6 +1641,7 @@ const CheckoutPage = () => {
       setSummary(null);
       setConfirmOpen(false);
       setExtraDays("");
+      setExtraDaysEdited(false);
       setRentPerDay("");
       setUseManualRent(false);
       setOverrideNoticePeriod(false);
@@ -1805,7 +1845,7 @@ const CheckoutPage = () => {
                           ["Daily Stay Total",  `₹${dailyStayTotal.toLocaleString()}`],
                         ] as [string, string][])
                       : ([
-                          ["Monthly Rent", `₹${selectedTenant.monthlyRent}`],
+                          ["Monthly Rent", `₹${effectiveMonthlyRent.toLocaleString()}`],
                         ] as [string, string][])),
                     ["Advance Paid", `₹${selectedTenant.advance}`],
                     ["Pending Amount", `₹${tenantPendingAmount.toLocaleString()}`],
@@ -2117,14 +2157,32 @@ const CheckoutPage = () => {
                   </div>
 
                   <div className="grid gap-2">
-                    <Label htmlFor="extra-days" className="text-xs">Daily Basic Tenant Rent Days</Label>
+                    <Label htmlFor="extra-days" className="text-xs">{usedMonthLabel} Rent Days</Label>
                     <Input
                       id="extra-days"
                       type="number"
-                      placeholder="Daily Basic Tenant Rent Days"
+                      placeholder={`${usedMonthLabel} Rent Days`}
                       value={extraDays}
-                      onChange={(e) => setExtraDays(e.target.value)}
+                      onChange={(e) => {
+                        setExtraDays(e.target.value);
+                        setExtraDaysEdited(true);
+                      }}
                     />
+                    <p className="text-[11px] text-slate-600">
+                      Days used in {usedMonthLabel} {dateForCalc.getFullYear()} in this room: {usedDaysInMonth} of {daysInMonth}
+                      {extraDaysEdited && String(usedDaysInMonth) !== extraDays && (
+                        <button
+                          type="button"
+                          className="ml-2 underline"
+                          onClick={() => {
+                            setExtraDaysEdited(false);
+                            setExtraDays(usedDaysInMonth > 0 ? String(usedDaysInMonth) : "");
+                          }}
+                        >
+                          Reset to {usedDaysInMonth} days
+                        </button>
+                      )}
+                    </p>
 
                     <div className="flex items-center gap-2">
                       <input
