@@ -502,6 +502,7 @@ export interface Tenant {
   advance: number;
   monthlyRent: number;
   registrationFees?: number;
+  pendingAmount?: number;
   joinReading: number;
   checkoutReading: number | null;
   acJoinReading: number | null;
@@ -549,6 +550,7 @@ export interface TenantRequest {
   advance: number;
   monthlyRent: number;
   registrationFees?: number; 
+  pendingAmount?: number;
   tenantStay?: TenantStay;
   noOfDays?: number;
   amountPerDay?: number;

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { getDashboard, getUserRole, getBranchId } from "@/lib/store";
+import { getDashboard, getUserRole, getBranchId, getTenantPaymentHistory, fetchAllPayments } from "@/lib/store";
 import api from "@/lib/api";
 import {
   Building2, Users, Zap, BedDouble, AlertTriangle, GitBranch,
@@ -37,6 +37,9 @@ interface TenantDashboard {
   myBranchName: string; myRoomNumber: string; myBedNumber: string;
   myRoomType: string; currentMonthPaid: number; currentMonthPending: number;
   overallPaid: number; overallPending: number;
+  // NEW: the tenant's own "Pending (₹)" figure (Tenant.pendingAmount), sent by
+  // GET /dashboard/tenant. Included in the pending cards below.
+  tenantPendingAmount?: number;
   totalRooms: number; totalBeds: number;
   availableBeds: number; notAvailableBeds: number;
 }
@@ -115,6 +118,51 @@ const fetchAll = async (url: string, extraParams?: Record<string, any>): Promise
     },
     firstContent
   );
+};
+
+/* ───────────── Tenant "Pending Amount" helpers ─────────────
+   Tenant.pendingAmount is the "Pending (₹)" figure on the Tenants page. It is
+   not stored on any Rent record, so it is added on top of the rent-based
+   pending totals everywhere on the dashboard. */
+
+/** Branch id of a tenant: via their room first, then the tenant's own branch. */
+const tenantBranchOf = (t: any, roomMap: Map<any, any>): number | null => {
+  const room = roomMap.get(Number(t.roomId));
+  const roomBranch = room ? (room.unitId ?? room.branchId ?? null) : null;
+  const b = roomBranch ?? t.branchId ?? t.unitId ?? null;
+  return b != null ? Number(b) : null;
+};
+
+const sumTenantPending = (tenants: any[]): number =>
+  tenants.reduce((s, t) => s + Math.max(0, Number(t.pendingAmount ?? 0)), 0);
+
+/* ───────────── Payments made against the previous Pending Amount ─────────────
+   These are APPROVED payment transactions with no rent attached (rentId == null).
+   They reduce Tenant.pendingAmount but are not on any Rent record, so they must
+   be added to every "Collected / Paid" figure. */
+
+const isPrevPendingTxn = (p: any) =>
+  p?.rentId == null && String(p?.status ?? "").toUpperCase() === "APPROVED";
+
+const isInCurrentMonth = (p: any): boolean => {
+  const d = new Date(p?.verifiedAt ?? p?.submittedAt);
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+};
+
+/** Approver-scoped (ADMIN = own branches, WARDEN = own branch). */
+const fetchPrevPendingPayments = async (): Promise<any[]> => {
+  const out: any[] = [];
+  let page = 0;
+  let totalPages = 1;
+  while (page < totalPages && page < 200) {
+    const r = await fetchAllPayments(page, PAGE_SIZE);
+    out.push(...(r.content ?? []));
+    totalPages = Math.max(1, Math.ceil((r.totalElements ?? 0) / PAGE_SIZE));
+    page++;
+  }
+  return out.filter(isPrevPendingTxn);
 };
 
 /* ───────────── Accessibility helpers ───────────── */
@@ -393,6 +441,67 @@ const fetchTenantDetailsFromRents = async (
       });
     }
   }
+
+  // NEW: pending views also include each tenant's own Pending Amount
+  // (Tenant.pendingAmount), so the list adds up to the card above it. Tenants
+  // with a Pending Amount but no unpaid Rent record are listed too.
+  if (!isCollected) {
+    for (const t of tenants) {
+      const tp = Math.max(0, Number((t as any).pendingAmount ?? 0));
+      if (!(tp > 0)) continue;
+
+      if (branchId) {
+        const tb = tenantBranchOf(t, roomMap);
+        if (tb == null || tb !== Number(branchId)) continue;
+      }
+
+      const tid = Number((t as any).id);
+      const existing = map.get(tid);
+      if (existing) {
+        existing.pendingAmount += tp;
+      } else {
+        const room = roomMap.get(Number((t as any).roomId));
+        map.set(tid, {
+          tenantId: tid,
+          tenantName: (t as any).name ?? `Tenant #${tid}`,
+          roomNumber: room?.roomNumber ?? "—",
+          bedNumber: (t as any).bedId != null
+            ? (bedMap.get(Number((t as any).bedId)) ?? String((t as any).bedId))
+            : "—",
+          collectedAmount: 0,
+          pendingAmount: tp,
+        });
+      }
+    }
+  }
+
+  // Collected views also list payments made against the previous Pending Amount.
+  if (isCollected) {
+    try {
+      const prev = await fetchPrevPendingPayments();
+      for (const p of prev) {
+        if (isCurrent && !isInCurrentMonth(p)) continue;
+        const tid = Number(p.tenantId);
+        const amt = Number(p.amount ?? 0);
+        const existing = map.get(tid);
+        if (existing) {
+          existing.collectedAmount += amt;
+        } else {
+          map.set(tid, {
+            tenantId: tid,
+            tenantName: p.tenantName ?? `Tenant #${tid}`,
+            roomNumber: p.roomNumber ?? "—",
+            bedNumber: "—",
+            collectedAmount: amt,
+            pendingAmount: 0,
+          });
+        }
+      }
+    } catch {
+      /* list still works with rent-only data */
+    }
+  }
+
   return Array.from(map.values());
 };
 
@@ -447,10 +556,32 @@ const computeWardenFinancials = async (branchId: number) => {
       currentPending += unpaid;
     }
   }
+
+  // Payments made against previous Pending Amounts (already scoped to this warden's branch).
+  try {
+    const prev = await fetchPrevPendingPayments();
+    for (const p of prev) {
+      const amt = Number(p.amount ?? 0);
+      overallCollected += amt;
+      if (isInCurrentMonth(p)) currentCollected += amt;
+    }
+  } catch {
+    /* keep rent-only figures */
+  }
+
+  // NEW: add the branch's tenant Pending Amounts to both pending figures.
+  const branchTenantPending = sumTenantPending(
+    tenants.filter((t: any) => tenantBranchOf(t, roomMap) === branchId)
+  );
+  currentPending += branchTenantPending;
+  overallPending += branchTenantPending;
+
   return { currentCollected, currentPending, overallCollected, overallPending };
 };
 
-const computeTenantFinancials = async (tenantId: number) => {
+// `extraPending` = the tenant's own Pending Amount (Tenant.pendingAmount),
+// added to both pending figures.
+const computeTenantFinancials = async (tenantId: number, extraPending = 0) => {
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
   const currentYear = now.getFullYear();
@@ -481,6 +612,23 @@ const computeTenantFinancials = async (tenantId: number) => {
       currentMonthPending += unpaid;
     }
   }
+
+  // Payments made against the previous Pending Amount (by the tenant or recorded by staff).
+  try {
+    const history: any[] = await getTenantPaymentHistory(tenantId);
+    for (const p of history.filter(isPrevPendingTxn)) {
+      const amt = Number(p.amount ?? 0);
+      overallPaid += amt;
+      if (isInCurrentMonth(p)) currentMonthPaid += amt;
+    }
+  } catch {
+    /* keep rent-only figures */
+  }
+
+  const extra = Math.max(0, Number(extraPending) || 0);
+  currentMonthPending += extra;
+  overallPending += extra;
+
   return { currentMonthPaid, currentMonthPending, overallPaid, overallPending };
 };
 
@@ -642,11 +790,15 @@ const AdminDetailModal = ({ mode, branchId, onClose }: AdminDetailModalProps) =>
 interface TenantDetailModalProps {
   mode: TenantDetailMode;
   tenantId: number;
+  // NEW: the tenant's own Pending Amount, listed as an extra row in the
+  // two pending views (this month / all-time) and included in their total.
+  extraPending?: number;
   onClose: () => void;
 }
 
-const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) => {
+const TenantDetailModal = ({ mode, tenantId, extraPending = 0, onClose }: TenantDetailModalProps) => {
   const [rows, setRows] = useState<RentRecord[]>([]);
+  const [prevPaid, setPrevPaid] = useState<{ id: number; amount: number; when: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -681,6 +833,27 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
         });
 
         setRows(filtered);
+
+        // Paid views also list payments made against the previous Pending Amount.
+        if (mode === "thisMonthPaid" || mode === "overallPaid") {
+          try {
+            const hist: any[] = await getTenantPaymentHistory(tenantId);
+            setPrevPaid(
+              hist
+                .filter(isPrevPendingTxn)
+                .filter((p) => mode === "overallPaid" || isInCurrentMonth(p))
+                .map((p) => ({
+                  id: Number(p.id),
+                  amount: Number(p.amount ?? 0),
+                  when: new Date(p.verifiedAt ?? p.submittedAt).toLocaleDateString(),
+                }))
+            );
+          } catch {
+            setPrevPaid([]);
+          }
+        } else {
+          setPrevPaid([]);
+        }
       } catch {
         setError("Failed to load payment records. Please try again.");
       } finally {
@@ -703,9 +876,19 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
       return sortAsc ? av - bv : bv - av;
     });
 
-  const total = filtered.reduce(
-    (s, r) => s + (isPaidMode ? (r.paidAmount ?? 0) : (r.pendingAmount ?? 0)), 0
-  );
+  // The tenant's own Pending Amount row (pending views only; hidden while a
+  // search term is active, since it doesn't belong to any month).
+  const showExtra = !isPaidMode && extraPending > 0 && search.trim() === "";
+  // Payments made against the previous Pending Amount (paid views only).
+  const showPrevPaid = isPaidMode && prevPaid.length > 0 && search.trim() === "";
+  const prevPaidTotal = showPrevPaid ? prevPaid.reduce((s, x) => s + x.amount, 0) : 0;
+
+  const total =
+    filtered.reduce(
+      (s, r) => s + (isPaidMode ? (r.paidAmount ?? 0) : (r.pendingAmount ?? 0)), 0
+    ) + (showExtra ? extraPending : 0) + prevPaidTotal;
+
+  const extraCount = (showExtra ? 1 : 0) + (showPrevPaid ? prevPaid.length : 0);
 
   return (
     <div
@@ -748,7 +931,7 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
             <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">Loading records…</div>
           ) : error ? (
             <div role="alert" className="flex items-center justify-center py-16 text-sm text-destructive">{error}</div>
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && !showExtra && !showPrevPaid ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <CheckCircle2 className="h-8 w-8 opacity-30" aria-hidden="true" />
               <p className="text-sm">No records found</p>
@@ -813,13 +996,39 @@ const TenantDetailModal = ({ mode, tenantId, onClose }: TenantDetailModalProps) 
                     </td>
                   </tr>
                 ))}
+                {showExtra && (
+                  <tr className="hover:bg-muted/30 transition-colors">
+                    <td className="px-5 py-3 text-muted-foreground text-xs">{filtered.length + 1}</td>
+                    <td className="px-4 py-3" colSpan={4}>
+                      <div className="font-medium">Pending Amount</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">Previous dues on your account</div>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <span className="font-semibold text-rose-600">₹{Math.round(extraPending).toLocaleString()}</span>
+                    </td>
+                  </tr>
+                )}
+                {showPrevPaid && prevPaid.map((p, idx) => (
+                  <tr key={`prev-${p.id}`} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-5 py-3 text-muted-foreground text-xs">{filtered.length + idx + 1}</td>
+                    <td className="px-4 py-3" colSpan={4}>
+                      <div className="font-medium">Previous Pending Amount</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">Paid on {p.when}</div>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <span className="font-semibold text-emerald-700">₹{Math.round(p.amount).toLocaleString()}</span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
         </div>
-        {!loading && filtered.length > 0 && (
+        {!loading && (filtered.length > 0 || showExtra || showPrevPaid) && (
           <div className="px-6 py-3 border-t bg-muted/30 flex justify-between items-center">
-            <span className="text-xs text-muted-foreground">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</span>
+            <span className="text-xs text-muted-foreground">
+              {filtered.length + extraCount} record{filtered.length + extraCount !== 1 ? "s" : ""}
+            </span>
             <span className={`text-sm font-bold ${isPaidMode ? "text-emerald-700" : "text-rose-600"}`}>
               Total: ₹{Math.round(total).toLocaleString()}
             </span>
@@ -1021,7 +1230,12 @@ const TenantDashboardView = ({ data, financials }: { data: TenantDashboard; fina
   return (
     <div>
       {detailMode && tenantId ? (
-        <TenantDetailModal mode={detailMode} tenantId={tenantId} onClose={() => setDetailMode(null)} />
+        <TenantDetailModal
+          mode={detailMode}
+          tenantId={tenantId}
+          extraPending={Number(data.tenantPendingAmount ?? 0)}
+          onClose={() => setDetailMode(null)}
+        />
       ) : null}
       <SectionHeading>My Room &amp; Bed Details</SectionHeading>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -1095,28 +1309,31 @@ const Dashboard = () => {
           if (!data) throw new Error("Empty response");
           setTenantData(data);
 
+          // The tenant's own Pending Amount (Tenant.pendingAmount).
+          const tenantExtra = Math.max(0, Number(data.tenantPendingAmount ?? 0));
+
           const tenantId =
             data.tenantId ??
             Number(sessionStorage.getItem("tenantId") ?? sessionStorage.getItem("userId") ?? 0);
 
           if (tenantId) {
             try {
-              const fin = await computeTenantFinancials(tenantId);
+              const fin = await computeTenantFinancials(tenantId, tenantExtra);
               setTenantFin(fin);
             } catch {
               setTenantFin({
                 currentMonthPaid: data.currentMonthPaid ?? 0,
-                currentMonthPending: data.currentMonthPending ?? 0,
+                currentMonthPending: (data.currentMonthPending ?? 0) + tenantExtra,
                 overallPaid: data.overallPaid ?? 0,
-                overallPending: data.overallPending ?? 0,
+                overallPending: (data.overallPending ?? 0) + tenantExtra,
               });
             }
           } else {
             setTenantFin({
               currentMonthPaid: data.currentMonthPaid ?? 0,
-              currentMonthPending: data.currentMonthPending ?? 0,
+              currentMonthPending: (data.currentMonthPending ?? 0) + tenantExtra,
               overallPaid: data.overallPaid ?? 0,
-              overallPending: data.overallPending ?? 0,
+              overallPending: (data.overallPending ?? 0) + tenantExtra,
             });
           }
         } catch (err: any) {
@@ -1172,7 +1389,21 @@ const Dashboard = () => {
           return;
         }
 
-        setGlobalData(res);
+        // ADMIN: the backend totals only cover Rent records, so add every
+        // tenant's own Pending Amount on top of both pending cards.
+        let tenantPendingTotal = 0;
+        try {
+          const allTenants = await fetchAll("/tenants");
+          tenantPendingTotal = sumTenantPending(allTenants);
+        } catch {
+          tenantPendingTotal = 0;
+        }
+
+        setGlobalData({
+          ...res,
+          pendingDues: (res.pendingDues ?? 0) + tenantPendingTotal,
+          overallPending: (res.overallPending ?? 0) + tenantPendingTotal,
+        });
       } catch (err: any) {
         const status = err?.response?.status;
         setError(

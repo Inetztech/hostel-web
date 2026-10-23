@@ -835,6 +835,10 @@ const CheckoutPage = () => {
 
   const registrationFees = Number(selectedTenant?.registrationFees ?? 0);
 
+  // The Pending Amount entered on the tenant at check-in (Add / Edit Tenant).
+  // It is still owed by the tenant, so it is added to the amount payable.
+  const tenantPendingAmount = Number(selectedTenant?.pendingAmount ?? 0);
+
   const isDailyStay = selectedTenant?.tenantStay === "DAILY";
 
   const advanceEbCollected = isDailyStay
@@ -1527,14 +1531,17 @@ const CheckoutPage = () => {
     ? (hasFinalReading ? finalEBAmount - advanceEbCollected : 0)
     : finalEBAmount;
 
+  // The tenant's Pending Amount (entered at check-in) is added on top of
+  // everything else that is owed at check-out.
   const calculatedNetPayable = summary
     ? summary.totalRentDue +
       tenantEBDue +
       ebPayableAfterAdvance +
       maintenanceCharge +
-      extraRent -
+      extraRent +
+      tenantPendingAmount -
       summary.advancePaid
-    : maintenanceCharge;
+    : maintenanceCharge + tenantPendingAmount;
 
   const handleConfirmCheckout = async () => {
     if (!selectedTenant) {
@@ -1801,6 +1808,7 @@ const CheckoutPage = () => {
                           ["Monthly Rent", `₹${selectedTenant.monthlyRent}`],
                         ] as [string, string][])),
                     ["Advance Paid", `₹${selectedTenant.advance}`],
+                    ["Pending Amount", `₹${tenantPendingAmount.toLocaleString()}`],
                     ["Room Type",    isAcRoom ? "AC" : "Non-AC"],
                     ["EB Mode",      businessModelNote ? `${ebModeLabel} (${businessModelNote})` : ebModeLabel],
                   ].map(([label, value]) => (
@@ -2081,6 +2089,17 @@ const CheckoutPage = () => {
                     </span>
                     <span className="font-medium">
                       ₹{Math.round(tenantEBDue).toLocaleString()}
+                    </span>
+                  </div>
+
+                  {/* Pending Amount entered on the tenant at check-in. It is
+                      added to the Balance to Pay below. */}
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">
+                      Pending Amount
+                    </span>
+                    <span className="font-medium">
+                      ₹{Math.round(tenantPendingAmount).toLocaleString()}
                     </span>
                   </div>
 

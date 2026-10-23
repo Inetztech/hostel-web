@@ -234,7 +234,7 @@ type FormState = {
   idProofType: IdProofType | ""; idProofNumber: string;
   branchId: number | ""; roomId: number | ""; bedId: number | "";
   tenantStay: TenantStay | "";
-  advance: string; monthlyRent: string; registrationFees: string;
+  advance: string; monthlyRent: string; registrationFees: string; pendingAmount: string;
   noOfDays: string; amountPerDay: string; ebAmount: string;
   currentReading: string; acJoinReading: string;
   checkInDate: string; idProofDoc: File | null;
@@ -245,7 +245,7 @@ const EMPTY_FORM: FormState = {
   name: "", phone: "", email: "", idProofType: "", idProofNumber: "",
   branchId: "", roomId: "", bedId: "",
   tenantStay: "",
-  advance: "", monthlyRent: "", registrationFees: "",
+  advance: "", monthlyRent: "", registrationFees: "", pendingAmount: "",
   noOfDays: "", amountPerDay: "", ebAmount: "",
   currentReading: "", acJoinReading: "", checkInDate: "", idProofDoc: null,
   tenantPhoto: null,
@@ -579,6 +579,26 @@ const TenantForm = ({
   const isMonthly = form.tenantStay === "MONTHLY";
   const dailyTotal = computeDailyTotal(form.noOfDays, form.amountPerDay, form.ebAmount);
 
+  /* Billing / reading / date inputs are always rendered with black text
+     (Add and Edit dialogs share this form). */
+  const blackInput = "rounded-lg text-black";
+
+  const pendingField = (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-muted-foreground">Pending Amount (₹)</label>
+      <Input aria-label="Pending amount" className={`${blackInput} ${errCls("pendingAmount")}`} type="number" inputMode="numeric" min="0" step="1" placeholder="Pending Amount"
+        value={form.pendingAmount} onChange={(e) => set("pendingAmount")(e.target.value)} />
+      <FieldError field="pendingAmount" />
+    </div>
+  );
+
+  const checkInField = (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-muted-foreground">Check-in Date</label>
+      <Input aria-label="Check-in date" className={blackInput} type="date" value={form.checkInDate} onChange={(e) => set("checkInDate")(e.target.value)} />
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {fraudResult && <FraudCard fraud={fraudResult} tenantName={form.name} tenantPhone={form.phone} />}
@@ -765,40 +785,56 @@ const TenantForm = ({
         </p>
       )}
 
+      {/* No stay type chosen yet: Pending Amount stays hidden until Monthly or
+          Daily is selected; only the Check-in Date is shown. */}
+      {!form.tenantStay && (
+        <div className="grid grid-cols-2 gap-4">
+          {checkInField}
+          <div />
+        </div>
+      )}
+
+      {/* ── MONTHLY order: Registration Fees, Advance, Rent, Pending Amount,
+          Current EB Reading, Current AC EB Reading, Check-in Date ── */}
       {isMonthly && (
         <>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Advance</label>
-              <Input aria-label="Advance" className="rounded-lg" type="number" placeholder="Advance" value={form.advance} onChange={(e) => set("advance")(e.target.value)} />
+              <label className="text-xs font-medium text-muted-foreground">Registration Fees</label>
+              <Input aria-label="Registration fees" className={blackInput} type="number" placeholder="Registration Fees" value={form.registrationFees} onChange={(e) => set("registrationFees")(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Registration Fees</label>
-              <Input aria-label="Registration fees" className="rounded-lg" type="number" placeholder="Registration Fees" value={form.registrationFees} onChange={(e) => set("registrationFees")(e.target.value)} />
+              <label className="text-xs font-medium text-muted-foreground">Advance</label>
+              <Input aria-label="Advance" className={blackInput} type="number" placeholder="Advance" value={form.advance} onChange={(e) => set("advance")(e.target.value)} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Rent</label>
-              <Input aria-label="Rent" className="rounded-lg" type="number" placeholder="Rent" value={form.monthlyRent} onChange={(e) => set("monthlyRent")(e.target.value)} />
+              <Input aria-label="Rent" className={blackInput} type="number" placeholder="Rent" value={form.monthlyRent} onChange={(e) => set("monthlyRent")(e.target.value)} />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
-              <Input aria-label="Current EB reading" className="rounded-lg" type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
-            </div>
+            {pendingField}
           </div>
 
-          {isAC && (
-            <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
+              <Input aria-label="Current EB reading" className={blackInput} type="number" placeholder="Current EB Reading" value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
+            </div>
+            {isAC ? (
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Current AC EB Reading</label>
-                <Input aria-label="Current AC EB reading" className="rounded-lg" type="number" placeholder="Current AC EB Reading"
+                <Input aria-label="Current AC EB reading" className={blackInput} type="number" placeholder="Current AC EB Reading"
                   value={form.acJoinReading} onChange={(e) => set("acJoinReading")(e.target.value)} />
               </div>
-              <div />
-            </div>
-          )}
+            ) : <div />}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {checkInField}
+            <div />
+          </div>
         </>
       )}
 
@@ -808,49 +844,51 @@ const TenantForm = ({
                                       Does NOT affect the total.
             • "Advance EB Amount"   → money (₹), saved as ebAmount.
                                       This is the term added to the total.
-          Total = (No. of Days × Amount/Day) + Advance EB Amount.  ── */}
+          Total = (No. of Days × Amount/Day) + Advance EB Amount.
+          Order: No. of Days, Amount/Day, Pending Amount, Advance EB Amount,
+          Current EB Reading, Current AC EB Reading, Total, Check-in Date. ── */}
       {isDaily && (
         <>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">No. of Days <span className="text-red-600">*</span></label>
-              <Input aria-label="Number of days" className={`rounded-lg ${errCls("noOfDays")}`} type="number" placeholder="No. of Days"
+              <Input aria-label="Number of days" className={`${blackInput} ${errCls("noOfDays")}`} type="number" placeholder="No. of Days"
                 value={form.noOfDays} onChange={(e) => set("noOfDays")(e.target.value)} />
               <FieldError field="noOfDays" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Amount / Day <span className="text-red-600">*</span></label>
-              <Input aria-label="Amount per day" className={`rounded-lg ${errCls("amountPerDay")}`} type="number" placeholder="Amount per Day"
+              <Input aria-label="Amount per day" className={`${blackInput} ${errCls("amountPerDay")}`} type="number" placeholder="Amount per Day"
                 value={form.amountPerDay} onChange={(e) => set("amountPerDay")(e.target.value)} />
               <FieldError field="amountPerDay" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
-              <Input aria-label="Current EB reading" className="rounded-lg" type="number" placeholder="Current EB Reading"
-                value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
-              <p className="text-[11px] text-muted-foreground">Meter reading at check-in.</p>
-            </div>
+            {pendingField}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Advance EB Amount (₹)</label>
-              <Input aria-label="Advance EB amount" className="rounded-lg" type="number" placeholder="Advance EB Amount"
+              <Input aria-label="Advance EB amount" className={blackInput} type="number" placeholder="Advance EB Amount"
                 value={form.ebAmount} onChange={(e) => set("ebAmount")(e.target.value)} />
               <p className="text-[11px] text-muted-foreground">Collected upfront and added to the total.</p>
             </div>
           </div>
 
-          {isAC && (
-            <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Current EB Reading</label>
+              <Input aria-label="Current EB reading" className={blackInput} type="number" placeholder="Current EB Reading"
+                value={form.currentReading} onChange={(e) => set("currentReading")(e.target.value)} />
+              <p className="text-[11px] text-muted-foreground">Meter reading at check-in.</p>
+            </div>
+            {isAC ? (
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Current AC EB Reading</label>
-                <Input aria-label="Current AC EB reading" className="rounded-lg" type="number" placeholder="Current AC EB Reading"
+                <Input aria-label="Current AC EB reading" className={blackInput} type="number" placeholder="Current AC EB Reading"
                   value={form.acJoinReading} onChange={(e) => set("acJoinReading")(e.target.value)} />
               </div>
-              <div />
-            </div>
-          )}
+            ) : <div />}
+          </div>
 
           <div className="rounded-lg border border-input bg-muted/40 px-3 py-2.5 flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
@@ -858,16 +896,13 @@ const TenantForm = ({
             </span>
             <span className="text-sm font-semibold">₹{dailyTotal.toFixed(2)}</span>
           </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {checkInField}
+            <div />
+          </div>
         </>
       )}
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Check-in Date</label>
-          <Input aria-label="Check-in date" className="rounded-lg" type="date" value={form.checkInDate} onChange={(e) => set("checkInDate")(e.target.value)} />
-        </div>
-        <div />
-      </div>
     </div>
   );
 };
@@ -1463,6 +1498,9 @@ const TenantsPage = () => {
       if (form.acJoinReading) fd.append("acJoinReading", form.acJoinReading);
     }
 
+    // Pending Amount (₹) applies to both stay types; blank is stored as 0.
+    fd.append("pendingAmount", form.pendingAmount.trim() || "0");
+
     if (form.checkInDate)   fd.append("checkInDate", form.checkInDate);
     if (form.idProofDoc)    fd.append("idProofDocument", form.idProofDoc);
     if (form.tenantPhoto)   fd.append("tenantPhoto", form.tenantPhoto);
@@ -1493,6 +1531,16 @@ const TenantsPage = () => {
       }
       if (form.amountPerDay === "" || isNaN(Number(form.amountPerDay)) || Number(form.amountPerDay) < 0) {
         errors.amountPerDay = "Amount per day is required";
+      }
+    }
+
+    // Mirrors the backend: pendingAmount is a whole number @Min(0). Blank is allowed (-> 0).
+    const pending = form.pendingAmount.trim();
+    if (pending !== "") {
+      if (isNaN(Number(pending)) || Number(pending) < 0) {
+        errors.pendingAmount = "Pending amount cannot be negative";
+      } else if (!/^\d{1,9}$/.test(pending)) {
+        errors.pendingAmount = "Enter a whole number (no decimals)";
       }
     }
 
@@ -2027,7 +2075,7 @@ const handleAdd = async () => {
                       errors={formErrors} clearError={clearFormError}
                     />
                   )}
-                  <DialogFooter>
+                  <DialogFooter className="mt-6">
                     <DialogClose asChild>
                       <Button variant="outline" className="rounded-lg" onClick={() => { setAddResultFraud(null); setLiveFraud(null); }}>
                         {addResultFraud ? "Close" : "Cancel"}
@@ -2250,16 +2298,17 @@ const handleAdd = async () => {
                   <th>BRANCH</th>
                   <th>CONTACT</th>
                   <th>CHECK-IN DATE</th>
-                  <th>RENT / TOTAL (₹)</th>
+                  <th style={{ textAlign: 'center' }}>RENT / TOTAL (₹)</th>
+                  <th>PENDING (₹)</th>
                   <th>STATUS</th>
                   <th style={{ textAlign: 'center' }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} className="text-center py-12 text-slate-500">Loading tenants...</td></tr>
+                  <tr><td colSpan={9} className="text-center py-12 text-slate-500">Loading tenants...</td></tr>
                 ) : tenants.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-12 text-slate-500">No tenants found.</td></tr>
+                  <tr><td colSpan={9} className="text-center py-12 text-slate-500">No tenants found.</td></tr>
                 ) : (
                   tenants.map((t) => {
                     const avatarColor = COLORS[t.id % COLORS.length];
@@ -2285,6 +2334,9 @@ const handleAdd = async () => {
                     const rentDisplay = isDailyStay
                       ? new Intl.NumberFormat('en-IN').format(t.totalAmount ?? 0)
                       : new Intl.NumberFormat('en-IN').format(t.monthlyRent || 0);
+
+                    const pendingAmountNum = Number(t.pendingAmount ?? 0);
+                    const pendingDisplay = new Intl.NumberFormat('en-IN').format(pendingAmountNum);
 
                     const statusClass =
                       t.status === "Active" ? "active" :
@@ -2322,11 +2374,17 @@ const handleAdd = async () => {
                           </div>
                         </td>
                         <td><div className="tn-date">{t.checkInDate}</div></td>
-                        <td>
+                        <td style={{ textAlign: 'center' }}>
                           <div className="tn-rent">₹{rentDisplay}</div>
                           <div className={`tn-stay-badge ${isDailyStay ? "daily" : "monthly"}`}>
                             {isDailyStay ? <CalendarDays size={10} className="shrink-0" aria-hidden="true" /> : <CalendarClock size={10} className="shrink-0" aria-hidden="true" />}
                             {stayLabel(t.tenantStay)}{isDailyStay && t.noOfDays ? ` · ${t.noOfDays}d` : ""}
+                          </div>
+                        </td>
+                        <td>
+                          {/* Pending amount is always shown in black */}
+                          <div className="tn-rent" style={{ color: "#000000" }}>
+                            ₹{pendingDisplay}
                           </div>
                         </td>
                         <td>
@@ -2368,6 +2426,7 @@ const handleAdd = async () => {
                                 tenantStay: (t.tenantStay as TenantStay) ?? "MONTHLY",
                                 advance: String(t.advance), monthlyRent: String(t.monthlyRent),
                                 registrationFees: String(t.registrationFees ?? ""),
+                                pendingAmount: String(t.pendingAmount ?? 0),
                                 noOfDays: String(t.noOfDays ?? ""),
                                 amountPerDay: String(t.amountPerDay ?? ""),
                                 // Advance EB Amount (₹)
@@ -2486,7 +2545,7 @@ const handleAdd = async () => {
               existingPhoto={editTenant?.tenantPhoto}
               errors={formErrors} clearError={clearFormError}
             />
-            <DialogFooter>
+            <DialogFooter className="mt-6">
               <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
               <Button className="rounded-lg" onClick={handleEdit}>Update Tenant</Button>
             </DialogFooter>
@@ -2550,6 +2609,7 @@ const handleAdd = async () => {
                         ["Registration Fees", `₹${(viewTenant as any).registrationFees ?? 0}`],
                         ["Monthly Rent",      `₹${viewTenant.monthlyRent ?? 0}`],
                       ] as [string, string][])),
+                  ["Pending Amount",    `₹${viewTenant.pendingAmount ?? 0}`],
                   ["Status",            statusLabel(viewTenant.status)],
                   ["Check-in",          viewTenant.checkInDate],
                   ["Check-out",         viewTenant.checkOutDate ?? "-"],

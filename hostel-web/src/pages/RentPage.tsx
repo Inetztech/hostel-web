@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import api from "@/lib/api";
 
 import {
   getRooms,
@@ -71,6 +72,13 @@ type RentRow = {
   pending: number;
   previousPending: number;
   currentPending: number;
+  // NEW: the tenant's own "Pending (₹)" figure from the Tenants page
+  // (Tenant.pendingAmount). Shown in its own PENDING AMT column; it is
+  // display-only and is NOT added into total / pending, to avoid
+  // double-counting amounts that are already billed through Rent records.
+  // UPDATE: it IS now included in `pending` (PENDING = rent + EB + damage +
+  // due + tenantPending), but not in `total`.
+  tenantPending?: number;
   rentRecord: Rent | undefined;
   unitId: number | undefined;
   amount: number;
@@ -359,13 +367,10 @@ const ActionCell = ({
     if (!localAmount || isNaN(inputAmount) || inputAmount <= 0)
       return toast.error("Enter valid amount");
 
-    const totalPending = bill.pending;
-    if (inputAmount > totalPending && totalPending > 0) {
-      toast.error(
-        `Amount ₹${inputAmount} exceeds pending ₹${Math.round(totalPending)}. Please enter ₹${Math.round(totalPending)} or less.`,
-        { duration: 4000 }
-      );
-      setLocalAmount(String(Math.round(totalPending)));
+    // Payment is validated and allocated atomically by the backend across
+    // older generated rents, this month's rent, and manual previous dues.
+    if (inputAmount > bill.pending + 0.001) {
+      toast.error(`Amount exceeds outstanding ₹${Math.round(bill.pending)}.`);
       return;
     }
 
@@ -376,14 +381,17 @@ const ActionCell = ({
   };
 
   const showTxnId = localMode && localMode !== "CASH";
-  const isUnpaid  =
-    rentRecord && (rentRecord.paymentStatus || "").toUpperCase() !== "PAID";
+  // Keep collection available when monthly rent is paid but manual previous dues remain.
+  const isUnpaid = Boolean(rentRecord) && (
+    (rentRecord.paymentStatus || "").toUpperCase() !== "PAID" ||
+    (bill.tenantPending ?? 0) > 0
+  );
 
   // A daily-stay tenant who has nothing outstanding (ebBalance >= 0,
   // i.e. exactly settled or owed a refund) and no Rent record yet has
   // nothing to generate or collect here.
   const isSettledDailyNoAction =
-    !rentRecord && bill.isDaily && (bill.ebBalance ?? 0) >= 0;
+    !rentRecord && bill.isDaily && (bill.ebBalance ?? 0) >= 0 && (bill.tenantPending ?? 0) <= 0;
 
   if (isSettledDailyNoAction) {
     // A11Y: was text-slate-400 (low contrast) — now text-slate-600.
@@ -553,6 +561,14 @@ const RentPage = () => {
   const tenantMap = useMemo(() => {
     const map = new Map<number, Tenant>();
     tenants.forEach((t) => map.set(Number(t.id), t));
+    return map;
+  }, [tenants]);
+
+  // NEW: the tenant's own "Pending (₹)" figure as shown on the Tenants page
+  // (Tenant.pendingAmount), keyed by tenantId.
+  const tenantPendingMap = useMemo(() => {
+    const map = new Map<number, number>();
+    tenants.forEach((t) => map.set(Number(t.id), Number(t.pendingAmount ?? 0)));
     return map;
   }, [tenants]);
 
@@ -1280,11 +1296,12 @@ const RentPage = () => {
           rentPerBed:    totalPaidAtCheckIn,
           displayEB:     liveEB,
           damageAmount:  displayDamage,
-          total:         advanceRent + liveEB + displayDamage,
+          total:         advanceRent + liveEB + displayDamage + (tenantPendingMap.get(Number(b.tenantId)) ?? 0),
           paid:          totalPaidAtCheckIn,
           previousPending: 0,
-          currentPending:  additionalEBDue + displayDamage,
-          pending:         additionalEBDue + displayDamage,
+          currentPending:  additionalEBDue + displayDamage + (tenantPendingMap.get(Number(b.tenantId)) ?? 0),
+          pending:         additionalEBDue + displayDamage + (tenantPendingMap.get(Number(b.tenantId)) ?? 0),
+          tenantPending:   tenantPendingMap.get(Number(b.tenantId)) ?? 0,
           rentRecord:      undefined,
           unitId:          room?.unitId,
           amount:          liveEB,
@@ -1334,20 +1351,24 @@ const RentPage = () => {
       const displayDamage = rentRecord
         ? recordDamage
         : (pendingDamageMap.get(Number(b.tenantId)) ?? 0);
-      const displayTotal  = rentRecord
+      // TOTAL = rent + EB + damage + due + tenant Pending Amount.
+      const tenantPendingAmt = tenantPendingMap.get(Number(b.tenantId)) ?? 0;
+      const displayTotal  = (rentRecord
         ? (isPaid ? recordTotal : displayRent + displayEB + displayDamage + due.dueAmount)
-        : rentPerBed + displayEB + displayDamage + due.dueAmount;
+        : rentPerBed + displayEB + displayDamage + due.dueAmount) + tenantPendingAmt;
 
       const currentPaid   = Number(rentRecord?.paidAmount || 0);
       const currentStatus = normalizeStatus(rentRecord?.paymentStatus);
 
+      // PENDING = TOTAL - paid. A fully paid Rent record still leaves the
+      // tenant's Pending Amount outstanding (it isn't stored on the record).
       const currentPending = rentRecord
         ? currentStatus === "PAID"
-          ? 0
+          ? tenantPendingAmt
           : currentStatus === "PARTIAL"
           ? displayTotal - currentPaid
           : displayTotal
-        : rentPerBed + displayEB + displayDamage + due.dueAmount;
+        : displayTotal;
 
       const { previousPending } = rentRecord
         ? computePreviousPending(b.tenantId, month, year, rents)
@@ -1387,6 +1408,7 @@ const RentPage = () => {
         pending:       rentRecord
           ? previousPending + currentPending
           : currentPending,
+        tenantPending: tenantPendingAmt,
         rentRecord,
         unitId:        room?.unitId,
         // The resolved displayEB so "Generate" bills the same figure shown.
@@ -1462,12 +1484,13 @@ const RentPage = () => {
         const currentPaid  = Number(r.paidAmount  || 0);
         const status       = normalizeStatus(r.paymentStatus);
 
+        const orphanTenantPending = tenantPendingMap.get(Number(r.tenantId)) ?? 0;
         const currentPending =
-          status === "PAID"
+          (status === "PAID"
             ? 0
             : status === "PARTIAL"
             ? recordTotal - currentPaid
-            : recordTotal;
+            : recordTotal) + orphanTenantPending;
 
         const { previousPending } = computePreviousPending(
           Number(r.tenantId),
@@ -1488,11 +1511,12 @@ const RentPage = () => {
           dueAmount:       Number(r.dueAmount ?? 0),
           dueDays:         Number(r.dueDays ?? 0),
           duePerDay:       Number(r.duePerDay ?? 0),
-          total:           recordTotal,
+          total:           recordTotal + orphanTenantPending,
           paid:            currentPaid,
           previousPending,
           currentPending,
           pending:         previousPending + currentPending,
+          tenantPending:   tenantPendingMap.get(Number(r.tenantId)) ?? 0,
           rentRecord:      r,
           unitId:          room?.unitId,
           amount:          recordEB,
@@ -1572,11 +1596,12 @@ const RentPage = () => {
           rentPerBed:    totalPaidAtCheckIn,
           displayEB:     grossAmount,
           damageAmount:  displayDamage,
-          total:         advanceRent + grossAmount + displayDamage,
+          total:         advanceRent + grossAmount + displayDamage + (tenantPendingMap.get(tenantId) ?? 0),
           paid:          totalPaidAtCheckIn,
           previousPending: 0,
-          currentPending:  additionalEBDue + displayDamage,
-          pending:         additionalEBDue + displayDamage,
+          currentPending:  additionalEBDue + displayDamage + (tenantPendingMap.get(tenantId) ?? 0),
+          pending:         additionalEBDue + displayDamage + (tenantPendingMap.get(tenantId) ?? 0),
+          tenantPending:   tenantPendingMap.get(tenantId) ?? 0,
           rentRecord:      undefined,
           unitId:          room?.unitId,
           amount:          grossAmount,
@@ -1631,11 +1656,12 @@ const RentPage = () => {
           displayEB:     0,
           rentPerBed,
           damageAmount,
-          total:         rentPerBed + damageAmount,
+          total:         rentPerBed + damageAmount + (tenantPendingMap.get(Number(tenantId)) ?? 0),
           paid:          0,
           previousPending: 0,
-          currentPending:  damageAmount,
-          pending:         damageAmount,
+          currentPending:  damageAmount + (tenantPendingMap.get(Number(tenantId)) ?? 0),
+          pending:         damageAmount + (tenantPendingMap.get(Number(tenantId)) ?? 0),
+          tenantPending:   tenantPendingMap.get(Number(tenantId)) ?? 0,
           rentRecord:      undefined,
           unitId:          room?.unitId,
           amount:          0,
@@ -1672,6 +1698,7 @@ const RentPage = () => {
     search,
     tenantNameMap,
     tenantRentMap,
+    tenantPendingMap,
     pendingDamageMap,
     dueConfigByBranch,
     allEBReadings,
@@ -1895,42 +1922,15 @@ const RentPage = () => {
     _bill: RentRow
   ) => {
     try {
-      const rentMonth = Number(rent.rentMonth);
-      const rentYear  = Number(rent.rentYear);
-
-      const { prevUnpaidRents } = computePreviousPending(
-        Number(rent.tenantId),
-        rentMonth,
-        rentYear,
-        rents
-      );
-
-      const sortedPrev = [...prevUnpaidRents].sort((a, b) =>
-        Number(a.rentYear) !== Number(b.rentYear)
-          ? Number(a.rentYear) - Number(b.rentYear)
-          : Number(a.rentMonth) - Number(b.rentMonth)
-      );
-
-      const queue: Rent[] = [...sortedPrev, rent];
-      let remaining = amount;
-
-      for (const record of queue) {
-        if (remaining <= 0) break;
-        const alreadyPaid  = Number(record.paidAmount  || 0);
-        const recordTotal  = Number(record.totalAmount || 0);
-        const recordStatus = normalizeStatus(record.paymentStatus);
-        if (recordStatus === "PAID") continue;
-        const recordPending = recordTotal - alreadyPaid;
-        if (recordPending <= 0) continue;
-        const apply = Math.min(remaining, recordPending);
-        remaining -= apply;
-        await recordPayment(record.id, mode, apply, txnId);
-      }
-
+      await api.put(`/rents/${rent.id}/combined-payment`, {
+        paymentMode: mode,
+        amount,
+        transactionId: txnId,
+      });
       toast.success("Payment recorded");
-      reload();
-    } catch {
-      toast.error("Payment failed");
+      await reload();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? "Payment failed");
     }
   };
 
@@ -1992,7 +1992,7 @@ const RentPage = () => {
         .rt-panel-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
         .rt-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; }
 
-        .rt-table { width: 100%; border-collapse: collapse; min-width: 1300px; }
+        .rt-table { width: 100%; border-collapse: collapse; min-width: 1350px; }
         .rt-table th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
         .rt-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
         .rt-table tr:hover { background: #fdfcff; }
@@ -2115,7 +2115,7 @@ const RentPage = () => {
           .rt-room-trigger { font-size: 12px; padding: 0 8px; }
           .rent-mobile-filters > div:has(input) { grid-column: 1 / -1; }
           .rent-mobile-filters > button { grid-column: 1 / -1; justify-self: start; margin-left: 0 !important; min-height: 36px; }
-          .rt-table { min-width: 1300px; }
+          .rt-table { min-width: 1350px; }
           .rt-table th, .rt-table td { padding: 12px 14px; }
           .rent-mobile-pagination { padding: 12px !important; gap: 10px; flex-wrap: wrap; }
           .rent-mobile-pagination > div { font-size: 12px; }
@@ -2256,7 +2256,8 @@ const RentPage = () => {
                       <th scope="col">EB (₹)</th>
                       <th scope="col">DAMAGE (₹)</th>
                       <th scope="col">DUE (₹)</th>
-                      <th scope="col">EB BALANCE</th>
+                      {/* Tenant's Pending (₹) from the Tenants page; included in TOTAL */}
+                      <th scope="col">PENDING AMT (₹)</th>
                       <th scope="col">TOTAL (₹)</th>
                       <th scope="col">STATUS</th>
                       <th scope="col">PENDING (₹)</th>
@@ -2286,7 +2287,8 @@ const RentPage = () => {
                           displayStatus = sStatus;
 
                           const isOverdueMock = (sStatus === "PENDING" || sStatus === "PARTIAL") && (row.pending > 0);
-                          if (sStatus === "PAID") { statusClass = "paid"; displayStatus = "Paid"; }
+                          if (sStatus === "PAID" && (row.tenantPending ?? 0) > 0) { statusClass = "overdue"; displayStatus = "Previous Due"; }
+                          else if (sStatus === "PAID") { statusClass = "paid"; displayStatus = "Paid"; }
                           else if (isOverdueMock) { statusClass = "overdue"; displayStatus = "Overdue"; }
                           else if (sStatus === "PENDING" || sStatus === "PARTIAL") { statusClass = "pending"; displayStatus = sStatus === "PARTIAL" ? "Partial" : "Pending"; }
                           else { statusClass = "not-due"; displayStatus = "Not Due"; }
@@ -2349,7 +2351,19 @@ const RentPage = () => {
                                 );
                               })()}
                             </td>
-                            <td><span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.displayEB))}</span></td>
+                            <td>
+                              <span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.displayEB))}</span>
+                              {/* Daily-stay only: EB advance vs. actual usage (replaces the old EB BALANCE column). */}
+                              {row.isDaily && row.ebBalance !== undefined && row.ebBalance !== 0 && (
+                                <div className="mt-1">
+                                  {row.ebBalance > 0 ? (
+                                    <span className="rt-eb-badge refund">Refund ₹{new Intl.NumberFormat('en-IN').format(Math.round(row.ebBalance))}</span>
+                                  ) : (
+                                    <span className="rt-eb-badge due">Due ₹{new Intl.NumberFormat('en-IN').format(Math.round(-row.ebBalance))}</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
                             <td>
                               <span className={`rt-value ${row.damageAmount <= 0 ? 'muted' : ''}`}>
                                 {row.damageAmount > 0
@@ -2375,18 +2389,11 @@ const RentPage = () => {
                               )}
                             </td>
                             <td>
-                              {row.isDaily && row.ebBalance !== undefined ? (
-                                row.ebBalance > 0 ? (
-                                  <span className="rt-eb-badge refund">
-                                    Refund ₹{new Intl.NumberFormat('en-IN').format(Math.round(row.ebBalance))}
-                                  </span>
-                                ) : row.ebBalance < 0 ? (
-                                  <span className="rt-eb-badge due">
-                                    Due ₹{new Intl.NumberFormat('en-IN').format(Math.round(-row.ebBalance))}
-                                  </span>
-                                ) : (
-                                  <span className="rt-eb-badge even">Even</span>
-                                )
+                              {/* NEW: same figure as the "Pending (₹)" column on the Tenants page. */}
+                              {(row.tenantPending ?? 0) > 0 ? (
+                                <span className="rt-value text-rose-700">
+                                  {new Intl.NumberFormat('en-IN').format(Math.round(row.tenantPending ?? 0))}
+                                </span>
                               ) : (
                                 <span className="rt-value muted">—</span>
                               )}
@@ -2394,7 +2401,7 @@ const RentPage = () => {
                             <td><span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.total))}</span></td>
                             <td><div className={`rt-status ${statusClass}`}>{displayStatus}</div></td>
                             <td>
-                              <div className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.pending > 0 ? row.pending : (row.isDaily ? 0 : row.total)))}</div>
+                              <div className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(Math.max(0, row.pending)))}</div>
                             </td>
                             <td>
                               <ActionCell bill={row} rentRecord={row.rentRecord} onGenerate={handleGenerate} onPayment={handlePayment} />

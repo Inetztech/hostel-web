@@ -79,7 +79,7 @@ const ProofThumb = ({ path }: { path?: string }) => {
 
 const downloadReceiptPdf = (p: PaymentTransaction) => {
   const receiptNo = `HMS-${String(p.id).padStart(6, "0")}`;
-  const period = `${MONTHS[p.rentMonth - 1]} ${p.rentYear}`;
+  const period = p.rentId == null ? "Previous Pending Amount" : `${MONTHS[p.rentMonth - 1]} ${p.rentYear}`;
 
   const pageWidth = 420;
   const pageHeight = 660;
@@ -189,7 +189,7 @@ const ReceiptPreviewDialog = ({
           <DialogTitle className="flex items-center gap-2">
             <ReceiptIcon className="h-4 w-4 text-primary" aria-hidden="true" /> Payment Receipt
           </DialogTitle>
-          <DialogDescription>Receipt {receiptNo} · {MONTHS[payment.rentMonth - 1]} {payment.rentYear}</DialogDescription>
+          <DialogDescription>Receipt {receiptNo} · {payment.rentId == null ? "Previous Pending Amount" : `${MONTHS[payment.rentMonth - 1]} ${payment.rentYear}`}</DialogDescription>
         </DialogHeader>
 
         <div className="rounded-2xl border overflow-hidden">
@@ -269,9 +269,13 @@ const TenantPayments = () => {
   const [tenantId, setTenantId] = useState<number | null>(null);
   const [rents, setRents] = useState<Rent[]>([]);
   const [history, setHistory] = useState<PaymentTransaction[]>([]);
+  // NEW: the tenant's own "Pending Amount" (Tenant.pendingAmount) — previous
+  // dues that aren't attached to any month's Rent record.
+  const [openingPending, setOpeningPending] = useState(0);
   const [loading, setLoading] = useState(true);
   const [payOpen, setPayOpen] = useState(false);
   const [selectedRentId, setSelectedRentId] = useState<string>("");
+  const PREVIOUS = "previous-pending";
   const [amount, setAmount] = useState("");
   const [mode, setMode] = useState<"CASH" | "UPI">("UPI");
   const [txnId, setTxnId] = useState("");
@@ -282,9 +286,10 @@ const TenantPayments = () => {
   const loadAll = async (tid: number) => {
     setLoading(true);
 
-    const [rentsResult, historyResult] = await Promise.allSettled([
+    const [rentsResult, historyResult, dashResult] = await Promise.allSettled([
       getTenantRents(tid),
       getTenantPaymentHistory(tid),
+      api.get("/dashboard/tenant"),
     ]);
 
     if (rentsResult.status === "fulfilled") {
@@ -299,6 +304,15 @@ const TenantPayments = () => {
     } else {
       console.error("Failed to load payment history:", historyResult.reason);
       toast.error("Failed to load payment history");
+    }
+
+    // The Pending Amount comes from GET /dashboard/tenant (tenantPendingAmount).
+    // If it can't be loaded the page still works with the rent-based dues.
+    if (dashResult.status === "fulfilled") {
+      const d = dashResult.value.data?.data ?? dashResult.value.data ?? {};
+      setOpeningPending(Math.max(0, Number(d.tenantPendingAmount ?? 0)));
+    } else {
+      setOpeningPending(0);
     }
 
     setLoading(false);
@@ -324,10 +338,15 @@ const TenantPayments = () => {
     [rents]
   );
 
-  const openPay = (rentId?: number) => {
-    setSelectedRentId(rentId ? String(rentId) : (dueRents[0] ? String(dueRents[0].id) : ""));
-    const target = dueRents.find((r) => r.id === (rentId ?? dueRents[0]?.id));
-    setAmount(target ? String(Math.round(target.pendingAmount ?? 0)) : "");
+  const hasOpeningPending = openingPending > 0;
+  const rentDuesTotal = dueRents.reduce((s, r) => s + (r.pendingAmount ?? 0), 0);
+
+  const openPay = (rentId?: number | "previous") => {
+    const isPrevious = rentId === "previous";
+    setSelectedRentId(isPrevious ? PREVIOUS : typeof rentId === "number" ? String(rentId)
+      : dueRents[0] ? String(dueRents[0].id) : hasOpeningPending ? PREVIOUS : "");
+    const target = dueRents.find((r) => r.id === (typeof rentId === "number" ? rentId : dueRents[0]?.id));
+    setAmount(isPrevious ? String(openingPending) : target ? String(Math.round(target.pendingAmount ?? 0)) : hasOpeningPending ? String(openingPending) : "");
     setMode("UPI");
     setTxnId("");
     setFile(null);
@@ -335,12 +354,19 @@ const TenantPayments = () => {
   };
 
   const submitPayment = async () => {
-    if (!selectedRentId) { toast.error("Select which month you're paying for"); return; }
-    if (!amount || Number(amount) <= 0) { toast.error("Enter a valid amount"); return; }
+    if (!selectedRentId) { toast.error("Select which due you're paying"); return; }
+    const isPrevious = selectedRentId === PREVIOUS;
+    const paymentAmount = Number(amount);
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0 ||
+        (isPrevious && !Number.isInteger(paymentAmount))) {
+      toast.error("Enter a valid amount" + (isPrevious ? " in whole rupees" : "")); return;
+    }
+    const applicableDue = isPrevious ? openingPending : dueRents.find(r => String(r.id) === selectedRentId)?.pendingAmount ?? 0;
+    if (paymentAmount > applicableDue) { toast.error(`Amount exceeds pending ${fmt(applicableDue)}`); return; }
     if (!file) { toast.error("Please attach a payment screenshot / receipt"); return; }
 
     const fd = new FormData();
-    fd.append("rentId", selectedRentId);
+    if (!isPrevious) fd.append("rentId", selectedRentId);
     fd.append("amount", amount);
     fd.append("paymentMode", mode);
     if (txnId) fd.append("transactionId", txnId);
@@ -348,7 +374,11 @@ const TenantPayments = () => {
 
     setSubmitting(true);
     try {
-      await submitPaymentApi(fd);
+      if (isPrevious) {
+        await api.post("/payments/previous-pending/submit", fd);
+      } else {
+        await submitPaymentApi(fd);
+      }
       toast.success("Payment submitted! It will reflect once your warden/admin verifies it.");
       setPayOpen(false);
       if (tenantId) await loadAll(tenantId);
@@ -368,16 +398,19 @@ const TenantPayments = () => {
               flagged by Lighthouse; text-slate-600 passes 4.5:1. */}
           <p className="text-sm text-slate-600">Pay your rent &amp; EB dues and track your payment history</p>
         </div>
-        <Button onClick={() => openPay()} disabled={dueRents.length === 0} className="gap-2 rounded-xl">
+        <Button onClick={() => openPay()} disabled={dueRents.length === 0 && !hasOpeningPending} className="gap-2 rounded-xl">
           <CreditCard className="h-4 w-4" aria-hidden="true" /> Pay Now
         </Button>
       </div>
 
-      {!loading && dueRents.length > 0 && (
+      {!loading && (dueRents.length > 0 || hasOpeningPending) && (
         <Card className="p-4 mb-6 border-amber-200 bg-amber-50/50 dark:bg-amber-950/10 rounded-2xl">
           <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
-            You have {dueRents.length} month{dueRents.length > 1 ? "s" : ""} with dues pending —{" "}
-            {fmt(dueRents.reduce((s, r) => s + (r.pendingAmount ?? 0), 0))} total.
+            {dueRents.length > 0
+              ? `You have ${dueRents.length} month${dueRents.length > 1 ? "s" : ""} with dues pending${hasOpeningPending ? " plus a previous Pending Amount" : ""}`
+              : "You have a previous Pending Amount on your account"}
+            {" — "}
+            {fmt(rentDuesTotal + openingPending)} total.
           </p>
         </Card>
       )}
@@ -387,40 +420,58 @@ const TenantPayments = () => {
           <IndianRupee className="h-4 w-4 text-slate-600" aria-hidden="true" />
           <h2 className="text-sm font-semibold">Pending Dues</h2>
         </div>
-        <Table>
+        <Table className="[&_th]:text-center [&_td]:text-center [&_th]:align-middle [&_td]:align-middle [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
           <TableHeader>
             <TableRow>
               <TableHead>Period</TableHead>
               <TableHead>Total</TableHead>
               <TableHead>Paid</TableHead>
               <TableHead>Pending</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className="text-center">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow><TableCell colSpan={5} className="text-center text-slate-600 py-8">Loading…</TableCell></TableRow>
-            ) : dueRents.length === 0 ? (
+            ) : dueRents.length === 0 && !hasOpeningPending ? (
               <TableRow><TableCell colSpan={5} className="text-center text-slate-600 py-8">You're all caught up — no dues pending</TableCell></TableRow>
-            ) : dueRents.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="font-medium">{MONTHS[r.rentMonth - 1]} {r.rentYear}</TableCell>
-                <TableCell>{fmt(r.totalAmount)}</TableCell>
-                <TableCell className="text-emerald-700">{fmt(r.paidAmount)}</TableCell>
-                <TableCell className="text-rose-700 font-semibold">{fmt(r.pendingAmount)}</TableCell>
-                <TableCell className="text-right">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="rounded-lg"
-                    aria-label={`Pay dues for ${MONTHS[r.rentMonth - 1]} ${r.rentYear}`}
-                    onClick={() => openPay(r.id)}
-                  >
-                    Pay
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            ) : (
+              <>
+                {dueRents.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{MONTHS[r.rentMonth - 1]} {r.rentYear}</TableCell>
+                    <TableCell>{fmt(r.totalAmount)}</TableCell>
+                    <TableCell className="text-emerald-700">{fmt(r.paidAmount)}</TableCell>
+                    <TableCell className="text-rose-700 font-semibold">{fmt(r.pendingAmount)}</TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-lg"
+                        aria-label={`Pay dues for ${MONTHS[r.rentMonth - 1]} ${r.rentYear}`}
+                        onClick={() => openPay(r.id)}
+                      >
+                        Pay
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+
+                {/* Opening balance is paid separately from monthly rent. */}
+                {hasOpeningPending && (
+                  <TableRow>
+                    <TableCell className="font-medium">
+                      Pending Amount
+                      <div className="text-xs font-normal text-slate-600">Previous dues on your account</div>
+                    </TableCell>
+                    <TableCell>{fmt(openingPending)}</TableCell>
+                    <TableCell className="text-emerald-700">{fmt(0)}</TableCell>
+                    <TableCell className="text-rose-700 font-semibold">{fmt(openingPending)}</TableCell>
+                    <TableCell className="text-center"><Button size="sm" variant="outline" className="rounded-lg" onClick={() => openPay("previous")}>Pay</Button></TableCell>
+                  </TableRow>
+                )}
+              </>
+            )}
           </TableBody>
         </Table>
       </Card>
@@ -430,7 +481,7 @@ const TenantPayments = () => {
           <History className="h-4 w-4 text-slate-600" aria-hidden="true" />
           <h2 className="text-sm font-semibold">My Payment History</h2>
         </div>
-        <Table>
+        <Table className="[&_th]:text-center [&_td]:text-center [&_th]:align-middle [&_td]:align-middle [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
           <TableHeader>
             <TableRow>
               <TableHead>Period</TableHead>
@@ -440,7 +491,7 @@ const TenantPayments = () => {
               <TableHead>Proof</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Submitted</TableHead>
-              <TableHead className="text-right">Receipt</TableHead>
+              <TableHead className="text-center">Receipt</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -450,7 +501,7 @@ const TenantPayments = () => {
               <TableRow><TableCell colSpan={8} className="text-center text-slate-600 py-8">No payments submitted yet</TableCell></TableRow>
             ) : history.map((h) => (
               <TableRow key={h.id}>
-                <TableCell className="font-medium">{MONTHS[h.rentMonth - 1]} {h.rentYear}</TableCell>
+                <TableCell className="font-medium">{h.rentId == null ? "Previous Pending Amount" : `${MONTHS[h.rentMonth - 1]} ${h.rentYear}`}</TableCell>
                 <TableCell>{fmt(h.amount)}</TableCell>
                 <TableCell>{h.paymentMode}</TableCell>
                 <TableCell className="font-mono text-xs">{h.transactionId || "—"}</TableCell>
@@ -458,11 +509,11 @@ const TenantPayments = () => {
                 <TableCell>
                   <StatusPill status={h.status} />
                   {h.status === "REJECTED" && h.remarks && (
-                    <div className="text-xs text-rose-700 mt-1 max-w-[180px]">{h.remarks}</div>
+                    <div className="text-xs text-rose-700 mt-1 max-w-[180px] mx-auto whitespace-normal break-words">{h.remarks}</div>
                   )}
                 </TableCell>
                 <TableCell className="text-xs text-slate-600">{new Date(h.submittedAt).toLocaleString()}</TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-center">
                   {h.status === "APPROVED" ? (
                     <Button
                       size="sm"
@@ -494,14 +545,15 @@ const TenantPayments = () => {
 
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label>Which month?</Label>
+              <Label>Which due?</Label>
               <Select value={selectedRentId} onValueChange={(v) => {
                 setSelectedRentId(v);
                 const target = dueRents.find((r) => String(r.id) === v);
-                setAmount(target ? String(Math.round(target.pendingAmount ?? 0)) : "");
+                setAmount(v === PREVIOUS ? String(openingPending) : target ? String(Math.round(target.pendingAmount ?? 0)) : "");
               }}>
-                <SelectTrigger aria-label="Which month are you paying for" className="rounded-xl"><SelectValue placeholder="Select month" /></SelectTrigger>
+                <SelectTrigger aria-label="Which due are you paying for" className="rounded-xl"><SelectValue placeholder="Select month" /></SelectTrigger>
                 <SelectContent className="rounded-xl">
+                  {hasOpeningPending && <SelectItem value={PREVIOUS}>Previous Pending Amount — due {fmt(openingPending)}</SelectItem>}
                   {dueRents.map((r) => (
                     <SelectItem key={r.id} value={String(r.id)}>
                       {MONTHS[r.rentMonth - 1]} {r.rentYear} — due {fmt(r.pendingAmount)}
@@ -679,7 +731,7 @@ const ApproverPayments = () => {
       </div>
 
       <Card className="p-0 overflow-hidden rounded-[24px]">
-        <Table>
+        <Table className="[&_th]:text-center [&_td]:text-center [&_th]:align-middle [&_td]:align-middle [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
           <TableHeader>
             <TableRow>
               <TableHead>Tenant</TableHead>
@@ -690,7 +742,7 @@ const ApproverPayments = () => {
               <TableHead>Txn ID</TableHead>
               <TableHead>Proof</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className="text-center">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -703,8 +755,8 @@ const ApproverPayments = () => {
             ) : rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">{r.tenantName}</TableCell>
-                <TableCell className="text-slate-600">{r.roomNumber ?? "—"} {r.branchName ? `· ${r.branchName}` : ""}</TableCell>
-                <TableCell>{MONTHS[r.rentMonth - 1]} {r.rentYear}</TableCell>
+                <TableCell className="text-slate-600">{r.roomNumber ?? "—"}{r.branchName ? ` · ${r.branchName}` : ""}</TableCell>
+                <TableCell>{r.rentId == null ? "Previous Pending Amount" : `${MONTHS[r.rentMonth - 1]} ${r.rentYear}`}</TableCell>
                 <TableCell className="font-semibold">{fmt(r.amount)}</TableCell>
                 <TableCell>{r.paymentMode}</TableCell>
                 <TableCell className="font-mono text-xs">{r.transactionId || "—"}</TableCell>
@@ -712,15 +764,15 @@ const ApproverPayments = () => {
                 <TableCell>
                   <StatusPill status={r.status} />
                   {r.status === "REJECTED" && r.remarks && (
-                    <div className="text-xs text-rose-700 mt-1 max-w-[180px]">{r.remarks}</div>
+                    <div className="text-xs text-rose-700 mt-1 max-w-[180px] mx-auto whitespace-normal break-words">{r.remarks}</div>
                   )}
                   {r.status === "APPROVED" && r.verifiedByName && (
                     <div className="text-xs text-slate-600 mt-1">by {r.verifiedByName}</div>
                   )}
                 </TableCell>
-                <TableCell className="text-right space-x-2">
+                <TableCell className="text-center">
                   {tab === "pending" ? (
-                    <>
+                    <div className="flex items-center justify-center gap-2">
                       {/* A11Y: emerald-600 with white text is below 4.5:1;
                           emerald-700 passes. */}
                       <Button
@@ -742,7 +794,7 @@ const ApproverPayments = () => {
                       >
                         <XCircle className="h-3.5 w-3.5 mr-1" aria-hidden="true" /> Reject
                       </Button>
-                    </>
+                    </div>
                   ) : r.status === "APPROVED" ? (
                     <Button
                       size="sm"
