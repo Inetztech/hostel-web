@@ -1,277 +1,2189 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  fetchBranches,
-  createBranch,
-  updateBranch,
-  deleteBranch,
-  getUserRole,
-} from "@/lib/store";
+// import { useState, useCallback, useEffect } from "react";
+// import { useNavigate } from "react-router-dom";
+// import { createBranch, updateBranch, deleteBranch, fetchBranches } from "@/lib/store";
+// import { getUserHostelId, getUserHostelName } from "@/lib/auth";
+// import { showBedLimitToast } from "@/lib/limitError";
+// import { Branch, BranchRequest } from "@/lib/types";
+// import { STATES, TN_DISTRICTS } from "@/lib/tnLocations";
+// import { LocationAreaSelect } from "@/components/LocationAreaSelect";
+// import { SearchableSelect } from "@/components/SearchableSelect";
+// import { Button } from "@/components/ui/button";
+// import { Input } from "@/components/ui/input";
+// import { Label } from "@/components/ui/label";
+// import {
+//   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+// } from "@/components/ui/select";
+// import {
+//   Dialog, DialogContent, DialogHeader, DialogTitle,
+//   DialogDescription, DialogFooter, DialogClose, DialogTrigger,
+// } from "@/components/ui/dialog";
+// import {
+//   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+//   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+//   AlertDialogDescription, AlertDialogTrigger,
+// } from "@/components/ui/alert-dialog";
+// import { toast } from "sonner";
+// import {
+//   Building2, Search, Plus,
+//   Pencil, Trash2, Phone, ChevronLeft, ChevronRight, MoreHorizontal, X, RefreshCw,
+// } from "lucide-react";
+
+// interface BranchForm {
+//   unitName: string;
+//   state: string;
+//   district: string;
+//   area: string;
+//   location: string;
+//   phone: string;
+//   capacityBeds: string;
+// }
+// const EMPTY_FORM: BranchForm = {
+//   unitName: "", state: "", district: "", area: "", location: "", phone: "", capacityBeds: "",
+// };
+
+// const COLORS = [
+//   { color: '#8b5cf6', bg: '#f3e8ff' },
+//   { color: '#3b82f6', bg: '#eff6ff' },
+//   { color: '#22c55e', bg: '#dcfce7' },
+//   { color: '#f97316', bg: '#ffedd5' },
+//   { color: '#ec4899', bg: '#fce7f3' },
+//   { color: '#64748b', bg: '#f1f5f9' },
+// ];
+
+// const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
+//   if (res && res.id != null) return res as T;
+//   if (res?.data && res.data.id != null) return res.data as T;
+//   if (res?.data?.data && res.data.data.id != null) return res.data.data as T;
+//   return undefined;
+// };
+
+// const getPageNumbers = (current: number, total: number): (number | "...")[] => {
+//   const SIBLINGS = 1;
+//   const totalNumbers = SIBLINGS * 2 + 5;
+
+//   if (total <= totalNumbers) {
+//     return Array.from({ length: total }, (_, i) => i + 1);
+//   }
+
+//   const leftIndex = Math.max(current - SIBLINGS, 1);
+//   const rightIndex = Math.min(current + SIBLINGS, total);
+
+//   const showLeftEllipsis = leftIndex > 2;
+//   const showRightEllipsis = rightIndex < total - 1;
+
+//   const pages: (number | "...")[] = [];
+//   pages.push(1);
+//   if (showLeftEllipsis) pages.push("...");
+//   for (let p = Math.max(leftIndex, 2); p <= Math.min(rightIndex, total - 1); p++) {
+//     pages.push(p);
+//   }
+//   if (showRightEllipsis) pages.push("...");
+//   if (total > 1) pages.push(total);
+//   return pages;
+// };
+
+// // Shared client-side validation, mirrors the backend BranchRequest constraints
+// // (unitName size, location size, phone pattern, capacityBeds >= 0, hostelId required).
+// //
+// // requireCapacity: true when creating a branch. When editing, an empty capacity is allowed
+// // because it means "use the hostel's capacity" (null on the backend).
+// const validateBranchForm = (
+//   f: BranchForm,
+//   hostelId: number | null | undefined,
+//   requireCapacity: boolean = true,
+// ): string | null => {
+//   const name = f.unitName.trim();
+//   if (!name) return "Branch name required";
+//   if (name.length < 2 || name.length > 100) return "Unit name must be between 2 and 100 characters";
+
+//   const location = f.location.trim();
+//   if (!location) return "Location is required";
+//   if (location.length < 2 || location.length > 150) {
+//     return "Location must be between 2 and 150 characters";
+//   }
+
+//   const phone = f.phone.trim();
+//   if (!phone) return "Contact phone is required";
+//   if (!/^[6-9]\d{9}$/.test(phone)) {
+//     return "Phone must be a 10-digit number";
+//   }
+
+//   if (!hostelId || hostelId < 1) {
+//     return "No hostel is assigned to your account yet. Ask your Super Admin to assign one.";
+//   }
+
+//   const capacity = f.capacityBeds.trim();
+//   if (requireCapacity && capacity === "") return "Bed capacity is required";
+//   if (capacity !== "" && Number(capacity) < 0) {
+//     return "Capacity beds cannot be negative";
+//   }
+
+//   return null;
+// };
+
+// // Spring's MethodArgumentNotValidException can come back in a few shapes depending on how
+// // the global exception handler formats it. Try the common ones before giving up to `fallback`.
+// const extractApiError = (e: any, fallback: string): string => {
+//   const data = e?.response?.data;
+//   if (!data) return fallback;
+//   if (typeof data.message === "string" && data.message.trim()) return data.message;
+//   if (Array.isArray(data.errors) && data.errors.length) {
+//     return data.errors
+//       .map((x: any) => (typeof x === "string" ? x : x.defaultMessage || x.message))
+//       .filter(Boolean)
+//       .join(", ");
+//   }
+//   if (typeof data.error === "string" && data.error.trim()) return data.error;
+//   return fallback;
+// };
+
+// const BranchPage = () => {
+//   const navigate = useNavigate();
+
+//   const [branches, setBranches] = useState<Branch[]>([]);
+//   const [totalCount, setTotalCount] = useState(0);
+//   const [loading, setLoading] = useState(true);
+//   const [page, setPage] = useState(0);
+//   const [pageSize] = useState(10);
+
+//   // Raw text the user is typing, and the debounced value actually sent to the API.
+//   const [searchTerm, setSearchTerm] = useState("");
+//   const [debouncedSearch, setDebouncedSearch] = useState("");
+
+//   const [addOpen,    setAddOpen]    = useState(false);
+//   const [editOpen,   setEditOpen]   = useState(false);
+//   const [form,       setForm]       = useState<BranchForm>(EMPTY_FORM);
+//   const [editBranch, setEditBranch] = useState<Branch | null>(null);
+
+//   const myHostelId   = getUserHostelId();
+//   const myHostelName = getUserHostelName();
+
+//   // Debounce the search box so we don't fire a request on every keystroke.
+//   useEffect(() => {
+//     const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
+//     return () => clearTimeout(t);
+//   }, [searchTerm]);
+
+//   // Whenever the debounced search term changes, go back to page 0.
+//   useEffect(() => {
+//     setPage(0);
+//   }, [debouncedSearch]);
+
+//   const loadBranches = useCallback(async () => {
+//     setLoading(true);
+//     try {
+//       const { content, totalElements } = await fetchBranches(page, pageSize, debouncedSearch);
+//       setBranches(content);
+//       setTotalCount(totalElements);
+//     } catch {
+//       toast.error("Failed to load branches");
+//     } finally {
+//       setLoading(false);
+//     }
+//   }, [page, pageSize, debouncedSearch]);
+
+//   useEffect(() => { loadBranches(); }, [loadBranches]);
+
+//   const err = (e: any, fallback: string) => toast.error(extractApiError(e, fallback));
+
+//   const handleAdd = async () => {
+//     const validationError = validateBranchForm(form, myHostelId, true);
+//     if (validationError) { toast.error(validationError); return; }
+
+//     try {
+//       const res = await createBranch({
+//         unitName: form.unitName.trim(),
+//         location: form.location.trim(),
+//         state:    form.state || undefined,
+//         district: form.district || undefined,
+//         phone:    form.phone.trim(),
+//         hostelId: myHostelId,
+//         capacityBeds: Number(form.capacityBeds),
+//       } as BranchRequest);
+
+//       toast.success("Branch created");
+//       setForm(EMPTY_FORM);
+//       setAddOpen(false);
+
+//       const newBranch = unwrapEntity<Branch>(res);
+//       navigate("/rooms", {
+//         state: newBranch?.id != null
+//           ? { unitId: newBranch.id, openAddRoom: true }
+//           : undefined,
+//       });
+
+//       loadBranches();
+//     } catch (e: any) {
+//       showBedLimitToast(e, navigate, extractApiError(e, "Create failed"));
+//     }
+//   };
+
+//   const handleEdit = async () => {
+//     if (!editBranch) return;
+
+//     const editForm: BranchForm = {
+//       unitName: editBranch.unitName,
+//       state: editBranch.state ?? "",
+//       district: editBranch.district ?? "",
+//       area: "",
+//       location: editBranch.location ?? "",
+//       phone: editBranch.phone ?? "",
+//       capacityBeds: editBranch.capacityBeds != null ? String(editBranch.capacityBeds) : "",
+//     };
+//     // Capacity is optional on edit: empty means "use the hostel's capacity".
+//     const validationError = validateBranchForm(editForm, editBranch.hostelId ?? myHostelId, false);
+//     if (validationError) { toast.error(validationError); return; }
+
+//     try {
+//       await updateBranch(editBranch.id, {
+//         unitName: editBranch.unitName.trim(),
+//         location: editBranch.location?.trim() ?? "",
+//         state:    editBranch.state || undefined,
+//         district: editBranch.district || undefined,
+//         phone:    editBranch.phone?.trim() ?? "",
+//         hostelId: editBranch.hostelId ?? myHostelId,
+//         // Don't coerce a missing capacity to 0 - that would silently replace
+//         // "uses hostel cap" with a real cap of 0 beds.
+//         capacityBeds: editBranch.capacityBeds ?? undefined,
+//       } as BranchRequest);
+//       toast.success("Branch updated");
+//       setEditOpen(false);
+//       setEditBranch(null);
+//       loadBranches();
+//     } catch (e: any) {
+//       showBedLimitToast(e, navigate, extractApiError(e, "Update failed"));
+//     }
+//   };
+
+//   const handleDelete = async (id: number) => {
+//     try {
+//       await deleteBranch(id);
+//       toast.success("Branch deleted");
+//       loadBranches();
+//     } catch (e: any) { err(e, "Delete failed"); }
+//   };
+
+//   const totalPages = Math.max(Math.ceil(totalCount / pageSize), 1);
+//   const currentPage1Based = page + 1;
+//   const pageNumbers = getPageNumbers(currentPage1Based, totalPages);
+
+//   return (
+//     <div className="min-h-full bg-[#fcfcfc] text-gray-900 font-sans pb-10">
+//       <style>{`
+//         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+//         .branch-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: 1500px; margin: 0 auto; }
+
+//         .branch-main-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+//         .branch-main-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+
+//         .branch-controls { display: flex; align-items: center; gap: 12px; }
+//         .branch-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 280px; }
+//         .branch-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
+
+//         .branch-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
+//         .branch-btn-primary:hover { background: #4200cc; }
+//         .branch-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+//         .branch-table-container { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
+//         .branch-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+//         .branch-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 24px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
+//         .branch-table td { padding: 16px 24px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+//         .branch-table tr:last-child td { border-bottom: none; }
+//         .branch-table tr:hover { background: #fdfcff; }
+
+//         .branch-icon-box { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+//         .branch-name { font-size: 14px; font-weight: 600; color: #0f172a; }
+//         .branch-address { font-size: 12px; color: #64748b; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
+
+//         .branch-contact { font-size: 13px; font-weight: 500; color: #475569; display: flex; align-items: center; gap: 8px; }
+//         .branch-beds { font-size: 14px; font-weight: 600; color: #0f172a; }
+//         /* #94a3b8 -> #64748b: fixes low-contrast text */
+//         .branch-beds-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+//         .branch-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #f1f5f9; background: #fff; flex-wrap: wrap; gap: 12px; }
+//         .branch-page-info { font-size: 13px; color: #64748b; }
+//         .branch-page-controls { display: flex; align-items: center; gap: 6px; }
+//         .branch-page-btn { min-width: 32px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
+//         .branch-page-btn:hover:not(:disabled) { background: #f8fafc; }
+//         .branch-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
+//         .branch-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+//         .branch-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #64748b; }
+//       `}</style>
+
+//       <div className="branch-wrap">
+
+//         <div className="branch-main-header">
+//           <div className="branch-main-title">All Branches</div>
+
+//           <div className="branch-controls">
+//             <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setForm(EMPTY_FORM); }}>
+//               <DialogTrigger asChild>
+//                 <button className="branch-btn-primary" disabled={!myHostelId} title={!myHostelId ? "No hostel assigned to your account yet" : undefined}>
+//                   <Plus size={16} aria-hidden="true" /> Add Branch
+//                 </button>
+//               </DialogTrigger>
+//               <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden mobile-form-dialog branch-mobile-dialog">
+//                 <DialogHeader>
+//                   <DialogTitle>Add Branch</DialogTitle>
+//                   <DialogDescription>
+//                     Create a new branch under <span className="font-medium">{myHostelName ?? "your hostel"}</span>
+//                   </DialogDescription>
+//                 </DialogHeader>
+//                 <BranchFormFields idPrefix="add" form={form} hostelName={myHostelName ?? "Assigned Hostel"} onChange={setForm} />
+//                 <DialogFooter>
+//                   <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
+//                   <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Create</Button>
+//                 </DialogFooter>
+//               </DialogContent>
+//             </Dialog>
+//           </div>
+//         </div>
+
+//         <div className="flex gap-4 mb-4">
+//           <div className="branch-search">
+//             <Search size={16} color="#94a3b8" aria-hidden="true" />
+//             <input
+//               type="text"
+//               aria-label="Search branches or address"
+//               placeholder="Search branches or address..."
+//               value={searchTerm}
+//               onChange={(e) => setSearchTerm(e.target.value)}
+//             />
+//             {searchTerm && (
+//               <button
+//                 type="button"
+//                 aria-label="Clear search"
+//                 onClick={() => setSearchTerm("")}
+//                 className="text-gray-500 hover:text-gray-700"
+//               >
+//                 <X size={14} aria-hidden="true" />
+//               </button>
+//             )}
+//           </div>
+//           <button type="button" className="branch-mobile-clear" onClick={() => setSearchTerm("")}>
+//             <RefreshCw size={14} aria-hidden="true" /> Clear Filters
+//           </button>
+//         </div>
+
+//         {!myHostelId && (
+//           <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-sm px-4 py-3 mb-6">
+//             No hostel is assigned to your account yet. Ask your Super Admin to assign one before creating branches.
+//           </div>
+//         )}
+
+//         <div className="branch-table-container">
+//           <div className="overflow-x-auto">
+//             <table className="branch-table">
+//               <thead>
+//                 <tr>
+//                   <th>BRANCH NAME</th>
+//                   <th>CONTACT</th>
+//                   <th>BED CAPACITY</th>
+//                   <th>BEDS CREATED</th>
+//                   <th>ACTIONS</th>
+//                 </tr>
+//               </thead>
+//               <tbody>
+//                 {loading ? (
+//                   <tr>
+//                     {/* text-slate-400 -> text-slate-600: contrast fix */}
+//                     <td colSpan={5} className="text-center py-12 text-slate-600">Loading branches...</td>
+//                   </tr>
+//                 ) : branches.length === 0 ? (
+//                   <tr>
+//                     <td colSpan={5} className="text-center py-12 text-slate-600">No branches found.</td>
+//                   </tr>
+//                 ) : (
+//                   branches.map(branch => {
+//                     const color = COLORS[branch.id % COLORS.length];
+//                     return (
+//                       <tr key={branch.id}>
+//                         <td>
+//                           <div className="flex items-center gap-3">
+//                             <div className="branch-icon-box" style={{ background: color.bg }} aria-hidden="true">
+//                               <Building2 size={18} color={color.color} />
+//                             </div>
+//                             <div>
+//                               <div className="branch-name">{branch.unitName}</div>
+//                               <div className="branch-address">{branch.location || 'No location set'}</div>
+//                             </div>
+//                           </div>
+//                         </td>
+//                         <td>
+//                           <div className="branch-contact">
+//                             <Phone size={14} color="#94a3b8" aria-hidden="true" /> {branch.phone || 'No phone'}
+//                           </div>
+//                         </td>
+//                         <td>
+//                           <div className="branch-beds">{branch.capacityBeds ?? "-"}</div>
+//                           <div className="branch-beds-sub">
+//                             {branch.capacityBeds != null ? "individual cap" : "uses hostel cap"}
+//                           </div>
+//                         </td>
+//                         <td>
+//                           <div className="branch-beds">{branch.bedCount ?? 0}</div>
+//                           <div className="branch-beds-sub">via Rooms &amp; Beds</div>
+//                         </td>
+//                         <td>
+//                           <div className="flex gap-2">
+//                             {/* Lighthouse: "Buttons do not have an accessible name" — icon-only edit/delete */}
+//                             <Button
+//                               type="button"
+//                               size="icon"
+//                               variant="outline"
+//                               aria-label={`Edit ${branch.unitName}`}
+//                               title="Edit"
+//                               className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
+//                               onClick={() => {
+//                                 setEditBranch({ ...branch });
+//                                 setEditOpen(true);
+//                               }}
+//                             >
+//                               <Pencil className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
+//                             </Button>
+//                             <AlertDialog>
+//                               <AlertDialogTrigger asChild>
+//                                 <Button
+//                                   type="button"
+//                                   size="icon"
+//                                   variant="outline"
+//                                   aria-label={`Delete ${branch.unitName}`}
+//                                   title="Delete"
+//                                   className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
+//                                 >
+//                                   <Trash2 className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />
+//                                 </Button>
+//                               </AlertDialogTrigger>
+//                               <AlertDialogContent className="rounded-2xl">
+//                                 <AlertDialogHeader>
+//                                   <AlertDialogTitle>Delete {branch.unitName}?</AlertDialogTitle>
+//                                   <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+//                                 </AlertDialogHeader>
+//                                 <AlertDialogFooter>
+//                                   <AlertDialogCancel className="rounded-lg">Cancel</AlertDialogCancel>
+//                                   <AlertDialogAction onClick={() => handleDelete(branch.id)} className="bg-red-600 hover:bg-red-700 rounded-lg">Delete</AlertDialogAction>
+//                                 </AlertDialogFooter>
+//                               </AlertDialogContent>
+//                             </AlertDialog>
+//                           </div>
+//                         </td>
+//                       </tr>
+//                     );
+//                   })
+//                 )}
+//               </tbody>
+//             </table>
+//           </div>
+
+//           <div className="branch-pagination">
+//             <div className="branch-page-info">
+//               Showing {branches.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} branches
+//             </div>
+
+//             <nav aria-label="Pagination" className="branch-page-controls">
+//               <Button
+//                 type="button"
+//                 size="icon"
+//                 variant="outline"
+//                 aria-label="Previous page"
+//                 className="w-8 h-8 rounded-lg"
+//                 disabled={page === 0}
+//                 onClick={() => setPage(p => Math.max(p - 1, 0))}
+//               >
+//                 <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+//               </Button>
+
+//               {pageNumbers.map((p, idx) =>
+//                 p === "..." ? (
+//                   <span key={`ellipsis-${idx}`} className="branch-page-ellipsis" aria-hidden="true">
+//                     <MoreHorizontal className="h-4 w-4" />
+//                   </span>
+//                 ) : (
+//                   <button
+//                     type="button"
+//                     key={p}
+//                     aria-label={`Page ${p}`}
+//                     aria-current={p === currentPage1Based ? "page" : undefined}
+//                     className={`branch-page-btn ${p === currentPage1Based ? "active" : ""}`}
+//                     onClick={() => setPage(p - 1)}
+//                   >
+//                     {p}
+//                   </button>
+//                 )
+//               )}
+
+//               <Button
+//                 type="button"
+//                 size="icon"
+//                 variant="outline"
+//                 aria-label="Next page"
+//                 className="w-8 h-8 rounded-lg"
+//                 disabled={currentPage1Based >= totalPages}
+//                 onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))}
+//               >
+//                 <ChevronRight className="h-4 w-4" aria-hidden="true" />
+//               </Button>
+//             </nav>
+//           </div>
+//         </div>
+
+//         <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditBranch(null); }}>
+//           <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden mobile-form-dialog branch-mobile-dialog">
+//             <DialogHeader>
+//               <DialogTitle>Edit Branch</DialogTitle>
+//               <DialogDescription>Update branch details</DialogDescription>
+//             </DialogHeader>
+//             {editBranch && (
+//               <BranchFormFields
+//                 idPrefix="edit"
+//                 form={{
+//                   unitName: editBranch.unitName,
+//                   state: editBranch.state ?? "",
+//                   district: editBranch.district ?? "",
+//                   area: editBranch.location?.split(",")[0]?.trim() ?? "",
+//                   location: editBranch.location ?? "",
+//                   phone: editBranch.phone ?? "",
+//                   capacityBeds: editBranch.capacityBeds != null ? String(editBranch.capacityBeds) : "",
+//                 }}
+//                 hostelName={editBranch.hostelName ?? myHostelName ?? "Assigned Hostel"}
+//                 onChange={(f) => {
+//                   setEditBranch({
+//                     ...editBranch,
+//                     unitName: f.unitName,
+//                     location: f.location,
+//                     state: f.state,
+//                     district: f.district,
+//                     phone: f.phone,
+//                     capacityBeds: f.capacityBeds === "" ? null : Number(f.capacityBeds),
+//                   });
+//                 }}
+//               />
+//             )}
+//             <DialogFooter>
+//               <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
+//               <Button onClick={handleEdit} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Save</Button>
+//             </DialogFooter>
+//           </DialogContent>
+//         </Dialog>
+//       </div>
+//     </div>
+//   );
+// };
+
+// const BranchFormFields = ({
+//   form, hostelName, onChange, idPrefix,
+// }: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void; idPrefix: string }) => {
+//   const handleStateChange = (value: string) => {
+//     onChange({ ...form, state: value, district: "", area: "", location: "" });
+//   };
+
+//   const handleDistrictChange = (value: string) => {
+//     onChange({ ...form, district: value, area: "", location: "" });
+//   };
+
+//   const handleAreaChange = (value: string) => {
+//     const stateLabel = STATES.find(s => s.value === form.state)?.label ?? form.state;
+//     const composed = [value, form.district, stateLabel].filter(Boolean).join(", ");
+//     onChange({ ...form, area: value, location: composed });
+//   };
+
+//   return (
+//     <div className="space-y-4">
+//       <div className="space-y-1.5">
+//         <Label htmlFor={`${idPrefix}-hostel`} className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
+//         <Input id={`${idPrefix}-hostel`} value={hostelName} disabled className="bg-slate-50 cursor-not-allowed rounded-lg" />
+//       </div>
+
+//       <div className="space-y-1.5">
+//         <Label htmlFor={`${idPrefix}-name`}>Branch Name <span className="text-red-500">*</span></Label>
+//         <Input
+//           id={`${idPrefix}-name`}
+//           placeholder="e.g. North Wing, Block A"
+//           value={form.unitName}
+//           className="rounded-lg"
+//           onChange={(e) => onChange({ ...form, unitName: e.target.value })}
+//         />
+//       </div>
+
+//       <div className="grid grid-cols-3 gap-4">
+//         <div className="space-y-1.5">
+//           <Label>State</Label>
+//           <Select value={form.state} onValueChange={handleStateChange}>
+//             <SelectTrigger className="rounded-lg" aria-label="State">
+//               <SelectValue placeholder="Select state" />
+//             </SelectTrigger>
+//             <SelectContent>
+//               {STATES.map((s) => (
+//                 <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+//               ))}
+//             </SelectContent>
+//           </Select>
+//         </div>
+
+//         <div className="space-y-1.5">
+//           <Label>District</Label>
+//           <SearchableSelect
+//             value={form.district}
+//             options={TN_DISTRICTS}
+//             disabled={!form.state}
+//             placeholder={!form.state ? "Select state first" : "Search district..."}
+//             onChange={handleDistrictChange}
+//           />
+//         </div>
+
+//         <div className="space-y-1.5">
+//           <Label>Location <span className="text-red-500">*</span></Label>
+//           <LocationAreaSelect
+//             value={form.area}
+//             district={form.district}
+//             stateLabel={STATES.find(s => s.value === form.state)?.label ?? "Tamil Nadu"}
+//             disabled={!form.district}
+//             placeholder={!form.district ? "Select district first" : "Select location"}
+//             onChange={handleAreaChange}
+//           />
+//         </div>
+//       </div>
+
+//       <div className="grid grid-cols-2 gap-4">
+//         <div className="space-y-1.5">
+//           <Label htmlFor={`${idPrefix}-phone`}>Contact Phone <span className="text-red-500">*</span></Label>
+//           <Input
+//             id={`${idPrefix}-phone`}
+//             type="tel"
+//             inputMode="numeric"
+//             placeholder="Contact Phone (10 digits)"
+//             value={form.phone}
+//             maxLength={10}
+//             className="rounded-lg"
+//             onChange={(e) => {
+//               const val = e.target.value.replace(/\D/g, "");
+//               onChange({ ...form, phone: val });
+//             }}
+//           />
+//         </div>
+
+//         <div className="space-y-1.5">
+//           <Label htmlFor={`${idPrefix}-capacity`}>Bed Capacity <span className="text-red-500">*</span></Label>
+//           <Input
+//             id={`${idPrefix}-capacity`}
+//             type="number"
+//             min={0}
+//             placeholder="e.g. 20"
+//             value={form.capacityBeds}
+//             className="rounded-lg"
+//             onChange={(e) => onChange({ ...form, capacityBeds: e.target.value.replace(/\D/g, "") })}
+//           />
+//         </div>
+//       </div>
+//     </div>
+//   );
+// };
+
+// export default BranchPage;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useState, useCallback, useEffect } from "react";
+
+import { useNavigate } from "react-router-dom";
+
+import { createBranch, updateBranch, deleteBranch, fetchBranches } from "@/lib/store";
+
+import { getUserHostelId, getUserHostelName } from "@/lib/auth";
+
+import { showBedLimitToast } from "@/lib/limitError";
+
 import { Branch, BranchRequest } from "@/lib/types";
 
-import { Card, CardContent } from "@/components/ui/card";
+import { STATES, TN_DISTRICTS } from "@/lib/tnLocations";
+
+import { LocationAreaSelect } from "@/components/LocationAreaSelect";
+
+import { SearchableSelect } from "@/components/SearchableSelect";
+
 import { Button } from "@/components/ui/button";
+
 import { Input } from "@/components/ui/input";
 
+import { Label } from "@/components/ui/label";
+
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-  DialogClose,
+
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+
+} from "@/components/ui/select";
+
+import {
+
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+
+  DialogDescription, DialogFooter, DialogClose, DialogTrigger,
+
 } from "@/components/ui/dialog";
 
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
+
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+
+  AlertDialogDescription, AlertDialogTrigger,
+
 } from "@/components/ui/alert-dialog";
 
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2 } from "lucide-react";
 
-import { AgGridReact } from "ag-grid-react";
-import { ColDef } from "ag-grid-community";
+import {
+
+  Building2, Search, Plus,
+
+  Pencil, Trash2, Phone, ChevronLeft, ChevronRight, MoreHorizontal, X, RefreshCw,
+
+} from "lucide-react";
+
+
+
+interface BranchForm {
+
+  unitName: string;
+
+  state: string;
+
+  district: string;
+
+  area: string;
+
+  location: string;
+
+  phone: string;
+
+  capacityBeds: string;
+
+}
+
+const EMPTY_FORM: BranchForm = {
+
+  unitName: "", state: "", district: "", area: "", location: "", phone: "", capacityBeds: "",
+
+};
+
+
+
+const COLORS = [
+
+  { color: '#8b5cf6', bg: '#f3e8ff' },
+
+  { color: '#3b82f6', bg: '#eff6ff' },
+
+  { color: '#22c55e', bg: '#dcfce7' },
+
+  { color: '#f97316', bg: '#ffedd5' },
+
+  { color: '#ec4899', bg: '#fce7f3' },
+
+  { color: '#64748b', bg: '#f1f5f9' },
+
+];
+
+
+
+const unwrapEntity = <T extends { id?: any }>(res: any): T | undefined => {
+
+  if (res && res.id != null) return res as T;
+
+  if (res?.data && res.data.id != null) return res.data as T;
+
+  if (res?.data?.data && res.data.data.id != null) return res.data.data as T;
+
+  return undefined;
+
+};
+
+
+
+const getPageNumbers = (current: number, total: number): (number | "...")[] => {
+
+  const SIBLINGS = 1;
+
+  const totalNumbers = SIBLINGS * 2 + 5;
+
+
+
+  if (total <= totalNumbers) {
+
+    return Array.from({ length: total }, (_, i) => i + 1);
+
+  }
+
+
+
+  const leftIndex = Math.max(current - SIBLINGS, 1);
+
+  const rightIndex = Math.min(current + SIBLINGS, total);
+
+
+
+  const showLeftEllipsis = leftIndex > 2;
+
+  const showRightEllipsis = rightIndex < total - 1;
+
+
+
+  const pages: (number | "...")[] = [];
+
+  pages.push(1);
+
+  if (showLeftEllipsis) pages.push("...");
+
+  for (let p = Math.max(leftIndex, 2); p <= Math.min(rightIndex, total - 1); p++) {
+
+    pages.push(p);
+
+  }
+
+  if (showRightEllipsis) pages.push("...");
+
+  if (total > 1) pages.push(total);
+
+  return pages;
+
+};
+
+
+
+// Shared client-side validation, mirrors the backend BranchRequest constraints
+
+// (unitName size, location size, phone pattern, capacityBeds >= 0, hostelId required).
+
+//
+
+// requireCapacity: true when creating a branch. When editing, an empty capacity is allowed
+
+// because it means "use the hostel's capacity" (null on the backend).
+
+const validateBranchForm = (
+
+  f: BranchForm,
+
+  hostelId: number | null | undefined,
+
+  requireCapacity: boolean = true,
+
+): string | null => {
+
+  const name = f.unitName.trim();
+
+  if (!name) return "Branch name required";
+
+  if (name.length < 2 || name.length > 100) return "Unit name must be between 2 and 100 characters";
+
+
+
+  const location = f.location.trim();
+
+  if (!location) return "Location is required";
+
+  if (location.length < 2 || location.length > 150) {
+
+    return "Location must be between 2 and 150 characters";
+
+  }
+
+
+
+  const phone = f.phone.trim();
+
+  if (!phone) return "Contact phone is required";
+
+  if (!/^[6-9]\d{9}$/.test(phone)) {
+
+    return "Phone must be a 10-digit number";
+
+  }
+
+
+
+  if (!hostelId || hostelId < 1) {
+
+    return "No hostel is assigned to your account yet. Ask your Super Admin to assign one.";
+
+  }
+
+
+
+  const capacity = f.capacityBeds.trim();
+
+  if (requireCapacity && capacity === "") return "Bed capacity is required";
+
+  if (capacity !== "" && Number(capacity) < 0) {
+
+    return "Capacity beds cannot be negative";
+
+  }
+
+
+
+  return null;
+
+};
+
+
+
+// Spring's MethodArgumentNotValidException can come back in a few shapes depending on how
+
+// the global exception handler formats it. Try the common ones before giving up to `fallback`.
+
+const extractApiError = (e: any, fallback: string): string => {
+
+  const data = e?.response?.data;
+
+  if (!data) return fallback;
+
+  if (typeof data.message === "string" && data.message.trim()) return data.message;
+
+  if (Array.isArray(data.errors) && data.errors.length) {
+
+    return data.errors
+
+      .map((x: any) => (typeof x === "string" ? x : x.defaultMessage || x.message))
+
+      .filter(Boolean)
+
+      .join(", ");
+
+  }
+
+  if (typeof data.error === "string" && data.error.trim()) return data.error;
+
+  return fallback;
+
+};
+
+
 
 const BranchPage = () => {
+
+  const navigate = useNavigate();
+
+
+
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [addOpen, setAddOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editBranchData, setEditBranchData] = useState<Branch | null>(null);
-  const [unitName, setUnitName] = useState("");
 
-  const role = getUserRole()?.toUpperCase();
+  const [totalCount, setTotalCount] = useState(0);
 
-  /* ================= LOAD DATA ================= */
-  const reload = async () => {
-    try {
-      const data = await fetchBranches();
-      setBranches(data);
-    } catch {
-      toast.error("Failed to load branches");
-    }
-  };
+  const [loading, setLoading] = useState(true);
+
+  const [page, setPage] = useState(0);
+
+  const [pageSize] = useState(10);
+
+
+
+  // Raw text the user is typing, and the debounced value actually sent to the API.
+
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+
+
+  const [addOpen,    setAddOpen]    = useState(false);
+
+  const [editOpen,   setEditOpen]   = useState(false);
+
+  const [form,       setForm]       = useState<BranchForm>(EMPTY_FORM);
+
+  const [editBranch, setEditBranch] = useState<Branch | null>(null);
+
+
+
+  const myHostelId   = getUserHostelId();
+
+  const myHostelName = getUserHostelName();
+
+
+
+  // Debounce the search box so we don't fire a request on every keystroke.
 
   useEffect(() => {
-    reload();
-  }, []);
 
-  /* ================= ACTIONS ================= */
-  const handleAdd = async () => {
-    if (!unitName) {
-      toast.error("Unit name required");
-      return;
-    }
+    const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
+
+    return () => clearTimeout(t);
+
+  }, [searchTerm]);
+
+
+
+  // Whenever the debounced search term changes, go back to page 0.
+
+  useEffect(() => {
+
+    setPage(0);
+
+  }, [debouncedSearch]);
+
+
+
+  const loadBranches = useCallback(async () => {
+
+    setLoading(true);
 
     try {
-      await createBranch({ unitName } as BranchRequest);
-      toast.success("Branch created");
-      setAddOpen(false);
-      setUnitName("");
-      reload();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Failed to create branch");
+
+      const { content, totalElements } = await fetchBranches(page, pageSize, debouncedSearch);
+
+      setBranches(content);
+
+      setTotalCount(totalElements);
+
+    } catch {
+
+      toast.error("Failed to load branches");
+
+    } finally {
+
+      setLoading(false);
+
     }
+
+  }, [page, pageSize, debouncedSearch]);
+
+
+
+  useEffect(() => { loadBranches(); }, [loadBranches]);
+
+
+
+  const err = (e: any, fallback: string) => toast.error(extractApiError(e, fallback));
+
+
+
+  const handleAdd = async () => {
+
+    const validationError = validateBranchForm(form, myHostelId, true);
+
+    if (validationError) { toast.error(validationError); return; }
+
+
+
+    try {
+
+      const res = await createBranch({
+
+        unitName: form.unitName.trim(),
+
+        location: form.location.trim(),
+
+        state:    form.state || undefined,
+
+        district: form.district || undefined,
+
+        phone:    form.phone.trim(),
+
+        hostelId: myHostelId,
+
+        capacityBeds: Number(form.capacityBeds),
+
+      } as BranchRequest);
+
+
+
+      toast.success("Branch created");
+
+      setForm(EMPTY_FORM);
+
+      setAddOpen(false);
+
+
+
+      const newBranch = unwrapEntity<Branch>(res);
+
+      navigate("/rooms", {
+
+        state: newBranch?.id != null
+
+          ? { unitId: newBranch.id, openAddRoom: true }
+
+          : undefined,
+
+      });
+
+
+
+      loadBranches();
+
+    } catch (e: any) {
+
+      showBedLimitToast(e, navigate, extractApiError(e, "Create failed"));
+
+    }
+
   };
+
+
 
   const handleEdit = async () => {
-    if (!editBranchData) return;
+
+    if (!editBranch) return;
+
+
+
+    const editForm: BranchForm = {
+
+      unitName: editBranch.unitName,
+
+      state: editBranch.state ?? "",
+
+      district: editBranch.district ?? "",
+
+      area: "",
+
+      location: editBranch.location ?? "",
+
+      phone: editBranch.phone ?? "",
+
+      capacityBeds: editBranch.capacityBeds != null ? String(editBranch.capacityBeds) : "",
+
+    };
+
+    // Capacity is optional on edit: empty means "use the hostel's capacity".
+
+    const validationError = validateBranchForm(editForm, editBranch.hostelId ?? myHostelId, false);
+
+    if (validationError) { toast.error(validationError); return; }
+
+
 
     try {
-      await updateBranch(editBranchData.id, {
-        unitName: editBranchData.unitName,
+
+      await updateBranch(editBranch.id, {
+
+        unitName: editBranch.unitName.trim(),
+
+        location: editBranch.location?.trim() ?? "",
+
+        state:    editBranch.state || undefined,
+
+        district: editBranch.district || undefined,
+
+        phone:    editBranch.phone?.trim() ?? "",
+
+        hostelId: editBranch.hostelId ?? myHostelId,
+
+        // Don't coerce a missing capacity to 0 - that would silently replace
+
+        // "uses hostel cap" with a real cap of 0 beds.
+
+        capacityBeds: editBranch.capacityBeds ?? undefined,
+
       } as BranchRequest);
+
       toast.success("Branch updated");
+
       setEditOpen(false);
-      setEditBranchData(null);
-      reload();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Failed to update branch");
+
+      setEditBranch(null);
+
+      loadBranches();
+
+    } catch (e: any) {
+
+      showBedLimitToast(e, navigate, extractApiError(e, "Update failed"));
+
     }
+
   };
+
+
 
   const handleDelete = async (id: number) => {
+
     try {
+
       await deleteBranch(id);
+
       toast.success("Branch deleted");
-      reload();
-    } catch {
-      toast.error("Failed to delete branch");
-    }
+
+      loadBranches();
+
+    } catch (e: any) { err(e, "Delete failed"); }
+
   };
 
-  /* ================= GRID DATA ================= */
-  const rowData = useMemo(() => branches, [branches]);
 
-  const columnDefs: ColDef[] = [
-    { headerName: "Unit Name", field: "unitName", filter: true },
 
-    ...(role === "ADMIN"
-      ? [
-          {
-            headerName: "Actions",
-            cellRenderer: (params: any) => (
-              <div className="flex gap-2">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => {
-                    setEditBranchData({ ...params.data });
-                    setEditOpen(true);
-                  }}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
+  const totalPages = Math.max(Math.ceil(totalCount / pageSize), 1);
 
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button size="icon" variant="ghost">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </AlertDialogTrigger>
+  const currentPage1Based = page + 1;
 
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        Delete Branch {params.data.unitName}?
-                      </AlertDialogTitle>
-                    </AlertDialogHeader>
+  const pageNumbers = getPageNumbers(currentPage1Based, totalPages);
 
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => handleDelete(params.data.id)}
-                      >
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            ),
-          },
-        ]
-      : []),
-  ];
 
-  const defaultColDef: ColDef = {
-    sortable: true,
-    resizable: true,
-    flex: 1,
-  };
 
-  const Grid = ({ data }: { data: any[] }) => (
-    <div className="ag-theme-alpine" style={{ height: 500 }}>
-      <AgGridReact
-        rowData={data}
-        columnDefs={columnDefs}
-        defaultColDef={defaultColDef}
-        pagination
-        paginationPageSize={10}
-        paginationPageSizeSelector={[10, 20, 50, 100]}
-      />
-    </div>
-  );
-
-  /* ================= UI ================= */
   return (
-    <div>
-      {/* HEADER */}
-      <div className="flex justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">Branches</h1>
-          <p className="text-sm text-muted-foreground">
-            {branches.length} units
-          </p>
+
+    <div className="min-h-full bg-[#fcfcfc] text-gray-900 font-sans pb-10">
+
+      <style>{`
+
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        .branch-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: 1500px; margin: 0 auto; }
+
+
+
+        .branch-main-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+
+        .branch-main-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+
+
+
+        .branch-controls { display: flex; align-items: center; gap: 12px; }
+
+        .branch-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 280px; }
+
+        .branch-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
+
+
+
+        .branch-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
+
+        .branch-btn-primary:hover { background: #4200cc; }
+
+        .branch-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+
+
+        .branch-table-container { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
+
+        .branch-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+
+        .branch-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 24px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
+
+        .branch-table td { padding: 16px 24px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+
+        .branch-table tr:last-child td { border-bottom: none; }
+
+        .branch-table tr:hover { background: #fdfcff; }
+
+
+
+        .branch-icon-box { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+        .branch-name { font-size: 14px; font-weight: 600; color: #0f172a; }
+
+        .branch-address { font-size: 12px; color: #64748b; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
+
+
+
+        .branch-contact { font-size: 13px; font-weight: 500; color: #475569; display: flex; align-items: center; gap: 8px; }
+
+        .branch-beds { font-size: 14px; font-weight: 600; color: #0f172a; }
+
+        /* #94a3b8 -> #64748b: fixes low-contrast text */
+
+        .branch-beds-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+
+
+        .branch-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #f1f5f9; background: #fff; flex-wrap: wrap; gap: 12px; }
+
+        .branch-page-info { font-size: 13px; color: #64748b; }
+
+        .branch-page-controls { display: flex; align-items: center; gap: 6px; }
+
+        .branch-page-btn { min-width: 32px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
+
+        .branch-page-btn:hover:not(:disabled) { background: #f8fafc; }
+
+        .branch-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
+
+        .branch-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .branch-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #64748b; }
+
+      
+          /* Mobile-only refinements: desktop layout remains unchanged. */
+          @media (max-width: 640px) {
+            .branch-wrap { padding: 16px 12px 24px; width: 100%; min-width: 0; }
+            .branch-main-header { gap: 10px; margin-bottom: 16px; }
+            .branch-main-title { font-size: 16px; white-space: nowrap; }
+            .branch-controls { min-width: 0; }
+            .branch-btn-primary { height: 36px; padding: 0 11px; font-size: 12px; white-space: nowrap; }
+            .branch-search { width: auto; min-width: 0; flex: 1 1 0%; height: 36px; padding: 0 9px; }
+            .branch-search input { min-width: 0; font-size: 12px; }
+            .branch-mobile-clear { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; font-size: 11px; padding: 0 8px; height: 36px; white-space: nowrap; border: 1px solid #e2e8f0; border-radius: 8px; background: white; }
+            .branch-table-container { width: 100%; max-width: 100%; overflow: hidden; border-radius: 12px; }
+            .branch-table-container > .overflow-x-auto { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+            .branch-table { min-width: 760px; }
+            .branch-table th { padding: 12px 14px; }
+            .branch-table td { padding: 12px 14px; }
+            .branch-pagination { padding: 12px 10px; justify-content: center; gap: 9px; }
+            .branch-page-info { text-align: center; width: 100%; font-size: 11px; }
+            .branch-page-controls { justify-content: center; max-width: 100%; flex-wrap: wrap; }
+            .branch-mobile-dialog { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; max-height: 90dvh; overflow-y: auto !important; overscroll-behavior: contain; padding: 16px; }
+            .branch-mobile-dialog .branch-form-location-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 12px; }
+            .branch-mobile-dialog .branch-form-contact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px; }
+            .branch-mobile-dialog input, .branch-mobile-dialog button { min-width: 0; max-width: 100%; }
+          }
+          @media (min-width: 641px) {
+            .branch-mobile-clear { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; font-size: 12px; background: white; }
+          }
+`}</style>
+
+
+
+      <div className="branch-wrap">
+
+
+
+        <div className="branch-main-header">
+
+          <div className="branch-main-title">All Branches</div>
+
+
+
+          <div className="branch-controls">
+
+            <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setForm(EMPTY_FORM); }}>
+
+              <DialogTrigger asChild>
+
+                <button className="branch-btn-primary" disabled={!myHostelId} title={!myHostelId ? "No hostel assigned to your account yet" : undefined}>
+
+                  <Plus size={16} aria-hidden="true" /> Add Branch
+
+                </button>
+
+              </DialogTrigger>
+
+              <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden mobile-form-dialog branch-mobile-dialog">
+
+                <DialogHeader>
+
+                  <DialogTitle>Add Branch</DialogTitle>
+
+                  <DialogDescription>
+
+                    Create a new branch under <span className="font-medium">{myHostelName ?? "your hostel"}</span>
+
+                  </DialogDescription>
+
+                </DialogHeader>
+
+                <BranchFormFields idPrefix="add" form={form} hostelName={myHostelName ?? "Assigned Hostel"} onChange={setForm} />
+
+                <DialogFooter>
+
+                  <DialogClose asChild><Button variant="outline" className="rounded-lg">Cancel</Button></DialogClose>
+
+                  <Button onClick={handleAdd} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Create</Button>
+
+                </DialogFooter>
+
+              </DialogContent>
+
+            </Dialog>
+
+          </div>
+
         </div>
 
-        {role === "ADMIN" && (
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Branch
-              </Button>
-            </DialogTrigger>
 
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Branch</DialogTitle>
-              </DialogHeader>
 
-              <div className="grid gap-4">
-                <Input
-                  placeholder="Unit Name"
-                  value={unitName}
-                  onChange={(e) => setUnitName(e.target.value)}
-                />
-              </div>
+        <div className="flex gap-4 mb-4">
 
-              <DialogFooter>
-                <DialogClose asChild>
-                  <Button variant="outline">Cancel</Button>
-                </DialogClose>
-                <Button onClick={handleAdd}>Create</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <div className="branch-search">
+
+            <Search size={16} color="#94a3b8" aria-hidden="true" />
+
+            <input
+
+              type="text"
+
+              aria-label="Search branches or address"
+
+              placeholder="Search branches or address..."
+
+              value={searchTerm}
+
+              onChange={(e) => setSearchTerm(e.target.value)}
+
+            />
+
+            {searchTerm && (
+
+              <button
+
+                type="button"
+
+                aria-label="Clear search"
+
+                onClick={() => setSearchTerm("")}
+
+                className="text-gray-500 hover:text-gray-700"
+
+              >
+
+                <X size={14} aria-hidden="true" />
+
+              </button>
+
+            )}
+
+          </div>
+
+          <button type="button" className="branch-mobile-clear" onClick={() => setSearchTerm("")}>
+
+            <RefreshCw size={14} aria-hidden="true" /> Clear Filters
+
+          </button>
+
+        </div>
+
+
+
+        {!myHostelId && (
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-sm px-4 py-3 mb-6">
+
+            No hostel is assigned to your account yet. Ask your Super Admin to assign one before creating branches.
+
+          </div>
+
         )}
+
+
+
+        <div className="branch-table-container">
+
+          <div className="overflow-x-auto">
+
+            <table className="branch-table">
+
+              <thead>
+
+                <tr>
+
+                  <th>BRANCH NAME</th>
+
+                  <th>CONTACT</th>
+
+                  <th>BED CAPACITY</th>
+
+                  <th>BEDS CREATED</th>
+
+                  <th>ACTIONS</th>
+
+                </tr>
+
+              </thead>
+
+              <tbody>
+
+                {loading ? (
+
+                  <tr>
+
+                    {/* text-slate-400 -> text-slate-600: contrast fix */}
+
+                    <td colSpan={5} className="text-center py-12 text-slate-600">Loading branches...</td>
+
+                  </tr>
+
+                ) : branches.length === 0 ? (
+
+                  <tr>
+
+                    <td colSpan={5} className="text-center py-12 text-slate-600">No branches found.</td>
+
+                  </tr>
+
+                ) : (
+
+                  branches.map(branch => {
+
+                    const color = COLORS[branch.id % COLORS.length];
+
+                    return (
+
+                      <tr key={branch.id}>
+
+                        <td>
+
+                          <div className="flex items-center gap-3">
+
+                            <div className="branch-icon-box" style={{ background: color.bg }} aria-hidden="true">
+
+                              <Building2 size={18} color={color.color} />
+
+                            </div>
+
+                            <div>
+
+                              <div className="branch-name">{branch.unitName}</div>
+
+                              <div className="branch-address">{branch.location || 'No location set'}</div>
+
+                            </div>
+
+                          </div>
+
+                        </td>
+
+                        <td>
+
+                          <div className="branch-contact">
+
+                            <Phone size={14} color="#94a3b8" aria-hidden="true" /> {branch.phone || 'No phone'}
+
+                          </div>
+
+                        </td>
+
+                        <td>
+
+                          <div className="branch-beds">{branch.capacityBeds ?? "-"}</div>
+
+                          <div className="branch-beds-sub">
+
+                            {branch.capacityBeds != null ? "individual cap" : "uses hostel cap"}
+
+                          </div>
+
+                        </td>
+
+                        <td>
+
+                          <div className="branch-beds">{branch.bedCount ?? 0}</div>
+
+                          <div className="branch-beds-sub">via Rooms &amp; Beds</div>
+
+                        </td>
+
+                        <td>
+
+                          <div className="flex gap-2">
+
+                            {/* Lighthouse: "Buttons do not have an accessible name" — icon-only edit/delete */}
+
+                            <Button
+
+                              type="button"
+
+                              size="icon"
+
+                              variant="outline"
+
+                              aria-label={`Edit ${branch.unitName}`}
+
+                              title="Edit"
+
+                              className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
+
+                              onClick={() => {
+
+                                setEditBranch({ ...branch });
+
+                                setEditOpen(true);
+
+                              }}
+
+                            >
+
+                              <Pencil className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
+
+                            </Button>
+
+                            <AlertDialog>
+
+                              <AlertDialogTrigger asChild>
+
+                                <Button
+
+                                  type="button"
+
+                                  size="icon"
+
+                                  variant="outline"
+
+                                  aria-label={`Delete ${branch.unitName}`}
+
+                                  title="Delete"
+
+                                  className="w-8 h-8 rounded-lg bg-white border-slate-200 hover:bg-slate-50 shadow-none"
+
+                                >
+
+                                  <Trash2 className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />
+
+                                </Button>
+
+                              </AlertDialogTrigger>
+
+                              <AlertDialogContent className="rounded-2xl">
+
+                                <AlertDialogHeader>
+
+                                  <AlertDialogTitle>Delete {branch.unitName}?</AlertDialogTitle>
+
+                                  <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+
+                                </AlertDialogHeader>
+
+                                <AlertDialogFooter>
+
+                                  <AlertDialogCancel className="rounded-lg">Cancel</AlertDialogCancel>
+
+                                  <AlertDialogAction onClick={() => handleDelete(branch.id)} className="bg-red-600 hover:bg-red-700 rounded-lg">Delete</AlertDialogAction>
+
+                                </AlertDialogFooter>
+
+                              </AlertDialogContent>
+
+                            </AlertDialog>
+
+                          </div>
+
+                        </td>
+
+                      </tr>
+
+                    );
+
+                  })
+
+                )}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+
+
+          <div className="branch-pagination">
+
+            <div className="branch-page-info">
+
+              Showing {branches.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} branches
+
+            </div>
+
+
+
+            <nav aria-label="Pagination" className="branch-page-controls">
+
+              <Button
+
+                type="button"
+
+                size="icon"
+
+                variant="outline"
+
+                aria-label="Previous page"
+
+                className="w-8 h-8 rounded-lg"
+
+                disabled={page === 0}
+
+                onClick={() => setPage(p => Math.max(p - 1, 0))}
+
+              >
+
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+
+              </Button>
+
+
+
+              {pageNumbers.map((p, idx) =>
+
+                p === "..." ? (
+
+                  <span key={`ellipsis-${idx}`} className="branch-page-ellipsis" aria-hidden="true">
+
+                    <MoreHorizontal className="h-4 w-4" />
+
+                  </span>
+
+                ) : (
+
+                  <button
+
+                    type="button"
+
+                    key={p}
+
+                    aria-label={`Page ${p}`}
+
+                    aria-current={p === currentPage1Based ? "page" : undefined}
+
+                    className={`branch-page-btn ${p === currentPage1Based ? "active" : ""}`}
+
+                    onClick={() => setPage(p - 1)}
+
+                  >
+
+                    {p}
+
+                  </button>
+
+                )
+
+              )}
+
+
+
+              <Button
+
+                type="button"
+
+                size="icon"
+
+                variant="outline"
+
+                aria-label="Next page"
+
+                className="w-8 h-8 rounded-lg"
+
+                disabled={currentPage1Based >= totalPages}
+
+                onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))}
+
+              >
+
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+
+              </Button>
+
+            </nav>
+
+          </div>
+
+        </div>
+
+
+
+        <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditBranch(null); }}>
+
+          <DialogContent className="sm:max-w-[640px] rounded-2xl overflow-hidden mobile-form-dialog branch-mobile-dialog">
+
+            <DialogHeader>
+
+              <DialogTitle>Edit Branch</DialogTitle>
+
+              <DialogDescription>Update branch details</DialogDescription>
+
+            </DialogHeader>
+
+            {editBranch && (
+
+              <BranchFormFields
+
+                idPrefix="edit"
+
+                form={{
+
+                  unitName: editBranch.unitName,
+
+                  state: editBranch.state ?? "",
+
+                  district: editBranch.district ?? "",
+
+                  area: editBranch.location?.split(",")[0]?.trim() ?? "",
+
+                  location: editBranch.location ?? "",
+
+                  phone: editBranch.phone ?? "",
+
+                  capacityBeds: editBranch.capacityBeds != null ? String(editBranch.capacityBeds) : "",
+
+                }}
+
+                hostelName={editBranch.hostelName ?? myHostelName ?? "Assigned Hostel"}
+
+                onChange={(f) => {
+
+                  setEditBranch({
+
+                    ...editBranch,
+
+                    unitName: f.unitName,
+
+                    location: f.location,
+
+                    state: f.state,
+
+                    district: f.district,
+
+                    phone: f.phone,
+
+                    capacityBeds: f.capacityBeds === "" ? null : Number(f.capacityBeds),
+
+                  });
+
+                }}
+
+              />
+
+            )}
+
+            <DialogFooter>
+
+              <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
+
+              <Button onClick={handleEdit} className="bg-[#5200FF] hover:bg-[#4200cc] rounded-lg">Save</Button>
+
+            </DialogFooter>
+
+          </DialogContent>
+
+        </Dialog>
+
       </div>
 
-      {/* EDIT DIALOG */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Branch</DialogTitle>
-          </DialogHeader>
-
-          {editBranchData && (
-            <div className="grid gap-4">
-              <Input
-                value={editBranchData.unitName}
-                onChange={(e) =>
-                  setEditBranchData({
-                    ...editBranchData,
-                    unitName: e.target.value,
-                  })
-                }
-              />
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setEditOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleEdit}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* GRID */}
-      <Card>
-        <CardContent>
-          <Grid data={rowData} />
-        </CardContent>
-      </Card>
     </div>
+
   );
+
 };
+
+
+
+const BranchFormFields = ({
+
+  form, hostelName, onChange, idPrefix,
+
+}: { form: BranchForm; hostelName: string; onChange: (f: BranchForm) => void; idPrefix: string }) => {
+
+  const handleStateChange = (value: string) => {
+
+    onChange({ ...form, state: value, district: "", area: "", location: "" });
+
+  };
+
+
+
+  const handleDistrictChange = (value: string) => {
+
+    onChange({ ...form, district: value, area: "", location: "" });
+
+  };
+
+
+
+  const handleAreaChange = (value: string) => {
+
+    const stateLabel = STATES.find(s => s.value === form.state)?.label ?? form.state;
+
+    const composed = [value, form.district, stateLabel].filter(Boolean).join(", ");
+
+    onChange({ ...form, area: value, location: composed });
+
+  };
+
+
+
+  return (
+
+    <div className="space-y-4">
+
+      <div className="space-y-1.5">
+
+        <Label htmlFor={`${idPrefix}-hostel`} className="text-xs text-muted-foreground">Parent Hostel (Managed Backend)</Label>
+
+        <Input id={`${idPrefix}-hostel`} value={hostelName} disabled className="bg-slate-50 cursor-not-allowed rounded-lg" />
+
+      </div>
+
+
+
+      <div className="space-y-1.5">
+
+        <Label htmlFor={`${idPrefix}-name`}>Branch Name <span className="text-red-500">*</span></Label>
+
+        <Input
+
+          id={`${idPrefix}-name`}
+
+          placeholder="e.g. North Wing, Block A"
+
+          value={form.unitName}
+
+          className="rounded-lg"
+
+          onChange={(e) => onChange({ ...form, unitName: e.target.value })}
+
+        />
+
+      </div>
+
+
+
+      <div className="grid grid-cols-3 gap-4 branch-form-location-grid">
+
+        <div className="space-y-1.5">
+
+          <Label>State</Label>
+
+          <Select value={form.state} onValueChange={handleStateChange}>
+
+            <SelectTrigger className="rounded-lg" aria-label="State">
+
+              <SelectValue placeholder="Select state" />
+
+            </SelectTrigger>
+
+            <SelectContent>
+
+              {STATES.map((s) => (
+
+                <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+
+              ))}
+
+            </SelectContent>
+
+          </Select>
+
+        </div>
+
+
+
+        <div className="space-y-1.5">
+
+          <Label>District</Label>
+
+          <SearchableSelect
+
+            value={form.district}
+
+            options={TN_DISTRICTS}
+
+            disabled={!form.state}
+
+            placeholder={!form.state ? "Select state first" : "Search district..."}
+
+            onChange={handleDistrictChange}
+
+          />
+
+        </div>
+
+
+
+        <div className="space-y-1.5">
+
+          <Label>Location <span className="text-red-500">*</span></Label>
+
+          <LocationAreaSelect
+
+            value={form.area}
+
+            district={form.district}
+
+            stateLabel={STATES.find(s => s.value === form.state)?.label ?? "Tamil Nadu"}
+
+            disabled={!form.district}
+
+            placeholder={!form.district ? "Select district first" : "Select location"}
+
+            onChange={handleAreaChange}
+
+          />
+
+        </div>
+
+      </div>
+
+
+
+      <div className="grid grid-cols-2 gap-4 branch-form-contact-grid">
+
+        <div className="space-y-1.5">
+
+          <Label htmlFor={`${idPrefix}-phone`}>Contact Phone <span className="text-red-500">*</span></Label>
+
+          <Input
+
+            id={`${idPrefix}-phone`}
+
+            type="tel"
+
+            inputMode="numeric"
+
+            placeholder="Contact Phone (10 digits)"
+
+            value={form.phone}
+
+            maxLength={10}
+
+            className="rounded-lg"
+
+            onChange={(e) => {
+
+              const val = e.target.value.replace(/\D/g, "");
+
+              onChange({ ...form, phone: val });
+
+            }}
+
+          />
+
+        </div>
+
+
+
+        <div className="space-y-1.5">
+
+          <Label htmlFor={`${idPrefix}-capacity`}>Bed Capacity <span className="text-red-500">*</span></Label>
+
+          <Input
+
+            id={`${idPrefix}-capacity`}
+
+            type="number"
+
+            min={0}
+
+            placeholder="e.g. 20"
+
+            value={form.capacityBeds}
+
+            className="rounded-lg"
+
+            onChange={(e) => onChange({ ...form, capacityBeds: e.target.value.replace(/\D/g, "") })}
+
+          />
+
+        </div>
+
+      </div>
+
+    </div>
+
+  );
+
+};
+
+
 
 export default BranchPage;
