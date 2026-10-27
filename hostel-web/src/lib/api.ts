@@ -47,7 +47,11 @@ api.interceptors.response.use(
       return Promise.reject(err);
     }
 
-    if (err.response?.status === 401 && !orig._retry) {
+    // Login / refresh calls answer 401 for a wrong password or a dead refresh token;
+    // those must reach the caller as-is, not trigger another refresh attempt.
+    const isAuthCall = typeof orig?.url === "string" && orig.url.includes("/auth/");
+
+    if (err.response?.status === 401 && !orig._retry && !isAuthCall) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -79,6 +83,13 @@ api.interceptors.response.use(
       } finally {
         isRefreshing = false;
       }
+    }
+
+    // A 403 usually means the Super Admin just switched a page OFF for this
+    // user. Tell the app shell so it can re-read permissions and, if needed,
+    // move the user off the page they can no longer use.
+    if (err.response?.status === 403) {
+      window.dispatchEvent(new Event("hms:permissions-stale"));
     }
 
     return Promise.reject(err);

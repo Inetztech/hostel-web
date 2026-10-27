@@ -87,8 +87,14 @@ export default function NotificationBell() {
 
   useEffect(() => {
     loadUnreadCount();
-    const id = setInterval(loadUnreadCount, POLL_MS);
-    return () => clearInterval(id);
+    // Don't poll while the tab is in the background; catch up when it becomes visible.
+    const tick = () => { if (document.visibilityState === "visible") loadUnreadCount(); };
+    const id = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, []);
 
   useEffect(() => {

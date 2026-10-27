@@ -1,4 +1,5 @@
 // src/AppRouter.tsx
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import AppLayout from "@/components/AppLayout";
@@ -6,54 +7,54 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import PermissionRoute from "@/components/PermissionRoute";
 
 import Login           from "@/pages/Login";
-import SuperAdminPage  from "@/pages/SuperAdminPage";
-import Dashboard       from "@/pages/Dashboard";
-import RoomsPage       from "@/pages/RoomsPage";
-import TenantsPage     from "@/pages/TenantsPage";
-import EBReadingsPage  from "@/pages/EBReadingsPage";
-import RentPage        from "@/pages/RentPage";
-import CheckoutPage    from "@/pages/CheckoutPage";
+const SuperAdminPage = lazy(() => import("@/pages/SuperAdminPage"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const RoomsPage = lazy(() => import("@/pages/RoomsPage"));
+const TenantsPage = lazy(() => import("@/pages/TenantsPage"));
+const EBReadingsPage = lazy(() => import("@/pages/EBReadingsPage"));
+const RentPage = lazy(() => import("@/pages/RentPage"));
+const CheckoutPage = lazy(() => import("@/pages/CheckoutPage"));
 import NotFound        from "@/pages/NotFound";
 import Unauthorized    from "@/pages/Unauthorized";
-import BranchPage      from "@/pages/BranchPage";
-import HostelAdminPage from "@/pages/HostelAdminPage";
+const BranchPage = lazy(() => import("@/pages/BranchPage"));
+const HostelAdminPage = lazy(() => import("@/pages/HostelAdminPage"));
 // import BusinessModelPage from "@/pages/BusinessModelPage";
-import UserRegisterPage from "@/pages/UserRegisterPage";
-import ComplaintsPage  from "@/pages/ComplaintPage";
+const UserRegisterPage = lazy(() => import("@/pages/UserRegisterPage"));
+const ComplaintsPage = lazy(() => import("@/pages/ComplaintPage"));
 // import FlatPage        from "@/pages/FlatPage";
-import FoodTimetablePage from "@/pages/FoodTimetablePage";
-import SundayMealPage from "@/pages/Sundaymealpage";
-import AnnouncementPage from "@/pages/AnnouncementPage";
-import RuleRegulationPage from "@/pages/RuleRegulationPage";
-import ProfilePage      from "@/pages/ProfilePage";
-import PaymentsPage     from "@/pages/PaymentsPage";
-import PermissionManagementPage from "@/pages/PermissionManagementPage";
-import TicketsPage from "@/pages/TicketsPage";
-import SuperAdminTicketsPage from "@/pages/SuperAdminTicketsPage";
-import ExpensePage from "./pages/ExpenseTracker";
-import VisitorPage from "./pages/Visitor";
-import MaintenancePage from "@/pages/MaintenancePage";
-import SubscriptionPage from "@/pages/SubscriptionPage";
-import TenantNoticePeriodPage from "@/pages/TenantNoticePeriodPage";
+const FoodTimetablePage = lazy(() => import("@/pages/FoodTimetablePage"));
+const SundayMealPage = lazy(() => import("@/pages/Sundaymealpage"));
+const AnnouncementPage = lazy(() => import("@/pages/AnnouncementPage"));
+const RuleRegulationPage = lazy(() => import("@/pages/RuleRegulationPage"));
+const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
+const PaymentsPage = lazy(() => import("@/pages/PaymentsPage"));
+const PermissionManagementPage = lazy(() => import("@/pages/PermissionManagementPage"));
+const TicketsPage = lazy(() => import("@/pages/TicketsPage"));
+const SuperAdminTicketsPage = lazy(() => import("@/pages/SuperAdminTicketsPage"));
+const ExpensePage = lazy(() => import("./pages/ExpenseTracker"));
+const VisitorPage = lazy(() => import("./pages/Visitor"));
+const MaintenancePage = lazy(() => import("@/pages/MaintenancePage"));
+const SubscriptionPage = lazy(() => import("@/pages/SubscriptionPage"));
+const TenantNoticePeriodPage = lazy(() => import("@/pages/TenantNoticePeriodPage"));
 
 import HomePage from "./pages/Home";
-import PropertyDetailPage from "@/pages/PropertyDetailPage";
-import DamagePage from "@/pages/DamagePage";
+const PropertyDetailPage = lazy(() => import("@/pages/PropertyDetailPage"));
+const DamagePage = lazy(() => import("@/pages/DamagePage"));
 
-import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
-import ResetPasswordPage   from "@/pages/ResetPasswordPage";
+const ForgotPasswordPage = lazy(() => import("@/pages/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("@/pages/ResetPasswordPage"));
 
 
 export const router = createBrowserRouter([
 
   // ── Public ──────────────────────────────────────────────────────────────
   { path: "/",             element: <HomePage /> },
-  { path: "/property/:id",  element: <PropertyDetailPage /> },
+  { path: "/property/:id",  element: <Suspense fallback={null}><PropertyDetailPage /></Suspense> },
   { path: "/login",        element: <Login /> },
   { path: "/admin",        element: <Navigate to="/dashboard" replace /> },
   { path: "/unauthorized", element: <Unauthorized /> },
-  { path: "/forgot-password", element: <ForgotPasswordPage /> },
-  { path: "/reset-password",  element: <ResetPasswordPage /> },
+  { path: "/forgot-password", element: <Suspense fallback={null}><ForgotPasswordPage /></Suspense> },
+  { path: "/reset-password",  element: <Suspense fallback={null}><ResetPasswordPage /></Suspense> },
 
   {
     element: (
@@ -68,7 +69,7 @@ export const router = createBrowserRouter([
         path: "/super-admin",
         element: (
           <ProtectedRoute allow={["SUPER_ADMIN"]}>
-            <SuperAdminPage />
+            <Suspense fallback={null}><SuperAdminPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -76,7 +77,7 @@ export const router = createBrowserRouter([
         path: "/super-admin/hostels",
         element: (
           <ProtectedRoute allow={["SUPER_ADMIN"]} permission="MANAGE_HOSTELS">
-            <HostelAdminPage />
+            <Suspense fallback={null}><HostelAdminPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -94,7 +95,7 @@ export const router = createBrowserRouter([
         path: "/super-admin/tickets",
         element: (
           <ProtectedRoute allow={["SUPER_ADMIN"]}>
-            <SuperAdminTicketsPage />
+            <Suspense fallback={null}><SuperAdminTicketsPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -103,7 +104,7 @@ export const router = createBrowserRouter([
         path: "/damages",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]} permission="MANAGE_DAMAGES">
-            <DamagePage />
+            <Suspense fallback={null}><DamagePage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -112,7 +113,7 @@ export const router = createBrowserRouter([
         path: "/permissions",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
-            <PermissionManagementPage />
+            <Suspense fallback={null}><PermissionManagementPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -122,7 +123,7 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN", "TENANT"]}>
             <PermissionRoute require={["MANAGE_MAINTENANCE", "VIEW_MAINTENANCE"]} staffOnly>
-              <MaintenancePage />
+              <Suspense fallback={null}><MaintenancePage /></Suspense>
             </PermissionRoute>
           </ProtectedRoute>
         ),
@@ -131,7 +132,7 @@ export const router = createBrowserRouter([
         path: "/dashboard",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN", "TENANT"]} permission="VIEW_DASHBOARD">
-            <Dashboard />
+            <Suspense fallback={null}><Dashboard /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -141,7 +142,7 @@ export const router = createBrowserRouter([
         path: "/branch",
         element: (
           <ProtectedRoute allow={["ADMIN"]} permission="MANAGE_BRANCHES">
-            <BranchPage />
+            <Suspense fallback={null}><BranchPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -150,7 +151,7 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
             <PermissionRoute require={["MANAGE_EXPENSES", "MANAGE_PAYMENTS", "VIEW_PAYMENTS"]}>
-              <ExpensePage />
+              <Suspense fallback={null}><ExpensePage /></Suspense>
             </PermissionRoute>
           </ProtectedRoute>
         ),
@@ -159,7 +160,7 @@ export const router = createBrowserRouter([
         path: "/visitor",
         element: (
           <PermissionRoute require="MANAGE_VISITORS" staffOnly>
-            <VisitorPage />
+            <Suspense fallback={null}><VisitorPage /></Suspense>
           </PermissionRoute>
         ),
       },
@@ -168,7 +169,7 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]}>
             <PermissionRoute require={["MANAGE_WARDENS", "MANAGE_TENANTS"]}>
-              <UserRegisterPage />
+              <Suspense fallback={null}><UserRegisterPage /></Suspense>
             </PermissionRoute>
           </ProtectedRoute>
         ),
@@ -178,7 +179,7 @@ export const router = createBrowserRouter([
         path: "/subscription",
         element: (
           <ProtectedRoute allow={["ADMIN"]}>
-            <SubscriptionPage />
+            <Suspense fallback={null}><SubscriptionPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -196,7 +197,7 @@ export const router = createBrowserRouter([
         path: "/rooms",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]} permission="MANAGE_ROOMS">
-            <RoomsPage />
+            <Suspense fallback={null}><RoomsPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -204,7 +205,7 @@ export const router = createBrowserRouter([
         path: "/tenants",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]} permission="MANAGE_TENANTS">
-            <TenantsPage />
+            <Suspense fallback={null}><TenantsPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -214,7 +215,7 @@ export const router = createBrowserRouter([
         path: "/notice-period",
         element: (
           <ProtectedRoute allow={["TENANT"]}>
-            <TenantNoticePeriodPage />
+            <Suspense fallback={null}><TenantNoticePeriodPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -223,7 +224,7 @@ export const router = createBrowserRouter([
         path: "/eb-readings",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]} permission="MANAGE_EB_READINGS">
-            <EBReadingsPage />
+            <Suspense fallback={null}><EBReadingsPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -231,7 +232,7 @@ export const router = createBrowserRouter([
         path: "/rent",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]} permission="MANAGE_RENTS">
-            <RentPage />
+            <Suspense fallback={null}><RentPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -239,7 +240,7 @@ export const router = createBrowserRouter([
         path: "/announcements",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN", "TENANT"]} permission="MANAGE_ANNOUNCEMENTS">
-            <AnnouncementPage />
+            <Suspense fallback={null}><AnnouncementPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -249,7 +250,7 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN", "TENANT"]}>
             <PermissionRoute require="MANAGE_RULES_REGULATIONS" staffOnly>
-              <RuleRegulationPage />
+              <Suspense fallback={null}><RuleRegulationPage /></Suspense>
             </PermissionRoute>
           </ProtectedRoute>
         ),
@@ -259,7 +260,7 @@ export const router = createBrowserRouter([
         path: "/checkout",
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN"]} permission="MANAGE_TENANTS">
-            <CheckoutPage />
+            <Suspense fallback={null}><CheckoutPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -268,7 +269,7 @@ export const router = createBrowserRouter([
         path: "/profile",
         element: (
           <ProtectedRoute allow={["SUPER_ADMIN", "ADMIN", "WARDEN", "TENANT"]}>
-            <ProfilePage />
+            <Suspense fallback={null}><ProfilePage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -278,7 +279,7 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allow={["ADMIN", "WARDEN", "TENANT"]}>
             <PermissionRoute require={["MANAGE_PAYMENTS", "VIEW_PAYMENTS"]}>
-              <PaymentsPage />
+              <Suspense fallback={null}><PaymentsPage /></Suspense>
             </PermissionRoute>
           </ProtectedRoute>
         ),
@@ -287,7 +288,7 @@ export const router = createBrowserRouter([
         path: "/complaints",
         element: (
           <ProtectedRoute allow={["ADMIN", "TENANT", "WARDEN"]} permission="MANAGE_COMPLAINTS">
-            <ComplaintsPage />
+            <Suspense fallback={null}><ComplaintsPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -295,7 +296,7 @@ export const router = createBrowserRouter([
         path: "/food-timetable",
         element: (
           <ProtectedRoute allow={["ADMIN", "TENANT", "WARDEN"]} permission="MANAGE_FOOD_TIMETABLE">
-            <FoodTimetablePage />
+            <Suspense fallback={null}><FoodTimetablePage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -303,7 +304,7 @@ export const router = createBrowserRouter([
         path: "/sunday-meal",
         element: (
           <ProtectedRoute allow={["ADMIN", "TENANT", "WARDEN"]} permission="VIEW_SUNDAY_MEAL">
-            <SundayMealPage />
+            <Suspense fallback={null}><SundayMealPage /></Suspense>
           </ProtectedRoute>
         ),
       },
@@ -311,7 +312,7 @@ export const router = createBrowserRouter([
         path: "/tickets",
         element: (
           <ProtectedRoute allow={["ADMIN"]}>
-            <TicketsPage />
+            <Suspense fallback={null}><TicketsPage /></Suspense>
           </ProtectedRoute>
         ),
       },
