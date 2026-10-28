@@ -70,15 +70,21 @@ type RentRow = {
   total: number;
   paid: number;
   pending: number;
+  // Unpaid balance of EARLIER months (already included in `pending`).
   previousPending: number;
+  // NEW: which months that previous balance comes from, e.g. "Sep 2026".
+  previousLabel?: string;
   currentPending: number;
-  // NEW: the tenant's own "Pending (₹)" figure from the Tenants page
-  // (Tenant.pendingAmount). Shown in its own PENDING AMT column; it is
-  // display-only and is NOT added into total / pending, to avoid
-  // double-counting amounts that are already billed through Rent records.
-  // UPDATE: it IS now included in `pending` (PENDING = rent + EB + damage +
-  // due + tenantPending), but not in `total`.
+  // The tenant's own "Pending (₹)" figure from the Tenants page
+  // (Tenant.pendingAmount), shown in its own PENDING AMT column.
+  // FIX: in the CHECK-IN month (no Rent record yet) only the part that is NOT
+  // this month's rent is shown here — the rent part of the check-in pending is
+  // already inside the RENT column, so it is treated as "already paid" credit.
   tenantPending?: number;
+  // NEW: part of the tenant's check-in Pending (₹) that is THIS month's unpaid
+  // rent (check-in month, no Rent record yet). Display-only note: it is already
+  // inside RENT / PENDING, so it is never added to TOTAL a second time.
+  checkInRentPending?: number;
   rentRecord: Rent | undefined;
   unitId: number | undefined;
   amount: number;
@@ -139,6 +145,18 @@ const checkedInAfterMonth = (
   if (!cy || !cm || !cd) return false;
   const monthEnd = new Date(year, month, 0); // last day of selected month
   return new Date(cy, cm - 1, cd) > monthEnd;
+};
+
+// NEW: true when (month, year) is the calendar month the tenant checked in.
+// Parses "YYYY-MM-DD" manually to avoid timezone shifts.
+const isCheckInMonth = (
+  checkInDate: string | null | undefined,
+  month: number,
+  year: number
+): boolean => {
+  if (!checkInDate) return false;
+  const [cy, cm] = String(checkInDate).slice(0, 10).split("-").map(Number);
+  return cy === year && cm === month;
 };
 
 /* ══════════════════════════════════════════════════════════════════
@@ -384,7 +402,8 @@ const ActionCell = ({
   // Keep collection available when monthly rent is paid but manual previous dues remain.
   const isUnpaid = Boolean(rentRecord) && (
     (rentRecord.paymentStatus || "").toUpperCase() !== "PAID" ||
-    (bill.tenantPending ?? 0) > 0
+    (bill.tenantPending ?? 0) > 0 ||
+    bill.previousPending > 0
   );
 
   // A daily-stay tenant who has nothing outstanding (ebBalance >= 0,
@@ -564,7 +583,7 @@ const RentPage = () => {
     return map;
   }, [tenants]);
 
-  // NEW: the tenant's own "Pending (₹)" figure as shown on the Tenants page
+  // The tenant's own "Pending (₹)" figure as shown on the Tenants page
   // (Tenant.pendingAmount), keyed by tenantId.
   const tenantPendingMap = useMemo(() => {
     const map = new Map<number, number>();
@@ -701,6 +720,30 @@ const RentPage = () => {
         ? tenant.totalAmount - advanceEB
         : (tenant.amountPerDay ?? 0) * (tenant.noOfDays ?? 0);
     return { advanceRent, advanceEB };
+  };
+
+  // FIX (double-counted first-month rent):
+  // Tenant.pendingAmount at check-in = unpaid part of
+  // (advance + registration + first month's rent). That bill ALREADY contains
+  // this month's rent, so adding it on top of the RENT column counted the rent
+  // twice (e.g. 8,000 + 250 EB + 5,000 pending = 13,250 instead of 5,250 due).
+  //
+  // For a MONTHLY tenant in their CHECK-IN month (before a Rent record exists):
+  //   rentCredit   = part of this month's rent already paid at check-in
+  //   extraPending = leftover pending that is NOT rent (still shown in PENDING AMT)
+  // Any other tenant / month returns the raw pending untouched.
+  // Assumes the check-in payment covers registration + advance first, and only
+  // the remainder goes to rent. Change the two Math.max lines if yours differs.
+  const splitCheckInPending = (tenantId: number, rent: number) => {
+    const tenant  = tenantMap.get(tenantId);
+    const pending = tenantPendingMap.get(tenantId) ?? 0;
+    if (!tenant || isDailyTenant(tenant) || !isCheckInMonth(tenant.checkInDate, month, year)) {
+      return { extraPending: pending, rentCredit: 0 };
+    }
+    return {
+      rentCredit:   Math.max(0, rent - pending),
+      extraPending: Math.max(0, pending - rent),
+    };
   };
 
   // Mirrors EBReadingsPage.tsx's tenantLastBilledReadingAll — the
@@ -1200,6 +1243,18 @@ const RentPage = () => {
     return { previousPending, prevUnpaidRents };
   };
 
+  // NEW: "Sep 2026" / "Aug 2026, Sep 2026" — the months a previous balance
+  // is made of, oldest first. Shown under the PREVIOUS DUE amount.
+  const previousMonthsLabel = (rs: Rent[]): string =>
+    [...rs]
+      .sort(
+        (a, b) =>
+          Number(a.rentYear) - Number(b.rentYear) ||
+          Number(a.rentMonth) - Number(b.rentMonth)
+      )
+      .map((r) => `${MONTHS[Number(r.rentMonth) - 1]?.slice(0, 3)} ${r.rentYear}`)
+      .join(", ");
+
   const filteredBills = useMemo(() => {
     return ebBills.filter((bill) => {
       if (role !== "ADMIN" && branchId) {
@@ -1351,13 +1406,29 @@ const RentPage = () => {
       const displayDamage = rentRecord
         ? recordDamage
         : (pendingDamageMap.get(Number(b.tenantId)) ?? 0);
-      // TOTAL = rent + EB + damage + due + tenant Pending Amount.
-      const tenantPendingAmt = tenantPendingMap.get(Number(b.tenantId)) ?? 0;
+
+      // FIX: check-in month (no Rent record yet) — split the tenant's check-in
+      // pending so this month's rent is not counted twice.
+      //   rentCredit   -> already paid toward this month's rent
+      //   extraPending -> pending that is NOT rent (shown in PENDING AMT)
+      // Once a Rent record exists the backend owns the numbers, so the raw
+      // tenant pending is used exactly as before.
+      const rawTenantPending = tenantPendingMap.get(Number(b.tenantId)) ?? 0;
+      const { extraPending, rentCredit } = rentRecord
+        ? { extraPending: rawTenantPending, rentCredit: 0 }
+        : splitCheckInPending(Number(b.tenantId), displayRent);
+      const tenantPendingAmt = extraPending;
+      // NEW: the slice of the tenant's pending that was folded into this
+      // month's rent (e.g. ROCK: 4,000 pending, 8,000 rent -> 4,000).
+      const checkInRentPending = rentRecord ? 0 : Math.max(0, rawTenantPending - extraPending);
+
+      // TOTAL = rent + EB + damage + due + (non-rent) tenant Pending Amount.
       const displayTotal  = (rentRecord
         ? (isPaid ? recordTotal : displayRent + displayEB + displayDamage + due.dueAmount)
         : rentPerBed + displayEB + displayDamage + due.dueAmount) + tenantPendingAmt;
 
-      const currentPaid   = Number(rentRecord?.paidAmount || 0);
+      // No Rent record yet: the rent already paid at check-in counts as paid.
+      const currentPaid   = rentRecord ? Number(rentRecord.paidAmount || 0) : rentCredit;
       const currentStatus = normalizeStatus(rentRecord?.paymentStatus);
 
       // PENDING = TOTAL - paid. A fully paid Rent record still leaves the
@@ -1368,11 +1439,14 @@ const RentPage = () => {
           : currentStatus === "PARTIAL"
           ? displayTotal - currentPaid
           : displayTotal
-        : displayTotal;
+        : Math.max(0, displayTotal - rentCredit);
 
-      const { previousPending } = rentRecord
-        ? computePreviousPending(b.tenantId, month, year, rents)
-        : { previousPending: 0 };
+      // FIX: earlier months' unpaid balance is carried whether or not THIS
+      // month's Rent record has been generated yet. Before, an ungenerated
+      // month forced previousPending to 0, so e.g. Sep's unpaid ₹2,000 was
+      // missing from Oct's row until Oct was generated.
+      const { previousPending, prevUnpaidRents } =
+        computePreviousPending(Number(b.tenantId), month, year, rents);
 
       const flatNumber =
         bill.flatNumber ||
@@ -1404,11 +1478,12 @@ const RentPage = () => {
         total:         displayTotal,
         paid:          currentPaid,
         previousPending,
+        previousLabel: previousMonthsLabel(prevUnpaidRents),
         currentPending,
-        pending:       rentRecord
-          ? previousPending + currentPending
-          : currentPending,
+        // PENDING = this month's outstanding + earlier months' unpaid balance.
+        pending:       previousPending + currentPending,
         tenantPending: tenantPendingAmt,
+        checkInRentPending,
         rentRecord,
         unitId:        room?.unitId,
         // The resolved displayEB so "Generate" bills the same figure shown.
@@ -1492,7 +1567,7 @@ const RentPage = () => {
             ? recordTotal - currentPaid
             : recordTotal) + orphanTenantPending;
 
-        const { previousPending } = computePreviousPending(
+        const { previousPending, prevUnpaidRents } = computePreviousPending(
           Number(r.tenantId),
           month,
           year,
@@ -1514,6 +1589,7 @@ const RentPage = () => {
           total:           recordTotal + orphanTenantPending,
           paid:            currentPaid,
           previousPending,
+          previousLabel:   previousMonthsLabel(prevUnpaidRents),
           currentPending,
           pending:         previousPending + currentPending,
           tenantPending:   tenantPendingMap.get(Number(r.tenantId)) ?? 0,
@@ -1648,6 +1724,11 @@ const RentPage = () => {
             })())
           : resolveTenantRent(Number(tenantId), room);
 
+        // FIX: same check-in-month split as the main rows (no double-counted rent).
+        const { extraPending, rentCredit } = splitCheckInPending(Number(tenantId), rentPerBed);
+        const damageOnlyTotal   = rentPerBed + damageAmount + extraPending;
+        const damageOnlyPending = Math.max(0, damageOnlyTotal - rentCredit);
+
         return {
           tenantId:      Number(tenantId),
           tenantName:    resolvedName,
@@ -1656,12 +1737,12 @@ const RentPage = () => {
           displayEB:     0,
           rentPerBed,
           damageAmount,
-          total:         rentPerBed + damageAmount + (tenantPendingMap.get(Number(tenantId)) ?? 0),
-          paid:          0,
+          total:         damageOnlyTotal,
+          paid:          rentCredit,
           previousPending: 0,
-          currentPending:  damageAmount + (tenantPendingMap.get(Number(tenantId)) ?? 0),
-          pending:         damageAmount + (tenantPendingMap.get(Number(tenantId)) ?? 0),
-          tenantPending:   tenantPendingMap.get(Number(tenantId)) ?? 0,
+          currentPending:  damageOnlyPending,
+          pending:         damageOnlyPending,
+          tenantPending:   extraPending,
           rentRecord:      undefined,
           unitId:          room?.unitId,
           amount:          0,
@@ -1992,7 +2073,8 @@ const RentPage = () => {
         .rt-panel-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
         .rt-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; }
 
-        .rt-table { width: 100%; border-collapse: collapse; min-width: 1350px; }
+        /* min-width raised 1350 -> 1450 for the new PREVIOUS DUE column. */
+        .rt-table { width: 100%; border-collapse: collapse; min-width: 1450px; }
         .rt-table th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
         .rt-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
         .rt-table tr:hover { background: #fdfcff; }
@@ -2115,7 +2197,7 @@ const RentPage = () => {
           .rt-room-trigger { font-size: 12px; padding: 0 8px; }
           .rent-mobile-filters > div:has(input) { grid-column: 1 / -1; }
           .rent-mobile-filters > button { grid-column: 1 / -1; justify-self: start; margin-left: 0 !important; min-height: 36px; }
-          .rt-table { min-width: 1350px; }
+          .rt-table { min-width: 1450px; }
           .rt-table th, .rt-table td { padding: 12px 14px; }
           .rent-mobile-pagination { padding: 12px !important; gap: 10px; flex-wrap: wrap; }
           .rent-mobile-pagination > div { font-size: 12px; }
@@ -2258,6 +2340,8 @@ const RentPage = () => {
                       <th scope="col">DUE (₹)</th>
                       {/* Tenant's Pending (₹) from the Tenants page; included in TOTAL */}
                       <th scope="col">PENDING AMT (₹)</th>
+                      {/* NEW: unpaid balance of earlier months; included in PENDING */}
+                      <th scope="col">PREVIOUS DUE (₹)</th>
                       <th scope="col">TOTAL (₹)</th>
                       <th scope="col">STATUS</th>
                       <th scope="col">PENDING (₹)</th>
@@ -2266,7 +2350,7 @@ const RentPage = () => {
                   </thead>
                   <tbody>
                     {paginatedRows.length === 0 ? (
-                      <tr><td colSpan={12} className="text-center py-12 rt-empty">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
+                      <tr><td colSpan={13} className="text-center py-12 rt-empty">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
                     ) : (
                       paginatedRows.map((row, i) => {
                         // Daily-stay tenants who haven't had a Rent record
@@ -2287,7 +2371,7 @@ const RentPage = () => {
                           displayStatus = sStatus;
 
                           const isOverdueMock = (sStatus === "PENDING" || sStatus === "PARTIAL") && (row.pending > 0);
-                          if (sStatus === "PAID" && (row.tenantPending ?? 0) > 0) { statusClass = "overdue"; displayStatus = "Previous Due"; }
+                          if (sStatus === "PAID" && ((row.tenantPending ?? 0) > 0 || row.previousPending > 0)) { statusClass = "overdue"; displayStatus = "Previous Due"; }
                           else if (sStatus === "PAID") { statusClass = "paid"; displayStatus = "Paid"; }
                           else if (isOverdueMock) { statusClass = "overdue"; displayStatus = "Overdue"; }
                           else if (sStatus === "PENDING" || sStatus === "PARTIAL") { statusClass = "pending"; displayStatus = sStatus === "PARTIAL" ? "Partial" : "Pending"; }
@@ -2389,11 +2473,41 @@ const RentPage = () => {
                               )}
                             </td>
                             <td>
-                              {/* NEW: same figure as the "Pending (₹)" column on the Tenants page. */}
+                              {/* Tenant's Pending (₹). In the check-in month only the
+                                  non-rent part is shown (rent part is already in RENT). */}
                               {(row.tenantPending ?? 0) > 0 ? (
                                 <span className="rt-value text-rose-700">
                                   {new Intl.NumberFormat('en-IN').format(Math.round(row.tenantPending ?? 0))}
                                 </span>
+                              ) : (row.checkInRentPending ?? 0) > 0 ? (
+                                <>
+                                  {/* Check-in month: the tenant's pending is part of this
+                                      month's unpaid rent, so it is shown as a note only
+                                      (it is already inside RENT / PENDING). */}
+                                  <span
+                                    className="rt-value text-rose-700"
+                                    title="Tenant's pending from check-in. Already counted in this month's rent, so it is not added to TOTAL again."
+                                  >
+                                    {new Intl.NumberFormat('en-IN').format(Math.round(row.checkInRentPending ?? 0))}
+                                  </span>
+                                  <div className="text-[10px] text-rose-700 mt-0.5">in rent</div>
+                                </>
+                              ) : (
+                                <span className="rt-value muted">—</span>
+                              )}
+                            </td>
+                            <td>
+                              {/* NEW: unpaid balance carried from earlier months
+                                  (e.g. Sep ₹2,000 shown on Oct). Included in PENDING. */}
+                              {row.previousPending > 0 ? (
+                                <>
+                                  <span className="rt-value text-rose-700">
+                                    {new Intl.NumberFormat('en-IN').format(Math.round(row.previousPending))}
+                                  </span>
+                                  {row.previousLabel && (
+                                    <div className="text-[10px] text-rose-700 mt-0.5">{row.previousLabel}</div>
+                                  )}
+                                </>
                               ) : (
                                 <span className="rt-value muted">—</span>
                               )}
