@@ -407,7 +407,8 @@ const CheckoutPage = () => {
   const [selectedBranch, setSelectedBranch]       = useState(
     getUserRole() === "ADMIN" ? "all" : String(getBranchId() ?? "all")
   );
-  // AC sub-meter readings (only used when the tenant's room is an AC room).
+  // AC sub-meter readings (only used when the tenant's room is an AC room
+  // AND the hostel's property type is not ROOM).
   const [acPrev, setAcPrev]                       = useState<string>("");
   const [acCurr, setAcCurr]                       = useState<string>("");
   const [useManualRent, setUseManualRent]         = useState(false);
@@ -610,7 +611,111 @@ const CheckoutPage = () => {
     return Math.max(joinFloor, acFloor);
   };
 
+  // ───────────────────────────────────────────────────────────────────
+  // MAIN-METER PREVIOUS READING for a checkout.
+  //
+  // FIX (Balaji / Mani, room G6):
+  //   Oct : Mani checked out at 8623 (Oct bill 8382 -> 8623, shared by
+  //         Balaji + Mani = 120.5 units each, ALREADY billed in October).
+  //   Nov : Balaji checks out at 8703.
+  // The old code took the lowest previousReading over EVERY reading of
+  // the meter (8382), so Balaji's checkout re-charged October's segment:
+  //   120.5 + 80 = 200.5 units (201) = ₹2,607     <- wrong
+  // Correct: 8623 -> 8703 = 80 units = ₹1,040.
+  //
+  // Rules (the same billing window the backend uses: one window per month):
+  //   1. A genuine EB-page entry exists (isCheckout === false)
+  //        -> highest such reading, floored by the highest active join.
+  //   2. Otherwise, if the meter already has a row in the CHECK-OUT MONTH
+  //        -> lowest previousReading of THAT month (same-month checkouts
+  //           still share their segments), never above the join reading.
+  //   3. Otherwise (no row in this month) earlier months are already
+  //      billed -> carry forward the highest reading of the EARLIER
+  //      months, never lower than the tenant's own join reading.
+  //   4. No readings at all -> earliest MONTHLY join reading.
+  // DAILY tenants' informational rows never move the meter.
+  // ───────────────────────────────────────────────────────────────────
+  const computeFinalPrevious = (
+    selected: Tenant,
+    room: Room | undefined,
+    readings: EBReading[],
+    dateISO: string
+  ): number => {
+    const d = parseLocalDate(dateISO) ?? new Date();
+    const m = d.getMonth() + 1;
+    const y = d.getFullYear();
+    const joinReading = Number(selected.joinReading ?? 0);
+    const isFlat = room?.flatId != null;
 
+    const roomIdsInFlat = new Set(
+      isFlat
+        ? rooms
+            .filter((r) => Number(r.flatId) === Number(room!.flatId))
+            .map((r) => Number(r.id))
+        : []
+    );
+
+    const dailyIds = new Set(
+      allTenants.filter((t) => t.tenantStay === "DAILY").map((t) => Number(t.id))
+    );
+
+    const pool = isFlat
+      ? allTenants.filter((t) => roomIdsInFlat.has(Number(t.roomId)))
+      : allTenants.filter((t) => Number(t.roomId) === Number(selected.roomId));
+
+    const validJoins = pool
+      .filter((t) => t.tenantStay !== "DAILY")
+      .map((t) => Number(t.joinReading))
+      .filter((v) => Number.isFinite(v) && v > 0);
+
+    const meterRows = readings.filter((r: any) => {
+      if (r.tenantId != null && dailyIds.has(Number(r.tenantId))) return false;
+      return isFlat
+        ? Number(r.flatId) === Number(room!.flatId)
+        : Number(r.roomId) === Number(selected.roomId);
+    });
+
+    // 1. genuine EB-page entries
+    const bulk = meterRows.filter((r: any) => r.isCheckout === false);
+    if (bulk.length > 0) {
+      const highestBulk = Math.max(...bulk.map((r) => Number(r.currentReading ?? 0)));
+      const activeJoins = pool
+        .filter((t) => String(t.status).toLowerCase() === "active")
+        .map((t) => Number(t.joinReading ?? 0));
+      const highestActiveJoin = activeJoins.length > 0 ? Math.max(...activeJoins) : 0;
+      return Math.max(highestBulk, highestActiveJoin);
+    }
+
+    // 2. rows already in the check-out month -> same billing window
+    const monthRows = meterRows.filter(
+      (r) => Number(r.month) === m && Number(r.year) === y
+    );
+    if (monthRows.length > 0) {
+      const lowestPrev = Math.min(...monthRows.map((r) => Number(r.previousReading ?? 0)));
+      return isFlat
+        ? Math.min(lowestPrev, joinReading)
+        : Math.min(
+            lowestPrev,
+            ...(validJoins.length > 0 ? validJoins : [joinReading]),
+            joinReading
+          );
+    }
+
+    // 3. earlier months are already billed -> carry the meter forward
+    const earlierRows = meterRows.filter(
+      (r) =>
+        Number(r.year) < y || (Number(r.year) === y && Number(r.month) < m)
+    );
+    if (earlierRows.length > 0) {
+      const carry = Math.max(...earlierRows.map((r) => Number(r.currentReading ?? 0)));
+      return Math.max(carry, joinReading);
+    }
+
+    // 4. nothing saved yet -> earliest monthly join reading
+    return validJoins.length > 0
+      ? Math.min(...validJoins, joinReading)
+      : joinReading;
+  };
 
   const handleSelectTenant = async (tenantId: string) => {
     try {
@@ -638,10 +743,11 @@ const CheckoutPage = () => {
       setMaintenanceCharge(selected.tenantStay === "DAILY" ? 0 : 1000);
 
       const room   = rooms.find((r) => Number(r.id) === Number(selected.roomId));
-      const isAcRoom = room?.hostelType === "AC";
 
       // Load the hostel's Business Model so this page follows the same
       // Extract / Approximate / Fixed mode the backend bills with.
+      // `loadedBm` is also used below to decide whether AC readings apply.
+      let loadedBm: BusinessModelLite | null = null;
       const hostelIdForModel = resolveHostelId(room, selected);
       if (hostelIdForModel == null) {
         setBusinessModel(null);
@@ -649,7 +755,8 @@ const CheckoutPage = () => {
       } else {
         try {
           const bm = await getBusinessModel(hostelIdForModel);
-          setBusinessModel((bm as BusinessModelLite) ?? null);
+          loadedBm = (bm as BusinessModelLite) ?? null;
+          setBusinessModel(loadedBm);
         } catch (bmErr: any) {
           const status = bmErr?.response?.status;
           console.warn("Business model not available, using Extract mode:", bmErr);
@@ -669,6 +776,12 @@ const CheckoutPage = () => {
         }
       }
 
+      // ROOM property: an AC room behaves exactly like a non-AC room, so no AC
+      // previous reading is prepared. FLAT property: unchanged.
+      const isRoomProperty =
+        String(loadedBm?.propertyType ?? "").toUpperCase() === "ROOM";
+      const isAcRoom = room?.hostelType === "AC" && !isRoomProperty;
+
       const allReadings = await fetchAllPages<EBReading>(getEBReadings, 10);
       setEbReadingsAll(allReadings);
 
@@ -682,112 +795,9 @@ const CheckoutPage = () => {
         );
       }
 
-      const joinReading = Number(selected.joinReading ?? 0);
-
-      // A flat's EB meter is ONE physical meter shared by every room in
-      // that flat, not one meter per room. "Previous" for a room that
-      // belongs to a flat is the flat's own latest known meter value.
-      if (room?.flatId != null) {
-        const flatReadings = allReadings.filter(
-          (r) => Number(r.flatId) === Number(room.flatId)
-        );
-        const roomIdsInFlat = new Set(
-          rooms.filter((r) => Number(r.flatId) === Number(room.flatId)).map((r) => r.id)
-        );
-        const flatAllTenants = allTenants.filter(
-          (t) => roomIdsInFlat.has(Number(t.roomId))
-        );
-
-        // Bulk entries (Add EB Reading page) settle every active tenant's
-        // share in one shot — the latest one is a genuine "everyone is paid
-        // up to here" floor.
-        const bulkReadings = flatReadings.filter(
-          (r: any) => r.isCheckout === false
-        );
-
-        let flatPrevious: number;
-        if (bulkReadings.length > 0) {
-          const highestBulk = Math.max(
-            ...bulkReadings.map((r) => Number(r.currentReading ?? 0))
-          );
-          const activeFlatTenants = flatAllTenants.filter(
-            (t) => String(t.status).toLowerCase() === "active"
-          );
-          const highestActiveJoin = activeFlatTenants.length > 0
-            ? Math.max(...activeFlatTenants.map((t) => Number(t.joinReading ?? 0)))
-            : 0;
-          flatPrevious = Math.max(highestBulk, highestActiveJoin);
-        } else if (flatReadings.length > 0) {
-          flatPrevious = Math.min(
-            ...flatReadings.map((r) => Number(r.previousReading ?? 0)),
-            joinReading
-          );
-        } else if (flatAllTenants.length > 0) {
-          const validFlatJoinReadings = flatAllTenants
-            .filter((t) => t.tenantStay !== "DAILY")
-            .map((t) => Number(t.joinReading))
-            .filter((v) => Number.isFinite(v) && v > 0);
-
-          flatPrevious = validFlatJoinReadings.length > 0
-            ? Math.min(...validFlatJoinReadings, joinReading)
-            : joinReading;
-        } else {
-          flatPrevious = joinReading;
-        }
-
-        setFinalPrev(String(flatPrevious));
-      } else {
-        const roomTenantsAll = allTenants.filter(
-          (t) => Number(t.roomId) === Number(selected.roomId)
-        );
-
-        const roomReadingsForThisRoom = allReadings.filter(
-          (r) => Number(r.roomId) === Number(selected.roomId)
-        );
-
-        const bulkRoomReadings = roomReadingsForThisRoom.filter(
-          (r: any) => r.isCheckout === false
-        );
-
-        let roomPrevious: number;
-
-        if (bulkRoomReadings.length > 0) {
-          const highestBulk = Math.max(
-            ...bulkRoomReadings.map((r) => Number(r.currentReading ?? 0))
-          );
-          const activeRoomTenants = roomTenantsAll.filter(
-            (t) => String(t.status).toLowerCase() === "active"
-          );
-          const highestActiveJoin = activeRoomTenants.length > 0
-            ? Math.max(...activeRoomTenants.map((t) => Number(t.joinReading ?? 0)))
-            : 0;
-          roomPrevious = Math.max(highestBulk, highestActiveJoin);
-        } else if (roomReadingsForThisRoom.length > 0) {
-          const validRoomJoinReadingsA = roomTenantsAll
-            .filter((t) => t.tenantStay !== "DAILY")
-            .map((t) => Number(t.joinReading))
-            .filter((v) => Number.isFinite(v) && v > 0);
-
-          roomPrevious = Math.min(
-            ...roomReadingsForThisRoom.map((r) => Number(r.previousReading ?? 0)),
-            ...(validRoomJoinReadingsA.length > 0 ? validRoomJoinReadingsA : [joinReading]),
-            joinReading
-          );
-        } else if (roomTenantsAll.length > 0) {
-          const validRoomJoinReadingsB = roomTenantsAll
-            .filter((t) => t.tenantStay !== "DAILY")
-            .map((t) => Number(t.joinReading))
-            .filter((v) => Number.isFinite(v) && v > 0);
-
-          roomPrevious = validRoomJoinReadingsB.length > 0
-            ? Math.min(...validRoomJoinReadingsB, joinReading)
-            : joinReading;
-        } else {
-          roomPrevious = joinReading;
-        }
-
-        setFinalPrev(String(roomPrevious));
-      }
+      // The main-meter "Previous" reading is derived by the effect below
+      // (computeFinalPrevious) so it also follows the Check-Out Date: a
+      // different month means a different billing window.
 
       const roomOwnReadings = allReadings.filter(
         (r) => Number(r.roomId) === Number(selected.roomId)
@@ -849,6 +859,23 @@ const CheckoutPage = () => {
     ? rooms.find((r) => Number(r.id) === Number(selectedTenant.roomId))
     : null;
 
+  // Main-meter "Previous" reading: recomputed whenever the tenant, the
+  // readings or the Check-Out Date (month) change.
+  useEffect(() => {
+    if (!selectedTenant) return;
+    setFinalPrev(
+      String(
+        computeFinalPrevious(
+          selectedTenant,
+          selectedRoom ?? undefined,
+          ebReadingsAll,
+          checkOutDate
+        )
+      )
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTenantId, checkOutDate, ebReadingsAll, rooms, allTenants]);
+
   const registrationFees = Number(selectedTenant?.registrationFees ?? 0);
 
   // The Pending Amount entered on the tenant at check-in (Add / Edit Tenant).
@@ -889,7 +916,17 @@ const CheckoutPage = () => {
         ? flatTenants
         : roomOnlyTenants;
 
-  const isAcRoom = selectedRoom?.hostelType === "AC";
+  // Property Type from the hostel's Business Model (ROOM / FLAT / "" = unknown).
+  // Declared before isAcRoom because the AC decision depends on it.
+  const propertyType = String(businessModel?.propertyType ?? "").toUpperCase();
+
+  // The room's real type, used only for display ("AC" / "Non-AC").
+  const roomIsAcType = selectedRoom?.hostelType === "AC";
+
+  // ROOM property: an AC room behaves exactly like a non-AC room — no AC
+  // Previous / AC Current reading, no separate AC share.
+  // FLAT property (or unknown): unchanged.
+  const isAcRoom = roomIsAcType && propertyType !== "ROOM";
 
   // AC sub-meter figures shown under the main reading for AC rooms.
   const hasAcReading =
@@ -914,7 +951,6 @@ const CheckoutPage = () => {
   // DAILY-stay tenants never take part in the monthly EB cycle, so they
   // always keep the existing Extract settlement (advance EB netting).
   // ───────────────────────────────────────────────────────────────────
-  const propertyType = String(businessModel?.propertyType ?? "").toUpperCase();
   const roomSettingsActive = propertyType !== "FLAT";
   const flatSettingsActive = propertyType !== "ROOM";
 
@@ -1265,6 +1301,9 @@ const CheckoutPage = () => {
   // Returns the selected tenant's AC UNITS. This is charged IN ADDITION to
   // the normal main-meter share (Extract mode) or to the flat's Approximate
   // share (Approximate Flat mode, at the same Approximate rate).
+  //
+  // ROOM property: isAcRoom is false, so this always returns 0 units — an AC
+  // room is billed exactly like a non-AC room.
   // ───────────────────────────────────────────────────────────────────
   const calculateAcShare = (): {
     units: number;
@@ -1549,6 +1588,7 @@ const CheckoutPage = () => {
   // the normal share (Extract) or the flat's Approximate share (APPROX_FLAT),
   // never deducted from the main-meter units. Approximate Room and both Fixed
   // modes do not charge AC separately (same as the backend).
+  // ROOM property: calculateAcShare() returns 0 units, so nothing is added.
   const acApplies = !approx || isApproxFlat;
   const acShare = acApplies ? calculateAcShare() : { units: 0, segments: [] };
   const acShareAmount = acShare.units * appliedEBRate;
@@ -1598,6 +1638,8 @@ const CheckoutPage = () => {
       toast.error("Check-Out Date cannot be before the Check-in Date");
       return;
     }
+    // ROOM property: isAcRoom is false, so AC readings are neither required
+    // nor sent (acCurrentReading goes to the backend as null).
     if (isAcRoom && acCurr === "") {
       toast.error("AC Current Reading is required for AC room");
       return;
@@ -1849,7 +1891,7 @@ const CheckoutPage = () => {
                         ] as [string, string][])),
                     ["Advance Paid", `₹${selectedTenant.advance}`],
                     ["Pending Amount", `₹${tenantPendingAmount.toLocaleString()}`],
-                    ["Room Type",    isAcRoom ? "AC" : "Non-AC"],
+                    ["Room Type",    roomIsAcType ? "AC" : "Non-AC"],
                     ["EB Mode",      businessModelNote ? `${ebModeLabel} (${businessModelNote})` : ebModeLabel],
                   ].map(([label, value]) => (
                     <div key={label}>
@@ -1888,7 +1930,7 @@ const CheckoutPage = () => {
                       />
                     </div>
 
-                    {/* ── AC SUB-METER (AC rooms only) ──
+                    {/* ── AC SUB-METER (AC rooms only, never in a ROOM property) ──
                         AC units are metered per ROOM, even inside a flat
                         whose main meter is shared. */}
                     {isAcRoom && (

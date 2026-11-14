@@ -276,17 +276,24 @@ const AnnouncementPage = () => {
         .ap-panel-header { padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
         .ap-panel-title { font-size: 16px; font-weight: 700; color: #0f172a; }
 
-        .ap-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
+        /* Fixed layout + column widths: the table always fits its card, so no horizontal scrollbar on desktop. */
+        .ap-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         /* A11Y: header text darkened from #94a3b8 (~2.6:1) to #475569 (~7.6:1) on white. */
-        .ap-table th { font-size: 11px; font-weight: 600; color: #475569; text-transform: uppercase; padding: 16px 24px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fff; letter-spacing: 0.5px; }
-        .ap-table td { padding: 16px 24px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+        .ap-table th { font-size: 11px; font-weight: 600; color: #475569; text-transform: uppercase; padding: 16px 16px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fff; letter-spacing: 0.5px; }
+        .ap-table td { padding: 16px 16px; border-bottom: 1px solid #f8fafc; vertical-align: middle; overflow: hidden; }
         .ap-table tr:hover { background: #fdfcff; }
 
-        .ap-row-title { font-size: 13px; font-weight: 500; color: #334155; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .ap-msg { font-size: 13px; color: #475569; max-width: 320px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
+        .ap-row-title { font-size: 13px; font-weight: 500; color: #334155; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ap-msg { font-size: 13px; color: #475569; max-width: 100%; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; word-break: break-word; }
         .ap-branch { font-size: 13px; font-weight: 500; color: #334155; }
         .ap-date { font-size: 13px; font-weight: 500; color: #334155; }
         .ap-page-btn:focus-visible, .ap-icon-btn:focus-visible { outline: 2px solid #5200FF; outline-offset: 2px; }
+
+        /* Only on small screens does the table scroll sideways instead of squishing. */
+        @media (max-width: 900px) {
+          .ap-wrap { padding: 16px; }
+          .ap-table { min-width: 760px; }
+        }
       `}</style>
 
       <div className="ap-wrap">
@@ -384,9 +391,18 @@ const AnnouncementPage = () => {
             </button>
           </div>
 
+          {/* overflow-x-auto only kicks in on small screens (see media query); on desktop the table fits. */}
           <div className="overflow-x-auto">
             <table className="ap-table">
               <caption className="sr-only">Announcements</caption>
+              <colgroup>
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "25%" }} />
+                <col style={{ width: "22%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "15%" }} />
+                <col style={{ width: "14%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th scope="col">TITLE</th>
@@ -411,7 +427,7 @@ const AnnouncementPage = () => {
                         </td>
                         <td><div className="ap-msg" title={row.content}>{row.content}</div></td>
                         <td>
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 text-slate-700">
+                          <span className="inline-flex items-center max-w-full gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 text-slate-700 break-words">
                             {bName}
                           </span>
                         </td>

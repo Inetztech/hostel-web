@@ -37,6 +37,12 @@ import {
 } from "lucide-react";
 
 /* ================= GENERIC HELPER — fetch every page of any paginated store fn ================= */
+/* PAGE SIZE: every request now uses the page size the caller asks for (10 by
+   default). The old 200-row floor was removed.
+   To keep a large list from firing dozens of requests at once, the remaining
+   pages are fetched with limited concurrency (FETCH_ALL_CONCURRENCY at a time). */
+const FETCH_ALL_CONCURRENCY = 5;
+
 async function fetchAllPages<T>(
   fetchFn: (page: number, size: number) => Promise<any>,
   pageSize = 10
@@ -45,11 +51,22 @@ async function fetchAllPages<T>(
   const firstContent: T[] = first?.content ?? first ?? [];
   const total: number     = first?.totalElements ?? firstContent.length;
   if (total <= pageSize) return firstContent;
+
   const totalPages = Math.ceil(total / pageSize);
-  const rest = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, i) =>
-      fetchFn(i + 1, pageSize).then((r: any) => r?.content ?? r ?? [])
-    )
+  const rest: T[][] = new Array(totalPages - 1);
+  let next = 1;
+
+  const worker = async () => {
+    while (true) {
+      const p = next++;
+      if (p >= totalPages) return;
+      const r = await fetchFn(p, pageSize);
+      rest[p - 1] = r?.content ?? r ?? [];
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(FETCH_ALL_CONCURRENCY, totalPages - 1) }, worker)
   );
   return [...firstContent, ...rest.flat()];
 }
@@ -595,7 +612,8 @@ const RoomsPage = () => {
   const loadBranches = useCallback(async () => {
     setBranchesLoading(true);
     try {
-      const branchesData = (await fetchAllPages<Branch>(getBranches)).filter(
+      // Page size 10 (no more size=200 request).
+      const branchesData = (await fetchAllPages<Branch>(getBranches, 10)).filter(
         (b): b is Branch => !!b && b.id != null
       );
       setBranches(branchesData);
@@ -627,7 +645,7 @@ const RoomsPage = () => {
     try {
       const [, flatsResult] = await Promise.allSettled([
         loadBranches(),
-        fetchAllPages<Flat>(getFlats),
+        fetchAllPages<Flat>(getFlats, 10),
       ]);
 
       const flatsData: Flat[] = flatsResult.status === "fulfilled" ? flatsResult.value : [];
@@ -647,11 +665,13 @@ const RoomsPage = () => {
 
   useEffect(() => { loadSupportingData(); }, [loadSupportingData]);
 
+  // Branches are already loaded once above, so only reload when the dialog is
+  // opened and the list is still empty (e.g. the first load failed).
   useEffect(() => {
-    if (addOpen && isAdmin) {
+    if (addOpen && isAdmin && branches.length === 0 && !branchesLoading) {
       loadBranches();
     }
-  }, [addOpen, isAdmin, loadBranches]);
+  }, [addOpen, isAdmin, branches.length, branchesLoading, loadBranches]);
 
   useEffect(() => {
     if (addOpen && isAdmin && selectedBranch !== "all" && !unitId) {
@@ -793,7 +813,7 @@ const RoomsPage = () => {
 
     if (!newFlat) {
       console.warn("createFlat did not return a usable Flat object, re-fetching flats list:", rawResponse);
-      const allFlats = (await fetchAllPages<Flat>(getFlats)).filter(Boolean);
+      const allFlats = (await fetchAllPages<Flat>(getFlats, 10)).filter(Boolean);
       setFlats(allFlats);
       newFlat = allFlats.find(
         f => f && String(f.branchId) === String(branchId) && f.flatNumber === flatNumber

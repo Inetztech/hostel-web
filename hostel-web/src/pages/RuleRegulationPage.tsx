@@ -64,10 +64,17 @@ import {
   Eye,
 } from "lucide-react";
 
+/* PERFORMANCE: a floor on the page size. Callers that pass 10 (or rely on the
+   default) used to need one HTTP round-trip per 10 rows (e.g. 2,000 rows = 200
+   requests, all fired at once). Every row is still
+   returned - it just takes ~20x fewer requests. */
+const BULK_PAGE_SIZE_FLOOR = 200;
+
 async function fetchAllPages<T>(
   fetchFn: (page: number, size: number) => Promise<any>,
-  pageSize = 10
+  requestedPageSize = 10
 ): Promise<T[]> {
+  const pageSize = Math.max(requestedPageSize, BULK_PAGE_SIZE_FLOOR);
   const first = await fetchFn(0, pageSize);
   const firstContent: T[] = first?.content ?? first ?? [];
   const total: number = first?.totalElements ?? firstContent.length;

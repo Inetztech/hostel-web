@@ -7,6 +7,7 @@ import {
   getPendingTenants, approveAndAllocateTenant,
   cancelCheckoutNotice, fetchTenantsInNoticePeriod,
   transferTenantRoomBed, getTenantTransferHistory, extractTenantDocument,
+  exportTenantsExcel,
 } from "@/lib/store";
 import { Room, Bed, Tenant, IdProofType, Branch, FraudCheckResponse, TenantStay, TenantTransferRequest, TenantTransferResponse } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -26,18 +27,46 @@ import {
   Users, ShieldCheck, UserX, FileCheck2,
   Download, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, Check, X, ClipboardCheck,
   CalendarClock, Ban, ArrowRightCircle, MoreHorizontal, CalendarDays,
-  ArrowLeftRight, History, Loader2,
+  ArrowLeftRight, History, Loader2, FileSpreadsheet,
 } from "lucide-react";
 import api from "@/lib/api";
 import CheckoutReportButton from "@/components/CheckoutReportButton";
+import { usePropertyType } from "@/lib/propertyType";
 
 /* ── Constants ──────────────────────────────────────────────────── */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const PAGE_SIZE     = 10;
 
+/* PERFORMANCE: rooms / units are requested 10 rows per request
+   (page=0&size=10, page=1&size=10, ...) as requested by the project owner.
+   fetchAllPages walks every page so the dropdowns and dialogs stay complete.
+
+   BEDS are no longer bulk-loaded. They are fetched per room, on demand
+   (GET /beds?roomId=..), only when a dialog needs the beds of a room
+   (see ensureBeds in the page component). That removes the ~25 bed requests
+   that used to run on every page load. */
 const REF_DATA_PAGE_SIZE = 10;
 
 const REF_DATA_BULK_PAGE_SIZE = 10;
+
+/* At most this many lookup requests are in flight at once, so they can never
+   take all of the browser's 6 connections and make table paging, the bell or
+   the profile refresh wait behind them. */
+const REF_DATA_MAX_PARALLEL = 4;
+let refActive = 0;
+const refWaiters: Array<() => void> = [];
+async function limitRef<T>(fn: () => Promise<T>): Promise<T> {
+  while (refActive >= REF_DATA_MAX_PARALLEL) {
+    await new Promise<void>((resolve) => refWaiters.push(resolve));
+  }
+  refActive++;
+  try {
+    return await fn();
+  } finally {
+    refActive--;
+    refWaiters.shift()?.();
+  }
+}
 
 const REF_DATA_CACHE_MS = 20_000;
 
@@ -78,6 +107,21 @@ const isBedOccupied = (b: any): boolean => {
   return raw === true || raw === 1 || String(raw).toLowerCase() === "true";
 };
 
+/* Free-bed count straight from the room (the rooms API already returns
+   availableBeds / occupiedBeds / totalBeds). Returns null when the room object
+   carries none of those, so callers can fall back to the loaded beds. This lets
+   room dropdowns hide full rooms WITHOUT loading every bed up front. */
+const roomFreeBeds = (r: any): number | null => {
+  const avail = r?.availableBeds;
+  if (avail != null && !isNaN(Number(avail))) return Number(avail);
+  const total = r?.totalBeds;
+  const occ   = r?.occupiedBeds;
+  if (total != null && occ != null && !isNaN(Number(total)) && !isNaN(Number(occ))) {
+    return Math.max(Number(total) - Number(occ), 0);
+  }
+  return null;
+};
+
 const computeDailyTotal = (noOfDays: string, amountPerDay: string, advanceEbAmount: string) => {
   const days  = Number(noOfDays)        || 0;
   const rate  = Number(amountPerDay)    || 0;
@@ -85,6 +129,10 @@ const computeDailyTotal = (noOfDays: string, amountPerDay: string, advanceEbAmou
   return (days * rate) + ebAdv;
 };
 
+/* Fetches every page of a paginated endpoint. Page 0 is fetched first, the
+   remaining pages are fetched in PARALLEL. If the server caps `size` below
+   what we asked for, the number of rows it actually returned is used as the
+   real page size, so no rows are ever skipped. */
 async function fetchAllPages<T>(
   fetchFn: (page: number, size: number) => Promise<any>,
   pageSize = REF_DATA_PAGE_SIZE
@@ -92,23 +140,34 @@ async function fetchAllPages<T>(
   const first = await fetchFn(0, pageSize);
   const content: T[] = first?.content ?? (Array.isArray(first) ? first : []);
   const total: number = first?.totalElements ?? content.length;
-  if (total <= pageSize) return content;
+  if (total <= content.length) return content;
+
+  const effectiveSize = content.length || pageSize;
+  const totalPages = Math.ceil(total / effectiveSize);
   const rest = await Promise.all(
-    Array.from({ length: Math.ceil(total / pageSize) - 1 }, (_, i) =>
+    Array.from({ length: totalPages - 1 }, (_, i) =>
       fetchFn(i + 1, pageSize).then((r: any) => r?.content ?? (Array.isArray(r) ? r : []))
     )
   );
   return [...content, ...rest.flat()];
 }
 
+/* sortDir: "room" = Room Wise (default; room ascending, tenant A–Z),
+            "nameAsc" = Name A–Z, "nameDesc" = Name Z–A.
+   Sent to the backend as ?sortDir=room|nameAsc|nameDesc. */
 const fetchTenantsPage = async (
-  page: number, size: number, unitId?: string, search?: string, status?: string, roomId?: string
+  page: number, size: number, unitId?: string, search?: string,
+  status?: string, roomId?: string, sortDir?: string
 ): Promise<{ content: Tenant[]; totalElements: number }> => {
   const params: Record<string, any> = { page, size };
   if (unitId && unitId !== "all") params.unitId = unitId;
   if (search && search.trim()) params.search = search.trim();
   if (status && status !== "all") params.status = status;
   if (roomId && roomId !== "all") params.roomId = roomId;
+  params.sortDir =
+    sortDir === "room" || sortDir === "nameAsc" || sortDir === "nameDesc" || sortDir === "asc"
+      ? sortDir
+      : "desc";
   const res = await api.get("/tenants", { params });
   return {
     content:       res.data?.data?.content ?? [],
@@ -124,10 +183,16 @@ const fetchRoomsFresh = async (pg = 0, size = REF_DATA_BULK_PAGE_SIZE, forceFres
   return { content: res.data?.data?.content ?? [], totalElements: res.data?.data?.totalElements ?? 0 };
 };
 
-const fetchBedsFresh = async (pg = 0, size = REF_DATA_BULK_PAGE_SIZE, forceFresh = false, unitId?: number) => {
+/* GET /beds supports unitId and roomId filters. The page uses roomId so it only
+   ever downloads the beds of the room a dialog is actually working with. */
+const fetchBedsFresh = async (
+  pg = 0, size = REF_DATA_BULK_PAGE_SIZE, forceFresh = false,
+  unitId?: number, roomId?: number
+) => {
   const params: Record<string, any> = { page: pg, size };
   if (forceFresh) params._ = Date.now();
   if (unitId != null) params.unitId = unitId;
+  if (roomId != null) params.roomId = roomId;
   const res = await api.get("/beds", { params });
   return { content: res.data?.data?.content ?? [], totalElements: res.data?.data?.totalElements ?? 0 };
 };
@@ -159,7 +224,7 @@ const fetchUnitsPage = async (
 
 const fetchAndNormalizeBranches = async (): Promise<Branch[]> => {
   try {
-    const rawList = await fetchAllPages<any>(fetchUnitsPage, REF_DATA_PAGE_SIZE);
+    const rawList = await fetchAllPages<any>((pg, size) => limitRef(() => fetchUnitsPage(pg, size)), REF_DATA_PAGE_SIZE);
 
     return rawList.map((b: any) => {
       const resolvedName =
@@ -470,7 +535,7 @@ const ID_PROOF_TYPE_LIST: IdProofType[] = ["AADHAR","PAN","VOTER_ID","DRIVING_LI
 
 const TenantForm = ({
   form, dispatch, rooms, beds, branches, editTenant, existingDoc, existingPhoto, fraudResult, branchLocked,
-  errors, clearError,
+  errors, clearError, bedsLoading, showAc = true,
 }: {
   form: FormState; dispatch: React.Dispatch<FormAction>;
   rooms: Room[]; beds: Bed[]; branches: Branch[]; editTenant?: Tenant | null;
@@ -482,6 +547,12 @@ const TenantForm = ({
      is required" etc. rather than one generic toast. */
   errors?: Partial<Record<keyof FormState, string>>;
   clearError?: (field: keyof FormState) => void;
+  /* True while the beds of the selected room are still being fetched. */
+  bedsLoading?: boolean;
+  /* False for a ROOM property: an AC room then behaves exactly like a non-AC
+     room (only "Current EB Reading", no "Current AC EB Reading").
+     FLAT property keeps showing the AC reading for AC rooms. */
+  showAc?: boolean;
 }) => {
   const [roomSearch, setRoomSearch] = useState("");
   const set = (field: keyof FormState) => (value: any) => {
@@ -539,7 +610,9 @@ const TenantForm = ({
   const errCls = (field: keyof FormState) => (err(field) ? "border-red-500 focus-visible:ring-red-400" : "");
   const FieldError = ({ field }: { field: keyof FormState }) =>
     err(field) ? <p className="text-[11px] text-red-600 mt-0.5">{err(field)}</p> : null;
-  const isAC = rooms.find((r) => r.id === Number(form.roomId))?.hostelType === "AC";
+
+  /* ROOM property → showAc is false → AC room is treated like a non-AC room. */
+  const isAC = showAc && rooms.find((r) => r.id === Number(form.roomId))?.hostelType === "AC";
 
   const alreadyHasLogin = !!(editTenant && ((editTenant as any).userId || (editTenant as any).user));
 
@@ -555,8 +628,13 @@ const TenantForm = ({
     : rooms.filter((r) => getRoomUnitName(r).trim().toLowerCase() === selectedBranchName);
 
 
+  /* A room is offered when it still has a free bed. The free count comes from
+     the room itself (rooms API), so this works without any bed being loaded.
+     Only if the room carries no count do we fall back to the beds loaded so far. */
   const roomHasAvailableBed = (room: Room) => {
     if (editTenant && Number(room.id) === Number(editTenant.roomId)) return true;
+    const free = roomFreeBeds(room);
+    if (free != null) return free > 0;
     const roomBeds = beds.filter((b) => Number(b.roomId) === Number(room.id));
     if (roomBeds.length === 0) return true;
     return roomBeds.some((b) => !isBedOccupied(b));
@@ -738,6 +816,9 @@ const TenantForm = ({
               const roomIdNum = Number(v);
               set("roomId")(roomIdNum);
               setRoomSearch("");
+              /* The beds of this room are fetched on demand by the page. If they are
+                 already cached, pick the first free one now; otherwise the page picks
+                 it as soon as they arrive. */
               const roomBeds = beds.filter((b) => Number(b.roomId) === roomIdNum);
               const firstFreeBed = roomBeds.find((b) =>
                 !isBedOccupied(b) || Number(b.id) === Number(editTenant?.bedId)
@@ -767,11 +848,13 @@ const TenantForm = ({
           <Select value={form.bedId ? String(form.bedId) : ""}
             disabled={!form.roomId}
             onValueChange={(v) => set("bedId")(Number(v))}>
-            <SelectTrigger aria-label="Bed" className={`rounded-lg ${errCls("bedId")}`}><SelectValue placeholder={form.roomId ? "Bed" : "Select a room first"} /></SelectTrigger>
+            <SelectTrigger aria-label="Bed" className={`rounded-lg ${errCls("bedId")}`}><SelectValue placeholder={form.roomId ? (bedsLoading && availableBeds.length === 0 ? "Loading beds…" : "Bed") : "Select a room first"} /></SelectTrigger>
             <SelectContent>
               {availableBeds.map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
               {form.roomId && availableBeds.length === 0 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No available beds in this room</div>
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  {bedsLoading ? "Loading beds…" : "No available beds in this room"}
+                </div>
               )}
             </SelectContent>
           </Select>
@@ -795,7 +878,7 @@ const TenantForm = ({
       )}
 
       {/* ── MONTHLY order: Registration Fees, Advance, Rent, Pending Amount,
-          Current EB Reading, Current AC EB Reading, Check-in Date ── */}
+          Current EB Reading, Current AC EB Reading (FLAT + AC room only), Check-in Date ── */}
       {isMonthly && (
         <>
           <div className="grid grid-cols-2 gap-4">
@@ -846,7 +929,7 @@ const TenantForm = ({
                                       This is the term added to the total.
           Total = (No. of Days × Amount/Day) + Advance EB Amount.
           Order: No. of Days, Amount/Day, Pending Amount, Advance EB Amount,
-          Current EB Reading, Current AC EB Reading, Total, Check-in Date. ── */}
+          Current EB Reading, Current AC EB Reading (FLAT + AC room only), Total, Check-in Date. ── */}
       {isDaily && (
         <>
           <div className="grid grid-cols-2 gap-4">
@@ -1080,16 +1163,32 @@ const TenantsPage = () => {
   const branchId = getBranchId();
   const isWarden = role === "WARDEN";
 
+  /* Business Model property type (ROOM / FLAT / null = not configured).
+     ROOM property: an AC room behaves exactly like a non-AC room — only the
+     normal "Current EB Reading" (joinReading) is shown/sent, never an AC join reading.
+     FLAT property: unchanged (AC rooms still show / send the AC join reading). */
+  const { propertyType } = usePropertyType();
+  const showAcReadings = propertyType !== "ROOM";
+
   const [rooms,    setRooms]    = useState<Room[]>([]);
   const allRoomsRef = useRef<Room[]>([]);
 
+  /* Beds are loaded per room, on demand (see ensureBeds). `beds` holds the beds of
+     every room fetched so far; allBedsRef mirrors it for the non-reactive lookups. */
   const [beds,     setBeds]     = useState<Bed[]>([]);
   const allBedsRef = useRef<Bed[]>([]);
+  const loadedBedRooms = useRef<Set<number>>(new Set());
+  const bedsInFlight   = useRef<Map<number, Promise<void>>>(new Map());
+  const [bedsLoadingCount, setBedsLoadingCount] = useState(0);
+  const bedsLoading = bedsLoadingCount > 0;
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [wardenBranchName, setWardenBranchName] = useState("");
 
   const refDataFetchedAt = useRef<number>(0);
+  /* De-duplicates concurrent non-forced reference-data loads (e.g. the
+     initial background load + a dialog opening a moment later). */
+  const refInFlight = useRef<Promise<void> | null>(null);
 
   const formBranches = useMemo(() => {
     if (!isWarden) return branches;
@@ -1117,6 +1216,11 @@ const TenantsPage = () => {
   const selectedRoomRef = useRef(selectedRoom);
   useEffect(() => { selectedRoomRef.current = selectedRoom; }, [selectedRoom]);
 
+  /* Sort order: "room" = Room Wise (default), "nameAsc" = Name A–Z, "nameDesc" = Name Z–A. */
+  const [selectedSort, setSelectedSort] = useState<string>("room");
+  const selectedSortRef = useRef(selectedSort);
+  useEffect(() => { selectedSortRef.current = selectedSort; }, [selectedSort]);
+
   const [addOpen,    setAddOpen]    = useState(false);
   const [editOpen,   setEditOpen]   = useState(false);
   const [viewOpen,   setViewOpen]   = useState(false);
@@ -1133,6 +1237,9 @@ const TenantsPage = () => {
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const autoImportOnSelectRef = useRef(false);
+
+  /* True while the tenant-list .xlsx is being generated/downloaded. */
+  const [exporting, setExporting] = useState(false);
 
   const [form, dispatch] = useReducer(
     formReducer,
@@ -1160,6 +1267,8 @@ const TenantsPage = () => {
   const [transferForm,       setTransferForm]       = useState<TransferFormState>(EMPTY_TRANSFER_FORM);
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferErrors,     setTransferErrors]     = useState<Record<string, string>>({});
+  // Search text for the "New Room" dropdown in the Transfer dialog.
+  const [transferRoomSearch, setTransferRoomSearch] = useState("");
 
   const [historyOpen,   setHistoryOpen]   = useState(false);
   const [historyTarget, setHistoryTarget] = useState<Tenant | null>(null);
@@ -1224,6 +1333,9 @@ const TenantsPage = () => {
     return () => { if (fraudDebounce.current) clearTimeout(fraudDebounce.current); };
   }, [form.phone, form.idProofNumber, addOpen]);
 
+  /* Pre-select branch (and the filtered room) when the Check-In dialog opens.
+     The bed is NOT picked here any more — the beds of the room are loaded on
+     demand, and the effect further below picks the first free one when they arrive. */
   useEffect(() => {
     if (!addOpen) return;
     if (form.branchId) return; // already set — don't clobber a manual pick on reopen
@@ -1242,68 +1354,106 @@ const TenantsPage = () => {
       const filteredRoom = allRoomsRef.current.find((r) => Number(r.id) === Number(selectedRoom));
       if (filteredRoom && Number(getRoomUnitId(filteredRoom)) === targetBranchId) {
         dispatch({ type: "set", field: "roomId", value: Number(selectedRoom) });
-
-        const roomBeds = allBedsRef.current.filter((b) => Number(b.roomId) === Number(selectedRoom));
-        const firstFreeBed = roomBeds.find((b) => !isBedOccupied(b));
-        if (firstFreeBed) {
-          dispatch({ type: "set", field: "bedId", value: firstFreeBed.id });
-        }
       }
     }
   }, [addOpen, isWarden, branchId, selectedBranch, selectedRoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Refresh reference data (rooms + beds + branches) ── */
-  const refreshReferenceData = useCallback(async (force = false) => {
-  if (!force && Date.now() - refDataFetchedAt.current < REF_DATA_CACHE_MS) return;
-  try {
-    const scopeUnitId = isWarden
-      ? Number(branchId)
-      : (selectedBranchRef.current !== "all" ? Number(selectedBranchRef.current) : undefined);
+  /* ── Refresh reference data (rooms + branches) ──
+     PERFORMANCE: rooms and branches are fetched in parallel and concurrent
+     non-forced calls share one in-flight request. A forced call (after add /
+     edit / transfer) always starts a fresh fetch so it never returns stale data.
+     Beds are NOT fetched here — see ensureBeds. */
+  const refreshReferenceData = useCallback((force = false): Promise<void> => {
+    if (!force && Date.now() - refDataFetchedAt.current < REF_DATA_CACHE_MS) return Promise.resolve();
+    if (!force && refInFlight.current) return refInFlight.current;
 
-    const [allRooms, allBeds, allBranches] = await Promise.all([
-      fetchAllPages<Room>((pg, size) => fetchRoomsFresh(pg, size, force, scopeUnitId)),
-      fetchAllPages<Bed>((pg, size) => fetchBedsFresh(pg, size, force, scopeUnitId)),
-      fetchAndNormalizeBranches(),
-    ]);
+    const run = (async () => {
+      try {
+        const scopeUnitId = isWarden
+          ? Number(branchId)
+          : (selectedBranchRef.current !== "all" ? Number(selectedBranchRef.current) : undefined);
 
-    allRoomsRef.current = allRooms;
-    allBedsRef.current  = allBeds;
-    setRooms(allRooms);
-    setBeds(allBeds);
-    setBranches(allBranches);
+        const [allRooms, allBranches] = await Promise.all([
+          fetchAllPages<Room>((pg, size) => limitRef(() => fetchRoomsFresh(pg, size, force, scopeUnitId))),
+          fetchAndNormalizeBranches(),
+        ]);
 
-      const filteredRooms = isWarden
-        ? allRooms.filter((r) => Number(getRoomUnitId(r)) === Number(branchId))
-        : allRooms;
+        allRoomsRef.current = allRooms;
 
-      const roomIds = new Set(filteredRooms.map((r) => r.id));
-      setRooms(filteredRooms);
-      setBeds(isWarden ? allBeds.filter((b) => roomIds.has(b.roomId)) : allBeds);
-      setBranches(allBranches);
+        const filteredRooms = isWarden
+          ? allRooms.filter((r) => Number(getRoomUnitId(r)) === Number(branchId))
+          : allRooms;
 
-      if (isWarden) {
-        const matchedBranch = allBranches.find(
-          (b) => Number(getBranchRawId(b)) === Number(branchId)
-        );
-        let resolvedName = getBranchDisplayName(matchedBranch);
-        if (!resolvedName && filteredRooms.length > 0) {
-          resolvedName = getRoomUnitName(filteredRooms[0]);
+        setRooms(filteredRooms);
+        setBranches(allBranches);
+
+        if (isWarden) {
+          const matchedBranch = allBranches.find(
+            (b) => Number(getBranchRawId(b)) === Number(branchId)
+          );
+          let resolvedName = getBranchDisplayName(matchedBranch);
+          if (!resolvedName && filteredRooms.length > 0) {
+            resolvedName = getRoomUnitName(filteredRooms[0]);
+          }
+          setWardenBranchName(resolvedName || `Branch ${branchId}`);
         }
-        setWardenBranchName(resolvedName || `Branch ${branchId}`);
-      }
 
-      refDataFetchedAt.current = Date.now();
-    } catch { /* non-critical */ }
+        refDataFetchedAt.current = Date.now();
+      } catch { /* non-critical */ }
+      finally {
+        if (refInFlight.current === run) refInFlight.current = null;
+      }
+    })();
+
+    if (!force) refInFlight.current = run;
+    return run;
   }, [isWarden, branchId]);
 
-  const reloadBeds = useCallback(() => refreshReferenceData(true), [refreshReferenceData]);
+  /* ── Beds of ONE room, fetched on demand ──
+     GET /beds?roomId=.. returns only that room's beds, so opening a dialog costs
+     a request or two instead of ~25. Results are cached per room; `force`
+     re-fetches. Concurrent non-forced calls for a room share one request. */
+  const ensureBeds = useCallback((roomId: number | "" | null | undefined, force = false): Promise<void> => {
+    const id = Number(roomId);
+    if (!id || isNaN(id)) return Promise.resolve();
+    if (!force && loadedBedRooms.current.has(id)) return Promise.resolve();
+    const existing = bedsInFlight.current.get(id);
+    if (!force && existing) return existing;
+
+    setBedsLoadingCount((c) => c + 1);
+    const run: Promise<void> = (async () => {
+      try {
+        const list = await fetchAllPages<Bed>((pg, size) =>
+          limitRef(() => fetchBedsFresh(pg, size, force, undefined, id))
+        );
+        allBedsRef.current = [...allBedsRef.current.filter((b) => Number(b.roomId) !== id), ...list];
+        setBeds((prev) => [...prev.filter((b) => Number(b.roomId) !== id), ...list]);
+        loadedBedRooms.current.add(id);
+      } catch { /* non-critical */ }
+      finally {
+        setBedsLoadingCount((c) => Math.max(c - 1, 0));
+        if (bedsInFlight.current.get(id) === run) bedsInFlight.current.delete(id);
+      }
+    })();
+    bedsInFlight.current.set(id, run);
+    return run;
+  }, []);
+
+  /* After add / edit / transfer / delete: refresh rooms (their free-bed counts)
+     and re-fetch the beds of every room already loaded, so nothing is stale. */
+  const reloadBeds = useCallback(async () => {
+    await refreshReferenceData(true);
+    const ids = [...loadedBedRooms.current];
+    await Promise.all(ids.map((id) => ensureBeds(id, true)));
+  }, [refreshReferenceData, ensureBeds]);
 
   const loadTenants = useCallback(async (
     branch?: string,
     pg?: number,
     searchTerm?: string,
     status?: string,
-    room?: string
+    room?: string,
+    sort?: string
   ) => {
     setLoading(true);
     try {
@@ -1312,8 +1462,9 @@ const TenantsPage = () => {
       const activeSearch = searchTerm ?? search;
       const activeStatus = status ?? selectedStatusRef.current;
       const activeRoom   = room ?? selectedRoomRef.current;
+      const activeSort   = sort ?? selectedSortRef.current;
       const { content, totalElements: total } =
-        await fetchTenantsPage(activePage, PAGE_SIZE, activeBranch, activeSearch, activeStatus, activeRoom);
+        await fetchTenantsPage(activePage, PAGE_SIZE, activeBranch, activeSearch, activeStatus, activeRoom, activeSort);
       setTenants(content);
       setTotalElements(total);
     } catch {
@@ -1330,27 +1481,56 @@ const TenantsPage = () => {
   const loadNoticeTenantsRef = useRef(loadNoticeTenants);
   useEffect(() => { loadNoticeTenantsRef.current = loadNoticeTenants; }, [loadNoticeTenants]);
 
-  /* ── Initial load ── */
+  /* ── Initial load ──
+     PERFORMANCE: the tenants table is the only request needed to paint the page,
+     so it goes out first, on its own. Pending approvals, the notice-period list
+     and the rooms/branches lookups start as soon as it has answered, so they no
+     longer compete with it for the browser's 6 connections and the backend's
+     database connections. Beds are not loaded at all until a dialog needs them. */
   const refLoaded = useRef(false);
   useEffect(() => {
     if (refLoaded.current) return;
     refLoaded.current = true;
-    (async () => {
-      try {
-        await refreshReferenceData(true);
-        await loadTenants(isWarden ? String(branchId) : "all", 0);
-        await loadPendingTenants();
-        await loadNoticeTenants();
-      } catch (err) {
-        console.error("[TenantsPage] initial load error:", err);
-        toast.error("Failed to load reference data");
-      }
-    })();
+    loadTenants(isWarden ? String(branchId) : "all", 0).finally(() => {
+      loadPendingTenants();
+      loadNoticeTenants();
+      refreshReferenceData(true);
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Rooms are re-fetched whenever a dialog that picks a room opens, and the
+  // per-room bed cache is dropped so occupancy is fresh when the dialog opens.
   useEffect(() => {
-    if (addOpen || editOpen || approveOpen) refreshReferenceData();
-  }, [addOpen, editOpen, approveOpen, refreshReferenceData]);
+    if (addOpen || editOpen || approveOpen || transferOpen) {
+      loadedBedRooms.current.clear();
+      refreshReferenceData(transferOpen);
+    }
+  }, [addOpen, editOpen, approveOpen, transferOpen, refreshReferenceData]);
+
+  /* Load the beds of whichever room the open dialog is working with. */
+  useEffect(() => {
+    if ((addOpen || editOpen) && form.roomId) ensureBeds(form.roomId);
+  }, [addOpen, editOpen, form.roomId, ensureBeds]);
+
+  useEffect(() => {
+    if (approveOpen && approveForm.roomId) ensureBeds(approveForm.roomId);
+  }, [approveOpen, approveForm.roomId, ensureBeds]);
+
+  useEffect(() => {
+    if (!transferOpen) return;
+    if (transferTarget?.roomId) ensureBeds(transferTarget.roomId); // for "Current Bed"
+    if (transferForm.roomId)    ensureBeds(transferForm.roomId);
+  }, [transferOpen, transferTarget?.roomId, transferForm.roomId, ensureBeds]);
+
+  /* Check-In dialog: once the beds of the chosen room are in, pick the first free
+     one if the user hasn't chosen a bed yet. */
+  useEffect(() => {
+    if (!addOpen || !form.roomId || form.bedId) return;
+    const free = beds.find(
+      (b) => Number(b.roomId) === Number(form.roomId) && !isBedOccupied(b)
+    );
+    if (free) dispatch({ type: "set", field: "bedId", value: free.id });
+  }, [addOpen, form.roomId, form.bedId, beds]);
 
   const prevSelectedBranch = useRef(selectedBranch);
   useEffect(() => {
@@ -1378,6 +1558,15 @@ const TenantsPage = () => {
     setPage(0);
     loadTenants(selectedBranch, 0, undefined, selectedStatus, selectedRoom);
   }, [selectedRoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Sort order changed (Room Wise / Name A–Z / Name Z–A) → back to page 1 and reload. */
+  const prevSelectedSort = useRef(selectedSort);
+  useEffect(() => {
+    if (prevSelectedSort.current === selectedSort) return;
+    prevSelectedSort.current = selectedSort;
+    setPage(0);
+    loadTenants(selectedBranch, 0, undefined, selectedStatus, selectedRoom, selectedSort);
+  }, [selectedSort]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSearch = useRef(search);
@@ -1448,6 +1637,42 @@ const TenantsPage = () => {
     );
   }, [rooms, selectedBranch]);
 
+  /* Does this room still have a free bed? Uses the room's own free count first
+     (no beds needed), then falls back to whatever beds are loaded. */
+  const roomHasFreeBed = useCallback((room: Room): boolean => {
+    const free = roomFreeBeds(room);
+    if (free != null) return free > 0;
+    const roomBeds = beds.filter((b) => Number(b.roomId) === Number(room.id));
+    if (roomBeds.length === 0) return true;
+    return roomBeds.some((b) => !isBedOccupied(b));
+  }, [beds]);
+
+  /* ── Rooms offered in the Transfer dialog's "New Room" dropdown ──
+     • same branch as the tenant's current room (a transfer moves within a hostel)
+     • only rooms that still have a free bed (the tenant's own room is always kept,
+       so they can still move to another bed in it)
+     • sorted 101, 102 … A1, A2 (natural order)
+     • filtered by the search box typed in the dropdown                     */
+  const transferRoomOptions = useMemo(() => {
+    if (!transferTarget) return [] as Room[];
+
+    const currentRoom = rooms.find((r) => Number(r.id) === Number(transferTarget.roomId));
+    const unitId = currentRoom ? getRoomUnitId(currentRoom) : NaN;
+
+    const inBranch = !isNaN(unitId)
+      ? rooms.filter((r) => Number(getRoomUnitId(r)) === unitId)
+      : rooms;
+
+    const term = transferRoomSearch.trim().toLowerCase();
+
+    return inBranch
+      .filter((r) => Number(r.id) === Number(transferTarget.roomId) || roomHasFreeBed(r))
+      .filter((r) => !term || String(r.roomNumber ?? "").toLowerCase().includes(term))
+      .sort((a, b) =>
+        String(a.roomNumber ?? "").localeCompare(String(b.roomNumber ?? ""), undefined, { numeric: true })
+      );
+  }, [rooms, roomHasFreeBed, transferTarget, transferRoomSearch]);
+
   const extractError = (e: any, fallback: string) => {
     const data = e?.response?.data;
     if (Array.isArray(data?.errors) && data.errors.length > 0) {
@@ -1489,13 +1714,15 @@ const TenantsPage = () => {
       fd.append("ebAmount",     form.ebAmount     || "0");
       // Current EB Reading (meter) — stored on the tenant as joinReading.
       fd.append("joinReading",  form.currentReading || "0");
-      if (form.acJoinReading) fd.append("acJoinReading", form.acJoinReading);
+      // ROOM property: AC room == non-AC room, so no AC join reading is sent.
+      if (form.acJoinReading && showAcReadings) fd.append("acJoinReading", form.acJoinReading);
     } else {
       fd.append("advance", form.advance || "0");
       fd.append("monthlyRent",      form.monthlyRent      || "0");
       fd.append("registrationFees", form.registrationFees || "0");
       fd.append("joinReading",      form.currentReading   || "0");
-      if (form.acJoinReading) fd.append("acJoinReading", form.acJoinReading);
+      // ROOM property: AC room == non-AC room, so no AC join reading is sent.
+      if (form.acJoinReading && showAcReadings) fd.append("acJoinReading", form.acJoinReading);
     }
 
     // Pending Amount (₹) applies to both stay types; blank is stored as 0.
@@ -1645,7 +1872,8 @@ const handleAdd = async () => {
         registrationFees: approveForm.registrationFees ? Number(approveForm.registrationFees) : 0,
         monthlyRent: approveForm.monthlyRent ? Number(approveForm.monthlyRent) : 0,
         joinReading: approveForm.joinReading ? Number(approveForm.joinReading) : 0,
-        acJoinReading: approveForm.acJoinReading ? Number(approveForm.acJoinReading) : undefined,
+        // ROOM property: AC room == non-AC room, so no AC join reading is sent.
+        acJoinReading: showAcReadings && approveForm.acJoinReading ? Number(approveForm.acJoinReading) : undefined,
       });
       toast.success(`${approveTarget.name} approved and checked in`);
       setApproveOpen(false);
@@ -1667,17 +1895,24 @@ const handleAdd = async () => {
     setApproveOpen(true);
   };
 
-  const approveRoomHostelType = rooms.find((r) => r.id === Number(approveForm.roomId))?.hostelType;
+  /* ROOM property → undefined → the AC Join Reading field is never shown. */
+  const approveRoomHostelType = showAcReadings
+    ? rooms.find((r) => r.id === Number(approveForm.roomId))?.hostelType
+    : undefined;
 
   /* ── Room / Bed Transfer ─────────────────────────────────────── */
   const openTransferDialog = (t: Tenant) => {
     setTransferTarget(t);
     setTransferForm({ ...EMPTY_TRANSFER_FORM, effectiveDate: getTodayISO() });
     setTransferErrors({});
+    setTransferRoomSearch("");
     setTransferOpen(true);
   };
 
-  const transferRoomHostelType = rooms.find((r) => r.id === Number(transferForm.roomId))?.hostelType;
+  /* ROOM property → undefined → the AC reading fields are never shown or required. */
+  const transferRoomHostelType = showAcReadings
+    ? rooms.find((r) => r.id === Number(transferForm.roomId))?.hostelType
+    : undefined;
 
   const validateTransferForm = (): boolean => {
     const errs: Record<string, string> = {};
@@ -1728,9 +1963,10 @@ const handleAdd = async () => {
       effectiveDate: transferForm.effectiveDate,
       reason: transferForm.reason || undefined,
       oldRoomFinalReading: transferForm.oldRoomFinalReading ? Number(transferForm.oldRoomFinalReading) : undefined,
-      oldRoomAcFinalReading: transferForm.oldRoomAcFinalReading ? Number(transferForm.oldRoomAcFinalReading) : undefined,
+      // ROOM property: AC room == non-AC room, so no AC readings are sent.
+      oldRoomAcFinalReading: showAcReadings && transferForm.oldRoomAcFinalReading ? Number(transferForm.oldRoomAcFinalReading) : undefined,
       newRoomJoinReading: transferForm.newRoomJoinReading ? Number(transferForm.newRoomJoinReading) : undefined,
-      newRoomAcJoinReading: transferForm.newRoomAcJoinReading ? Number(transferForm.newRoomAcJoinReading) : undefined,
+      newRoomAcJoinReading: showAcReadings && transferForm.newRoomAcJoinReading ? Number(transferForm.newRoomAcJoinReading) : undefined,
     };
 
     setTransferSubmitting(true);
@@ -1745,6 +1981,7 @@ const handleAdd = async () => {
       setTransferOpen(false);
       setTransferTarget(null);
       setTransferForm(EMPTY_TRANSFER_FORM);
+      setTransferRoomSearch("");
       await Promise.all([loadTenantsRef.current(), reloadBeds()]);
     } catch (e: any) {
       toast.error(extractError(e, "Failed to transfer tenant"));
@@ -1789,6 +2026,35 @@ const handleAdd = async () => {
       return;
     }
     await performExcelImport(excelFile);
+  };
+
+  /* Downloads the tenant list as .xlsx using the filters currently selected
+     on the page (branch, room, status, search, sort). Clear Filters first to
+     export every tenant. */
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportTenantsExcel({
+        unitId: selectedBranch,
+        roomId: selectedRoom,
+        status: selectedStatus,
+        search,
+        sortDir: selectedSort,
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `tenants_${getTodayISO()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("Tenant list downloaded");
+    } catch {
+      toast.error("Failed to export tenants");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleCancelNotice = (t: Tenant) => {
@@ -1867,7 +2133,7 @@ const handleAdd = async () => {
           .tn-search-main input { min-width: 0; font-size: 12px; }
           .tn-filters-row > button.tn-clear-btn { grid-column: 1 / -1; justify-self: end; justify-content: flex-end; }
           .tn-filters-row > button[data-state], .tn-filters-row > [role=combobox] { width: 100% !important; min-width: 0; }
-          .tn-room-dd { width: 100%; min-width: 0; }
+          .tn-room-dd { width: 100%; min-width: 0; flex: 1 1 auto; }
           .tn-room-menu { width: 100%; min-width: 0; }
           .tn-table-container { width: 100%; min-width: 0; }
           .tn-table-container > .overflow-x-auto { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -1897,17 +2163,26 @@ const handleAdd = async () => {
         .tn-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
         .tn-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
         .tn-btn-outline:hover { background: #f8fafc; }
+        .tn-btn-outline:disabled { opacity: 0.6; cursor: not-allowed; }
         .tn-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 8px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
         .tn-btn-primary:hover { background: #4200cc; }
 
-        .tn-filters-row { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
-        .tn-search-main { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; width: 220px; }
-        .tn-search-main input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
+        /* ── Filter row: Search | Branch | Room | Status | Sort | Clear Filters
+           all on ONE line. The search box is flexible (takes the leftover
+           width), the dropdowns are a fixed 140px, and nothing wraps.
+           Below 1100px (small laptops / tablets) it is allowed to wrap again
+           so nothing is cut off; phones use the grid layout above. ── */
+        .tn-filters-row { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: nowrap; }
+        @media (min-width: 641px) and (max-width: 1100px) {
+          .tn-filters-row { flex-wrap: wrap; }
+        }
+        .tn-search-main { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 12px; height: 38px; background: #fff; flex: 1 1 180px; min-width: 150px; }
+        .tn-search-main input { border: none; outline: none; width: 100%; min-width: 0; font-size: 13px; background: transparent; }
         .tn-search-main input::placeholder { color: #64748b; }
-        .tn-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; background: transparent; border: none; padding: 6px 12px; }
+        .tn-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; background: transparent; border: none; padding: 6px 8px; white-space: nowrap; flex-shrink: 0; }
 
         /* ── Searchable room filter dropdown ── */
-        .tn-room-dd { position: relative; width: 160px; }
+        .tn-room-dd { position: relative; width: 140px; flex: 0 0 140px; }
         .tn-room-trigger {
           display: flex; align-items: center; justify-content: space-between; gap: 8px;
           width: 100%; height: 38px; padding: 0 12px;
@@ -1951,6 +2226,48 @@ const handleAdd = async () => {
         .tn-table td { padding: 16px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; white-space: nowrap; }
         .tn-table tr:last-child td { border-bottom: none; }
         .tn-table tr:hover { background: #fdfcff; }
+
+        /* ── Compact main tenants table (5 columns: Tenant, Phone, Room & Bed, Status, Actions) ──
+           Fixed layout + explicit column widths so every row lines up. Higher specificity
+           (.tn-table.tn-table-compact) beats the base and mobile min-width rules. */
+        .tn-table.tn-table-compact { min-width: 0; table-layout: fixed; width: 100%; }
+        .tn-table.tn-table-compact th { padding: 14px 8px; }
+        .tn-table.tn-table-compact td { padding: 14px 8px; white-space: nowrap; vertical-align: middle; }
+        .tn-table.tn-table-compact th:first-child,
+        .tn-table.tn-table-compact td:first-child { padding-left: 16px; }
+        .tn-table.tn-table-compact th:last-child,
+        .tn-table.tn-table-compact td:last-child { padding-right: 16px; }
+        /* Extra breathing room before the Status and Actions columns so
+           Room & Bed | Status | Actions no longer look joined together. */
+        .tn-table.tn-table-compact th:nth-child(4),
+        .tn-table.tn-table-compact td:nth-child(4),
+        .tn-table.tn-table-compact th:nth-child(5),
+        .tn-table.tn-table-compact td:nth-child(5) { padding-left: 16px; }
+        /* A little extra space between Phone and Room & Bed (3rd column). */
+        .tn-table.tn-table-compact th:nth-child(3),
+        .tn-table.tn-table-compact td:nth-child(3) { padding-left: 24px; }
+        /* Single-line, ellipsised text so rows never wrap and stay the same height */
+        .tn-table.tn-table-compact .tn-room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* Tenant name and email also wrap instead of being cut with "…" (emails have no
+           spaces, so overflow-wrap:anywhere lets them break at any character if needed). */
+        .tn-table.tn-table-compact .tn-name { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.35; }
+        /* Email stays on ONE line. The Tenant column is wide enough for normal emails; an
+           unusually long one is cut with "…" and the full email shows on hover (title). */
+        .tn-table.tn-table-compact .tn-email { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* Branch names can be long (e.g. "Brindhavanam Hi-Tech Gents Hostel - VPL (Unit-1)"),
+           so let them wrap onto multiple lines and show in full instead of being cut with "…".
+           (Used by the Notice Period table; the main table no longer has a Branch column.) */
+        .tn-table.tn-table-compact .tn-branch-name { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word; line-height: 1.35; }
+        .tn-table.tn-table-compact td .flex > div:last-child { min-width: 0; flex: 1; }
+        .tn-table.tn-table-compact .tn-contact { white-space: nowrap; }
+        .tn-table.tn-table-compact .tn-status-badge { white-space: nowrap; }
+        .tn-table.tn-table-compact .tn-notice-tag { white-space: nowrap; }
+        .tn-table.tn-table-compact .tn-type-badge { white-space: nowrap; }
+        .tn-table.tn-table-compact .tn-action-btn { width: 30px; height: 30px; flex-shrink: 0; }
+        .tn-actions-cell { display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px; }
+        @media (max-width: 640px) {
+          .tn-table.tn-table-compact { min-width: 700px; }
+        }
 
         .tn-avatar { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; overflow: hidden; }
         .tn-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -2034,6 +2351,15 @@ const handleAdd = async () => {
                 setExcelFile(file);
                 if (wantsAutoImport) performExcelImport(file);
               }} />
+
+            {/* Export the (filtered) tenant list as an .xlsx download */}
+            <button className="tn-btn-outline" onClick={handleExportExcel} disabled={exporting}>
+              {exporting
+                ? <Loader2 size={16} className="shrink-0 animate-spin" aria-hidden="true" />
+                : <FileSpreadsheet size={16} className="shrink-0" aria-hidden="true" />}
+              {exporting ? "Exporting..." : "Export Excel"}
+            </button>
+
             <button className="tn-btn-outline" onClick={handleExcelImport}>
               <Download size={16} className="shrink-0" aria-hidden="true" /> Import Excel
             </button>
@@ -2072,7 +2398,8 @@ const handleAdd = async () => {
                     <TenantForm
                       form={form} dispatch={dispatch} rooms={rooms} beds={beds}
                       branches={formBranches} branchLocked={isWarden} fraudResult={liveFraud}
-                      errors={formErrors} clearError={clearFormError}
+                      errors={formErrors} clearError={clearFormError} bedsLoading={bedsLoading}
+                      showAc={showAcReadings}
                     />
                   )}
                   <DialogFooter className="mt-6">
@@ -2233,7 +2560,7 @@ const handleAdd = async () => {
           </div>
         )}
 
-        {/* Filters */}
+        {/* Filters — Search | Branch | Room | Status | Sort | Clear Filters (one line) */}
         <div className="tn-filters-row">
           <div className="tn-search-main">
             <Search size={16} color="#64748b" className="shrink-0" aria-hidden="true" />
@@ -2248,7 +2575,7 @@ const handleAdd = async () => {
           </div>
 
           <Select value={selectedBranch} onValueChange={setSelectedBranch} disabled={isWarden}>
-            <SelectTrigger aria-label="Filter by branch" className="w-full min-w-0 sm:w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectTrigger aria-label="Filter by branch" className="w-full min-w-0 sm:w-[140px] sm:shrink-0 h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Branches" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Branches</SelectItem>
               {branches.map(b => (
@@ -2265,7 +2592,7 @@ const handleAdd = async () => {
           />
 
           <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-            <SelectTrigger aria-label="Filter by status" className="w-full min-w-0 sm:w-[160px] h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Status" /></SelectTrigger>
+            <SelectTrigger aria-label="Filter by status" className="w-full min-w-0 sm:w-[140px] sm:shrink-0 h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="All Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="Active">Active</SelectItem>
@@ -2274,69 +2601,67 @@ const handleAdd = async () => {
             </SelectContent>
           </Select>
 
+          {/* ── Sort order: Room Wise (default) / Name A–Z (ascending) / Name Z–A (descending) ── */}
+          <Select value={selectedSort} onValueChange={setSelectedSort}>
+            <SelectTrigger aria-label="Sort order" className="w-full min-w-0 sm:w-[140px] sm:shrink-0 h-[38px] bg-white border border-slate-200 rounded-lg"><SelectValue placeholder="Sort" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="room">Room Wise</SelectItem>
+              <SelectItem value="nameAsc">Name A–Z</SelectItem>
+              <SelectItem value="nameDesc">Name Z–A</SelectItem>
+            </SelectContent>
+          </Select>
 
           <button className="tn-clear-btn" onClick={() => {
             setSearch("");
             setSelectedBranch(isWarden ? String(branchId ?? "all") : "all");
             setSelectedStatus("all");
             setSelectedRoom("all");
+            prevSelectedSort.current = "room"; // avoid a duplicate fetch from the sort effect
+            setSelectedSort("room");
             setPage(0);
-            loadTenants(isWarden ? String(branchId ?? "all") : "all", 0, "", "all", "all");
+            loadTenants(isWarden ? String(branchId ?? "all") : "all", 0, "", "all", "all", "room");
           }}>
             <RefreshCw size={14} className="shrink-0" aria-hidden="true" /> Clear Filters
           </button>
         </div>
 
-        {/* Table */}
+        {/* Table — compact: TENANT, PHONE, ROOM & BED, STATUS, ACTIONS.
+            In "Room Wise" mode tenants are ordered by room (ascending), then by name (A–Z),
+            without separate room header rows.
+            ROOM & BED shows the room name/number together with the bed number (e.g. "101 - Bed 1").
+            Check-in date, rent/total and pending amount are available in the View dialog. */}
         <div className="tn-table-container">
           <div className="overflow-x-auto">
-            <table className="tn-table">
+            <table className="tn-table tn-table-compact">
+              <colgroup>
+                <col />
+                <col style={{ width: 116 }} />
+                <col style={{ width: 190 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 232 }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th>TENANT</th>
+                  <th>PHONE</th>
                   <th>ROOM & BED</th>
-                  <th>BRANCH</th>
-                  <th>CONTACT</th>
-                  <th>CHECK-IN DATE</th>
-                  <th style={{ textAlign: 'center' }}>RENT / TOTAL (₹)</th>
-                  <th>PENDING (₹)</th>
                   <th>STATUS</th>
                   <th style={{ textAlign: 'center' }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={9} className="text-center py-12 text-slate-500">Loading tenants...</td></tr>
+                  <tr><td colSpan={5} className="text-center py-12 text-slate-500">Loading tenants...</td></tr>
                 ) : tenants.length === 0 ? (
-                  <tr><td colSpan={9} className="text-center py-12 text-slate-500">No tenants found.</td></tr>
+                  <tr><td colSpan={5} className="text-center py-12 text-slate-500">No tenants found.</td></tr>
                 ) : (
                   tenants.map((t) => {
                     const avatarColor = COLORS[t.id % COLORS.length];
                     const rNo = t.roomNumber ?? roomNo(t.roomId);
                     const bNo = t.bedNumber ?? bedNo(t.bedId);
-                    const isDailyStay = t.tenantStay === "DAILY";
+                    const roomBedLabel = `${rNo} - Bed ${bNo}`;
 
                     const room = allRoomsRef.current.find((r) => r.id === t.roomId);
-                    let typeName = "Standard";
-                    let typeColor = { color: '#475569', bg: '#f1f5f9' };
-                    if (room) {
-                      const rBeds = room.totalBeds || 1;
-                      const prefix = rBeds === 1 ? 'Single' : rBeds === 2 ? 'Double' : rBeds === 3 ? 'Triple' : rBeds === 4 ? 'Quad' : `${rBeds} Bed`;
-                      const suffix = room.hostelType === 'AC' ? 'AC' : room.hostelType === 'NON_AC' ? 'Non-AC' : room.hostelType;
-                      typeName = `${prefix} ${suffix}`;
-                      // AA-contrast text colors (>= 4.5:1 on their backgrounds)
-                      if (typeName.includes('Single')) typeColor = { color: '#1d4ed8', bg: '#eff6ff' };
-                      if (typeName.includes('Double')) typeColor = { color: '#15803d', bg: '#dcfce7' };
-                      if (typeName.includes('Triple')) typeColor = { color: '#6d28d9', bg: '#f3e8ff' };
-                      if (typeName.includes('Quad'))   typeColor = { color: '#9a3412', bg: '#ffedd5' };
-                    }
-
-                    const rentDisplay = isDailyStay
-                      ? new Intl.NumberFormat('en-IN').format(t.totalAmount ?? 0)
-                      : new Intl.NumberFormat('en-IN').format(t.monthlyRent || 0);
-
-                    const pendingAmountNum = Number(t.pendingAmount ?? 0);
-                    const pendingDisplay = new Intl.NumberFormat('en-IN').format(pendingAmountNum);
 
                     const statusClass =
                       t.status === "Active" ? "active" :
@@ -2346,47 +2671,34 @@ const handleAdd = async () => {
 
                     return (
                       <tr key={t.id}>
+                        {/* TENANT */}
                         <td>
                           <div className="flex items-center gap-3">
                             <div className="tn-avatar" style={{ background: avatarColor.bg, color: avatarColor.color }}>
                               {t.tenantPhoto ? (
-                                <img src={`${getApiOrigin()}${t.tenantPhoto}`} alt={t.name} />
+                                <img src={`${getApiOrigin()}${t.tenantPhoto}`} alt={t.name} loading="lazy" />
                               ) : getInitials(t.name)}
                             </div>
                             <div>
-                              <div className="tn-name">{t.name || "Unknown"}</div>
-                              <div className="tn-email">{t.email || "No email provided"}</div>
+                              <div className="tn-name" title={t.name || "Unknown"}>{t.name || "Unknown"}</div>
+                              <div className="tn-email" title={t.email || "No email provided"}>{t.email || "No email provided"}</div>
                             </div>
                           </div>
                         </td>
-                        <td>
-                          <div className="tn-room-name">{rNo} - Bed {bNo}</div>
-                          <div className="tn-type-badge" style={{ background: typeColor.bg, color: typeColor.color }}>
-                            {typeName}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="tn-branch-name">{t.branchName ?? branchName(t.roomId)}</div>
-                        </td>
+
+                        {/* PHONE */}
                         <td>
                           <div className="tn-contact">
                             <Phone size={14} className="shrink-0" aria-hidden="true" /> {t.phone}
                           </div>
                         </td>
-                        <td><div className="tn-date">{t.checkInDate}</div></td>
-                        <td style={{ textAlign: 'center' }}>
-                          <div className="tn-rent">₹{rentDisplay}</div>
-                          <div className={`tn-stay-badge ${isDailyStay ? "daily" : "monthly"}`}>
-                            {isDailyStay ? <CalendarDays size={10} className="shrink-0" aria-hidden="true" /> : <CalendarClock size={10} className="shrink-0" aria-hidden="true" />}
-                            {stayLabel(t.tenantStay)}{isDailyStay && t.noOfDays ? ` · ${t.noOfDays}d` : ""}
-                          </div>
-                        </td>
+
+                        {/* ROOM & BED — room number and bed number */}
                         <td>
-                          {/* Pending amount is always shown in black */}
-                          <div className="tn-rent" style={{ color: "#000000" }}>
-                            ₹{pendingDisplay}
-                          </div>
+                          <div className="tn-room-name" title={roomBedLabel}>{roomBedLabel}</div>
                         </td>
+
+                        {/* STATUS */}
                         <td>
                           <div className={`tn-status-badge ${statusClass}`}>
                             <div className={`w-1.5 h-1.5 rounded-full ${
@@ -2410,13 +2722,19 @@ const handleAdd = async () => {
                             </div>
                           )}
                         </td>
+
+                        {/* ACTIONS */}
                         <td>
-                          <div className="flex justify-center gap-2">
+                          <div className="tn-actions-cell">
                             <button className="tn-action-btn" onClick={() => { setViewTenant(t); setViewOpen(true); }} title="View" aria-label="View tenant">
                               <Eye size={16} color="#64748b" strokeWidth={2} className="shrink-0" />
                             </button>
                             <button className="tn-action-btn" aria-label="Edit tenant" onClick={() => {
-                              const derivedBranchId = room ? getRoomUnitId(room) : NaN;
+                              /* Branch comes straight from the tenants API (branchId), so Edit works
+                                 even before rooms/beds have finished loading in the background. */
+                              const apiBranchId = Number((t as any).branchId);
+                              const roomBranchId = room ? getRoomUnitId(room) : NaN;
+                              const derivedBranchId = !isNaN(apiBranchId) ? apiBranchId : roomBranchId;
                               setEditTenant(t);
                               dispatch({ type: "load", payload: {
                                 name: t.name, phone: t.phone, email: t.email || "",
@@ -2543,7 +2861,8 @@ const handleAdd = async () => {
               editTenant={editTenant}
               existingDoc={editTenant?.idProofDocument}
               existingPhoto={editTenant?.tenantPhoto}
-              errors={formErrors} clearError={clearFormError}
+              errors={formErrors} clearError={clearFormError} bedsLoading={bedsLoading}
+              showAc={showAcReadings}
             />
             <DialogFooter className="mt-6">
               <Button variant="outline" className="rounded-lg" onClick={() => setEditOpen(false)}>Cancel</Button>
@@ -2555,7 +2874,7 @@ const handleAdd = async () => {
 
       {/* View Dialog */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
+        <DialogContent className="sm:max-w-[960px] w-[calc(100vw-20px)] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
           <div className="relative max-h-[90vh] overflow-y-auto p-6">
             <DialogClose asChild>
               <button
@@ -2572,8 +2891,8 @@ const handleAdd = async () => {
             </DialogHeader>
             {viewTenant && (
               <div className="grid gap-2 text-sm">
-                <div className="flex justify-center mb-1">
-                  <div className="h-20 w-20 rounded-full overflow-hidden border bg-muted flex items-center justify-center">
+                <div className="flex items-center gap-4 pb-3 border-b border-slate-100">
+                  <div className="h-20 w-20 shrink-0 rounded-full overflow-hidden border bg-muted flex items-center justify-center">
                     {viewTenant.tenantPhoto ? (
                       <img src={`${getApiOrigin()}${viewTenant.tenantPhoto}`} alt={viewTenant.name}
                         className="h-full w-full object-cover" />
@@ -2581,8 +2900,15 @@ const handleAdd = async () => {
                       <UserIcon className="h-8 w-8 text-muted-foreground shrink-0" />
                     )}
                   </div>
+                  <div className="min-w-0">
+                    <div className="text-lg font-semibold text-slate-900 break-words">{viewTenant.name}</div>
+                    <div className="text-sm text-slate-500">
+                      {viewTenant.phone} · {statusLabel(viewTenant.status)}
+                    </div>
+                  </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4">
                 {([
                   ["Name",              viewTenant.name],
                   ["Phone",             viewTenant.phone],
@@ -2598,7 +2924,7 @@ const handleAdd = async () => {
                         ["No. of Days",        String(viewTenant.noOfDays ?? 0)],
                         ["Amount / Day",       `₹${viewTenant.amountPerDay ?? 0}`],
                         ["Current EB Reading", String(viewTenant.joinReading ?? 0)],
-                        ...(allRoomsRef.current.find((r) => r.id === viewTenant.roomId)?.hostelType === "AC"
+                        ...(showAcReadings && allRoomsRef.current.find((r) => r.id === viewTenant.roomId)?.hostelType === "AC"
                           ? ([["Current AC EB Reading", String(viewTenant.acJoinReading ?? 0)]] as [string, string][])
                           : ([] as [string, string][])),
                         ["Advance EB Amount",  `₹${viewTenant.ebAmount ?? 0}`],
@@ -2614,8 +2940,12 @@ const handleAdd = async () => {
                   ["Check-in",          viewTenant.checkInDate],
                   ["Check-out",         viewTenant.checkOutDate ?? "-"],
                 ] as [string, string][]).map(([label, val]) => (
-                  <p key={label}><span className="font-medium">{label}:</span> {val}</p>
+                  <div key={label} className="min-w-0">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
+                    <div className="font-medium text-slate-900 break-words">{val || "-"}</div>
+                  </div>
                 ))}
+                </div>
                 {viewTenant.idProofDocument ? (
                   <p className="flex items-center gap-1">
                     <span className="font-medium">ID Document:</span>{" "}
@@ -2649,16 +2979,6 @@ const handleAdd = async () => {
                     </p>
                   </div>
                 )}
-                {/* {viewTenant.status === "Checked_Out" && (
-                  <div className="mt-1 rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-800 space-y-1">
-                    <p className="font-semibold flex items-center gap-1">
-                      <FileCheck2 className="h-3 w-3 shrink-0" /> This tenant has checked out
-                    </p>
-                    <div className="pt-1">
-                      <CheckoutReportButton variant="button" tenantId={viewTenant.id} tenantName={viewTenant.name} />
-                    </div>
-                  </div>
-                )} */}
                 {viewTenant.status === "PENDING" && (
                   <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 space-y-1">
                     <p className="font-semibold flex items-center gap-1">
@@ -2786,7 +3106,7 @@ const handleAdd = async () => {
                     <SelectContent>
                       {rooms
                         .filter((r) => Number(getRoomUnitId(r)) === Number(approveForm.branchId))
-                        .filter((r) => beds.filter((b) => Number(b.roomId) === Number(r.id) && !isBedOccupied(b)).length > 0)
+                        .filter(roomHasFreeBed)
                         .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -2808,7 +3128,9 @@ const handleAdd = async () => {
                         .map((b) => <SelectItem key={b.id} value={String(b.id)}>Bed {b.bedNumber}</SelectItem>)}
                       {approveForm.roomId &&
                         beds.filter((b) => Number(b.roomId) === Number(approveForm.roomId) && !isBedOccupied(b)).length === 0 && (
-                          <div className="px-3 py-2 text-sm text-muted-foreground">No available beds in this room</div>
+                          <div className="px-3 py-2 text-sm text-muted-foreground">
+                            {bedsLoading ? "Loading beds…" : "No available beds in this room"}
+                          </div>
                         )}
                     </SelectContent>
                   </Select>
@@ -2867,7 +3189,12 @@ const handleAdd = async () => {
       {/* Transfer Room/Bed Dialog */}
       <Dialog open={transferOpen} onOpenChange={(open) => {
         setTransferOpen(open);
-        if (!open) { setTransferTarget(null); setTransferForm(EMPTY_TRANSFER_FORM); setTransferErrors({}); }
+        if (!open) {
+          setTransferTarget(null);
+          setTransferForm(EMPTY_TRANSFER_FORM);
+          setTransferErrors({});
+          setTransferRoomSearch("");
+        }
       }}>
         <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-hidden rounded-2xl p-0 [&>button]:hidden">
           <div className="relative max-h-[90vh] overflow-y-auto p-6">
@@ -2896,15 +3223,17 @@ const handleAdd = async () => {
                 <div>
                   <div className="text-xs font-medium text-muted-foreground">Current Room</div>
                   <div className="font-medium">
-                    {allRoomsRef.current.find((r) => r.id === transferTarget?.roomId)?.roomNumber ?? "-"}
+                    {transferTarget?.roomNumber ??
+                      allRoomsRef.current.find((r) => r.id === transferTarget?.roomId)?.roomNumber ?? "-"}
                   </div>
                 </div>
                 <div>
                   <div className="text-xs font-medium text-muted-foreground">Current Bed</div>
                   <div className="font-medium">
                     {(() => {
-                      const b = beds.find((bd) => bd.id === transferTarget?.bedId);
-                      return b ? `Bed ${b.bedNumber}` : "-";
+                      const bedLabel = transferTarget?.bedNumber ??
+                        beds.find((bd) => bd.id === transferTarget?.bedId)?.bedNumber;
+                      return bedLabel != null ? `Bed ${bedLabel}` : "-";
                     })()}
                   </div>
                 </div>
@@ -2919,14 +3248,35 @@ const handleAdd = async () => {
                   <label className="text-xs font-medium text-muted-foreground">New Room *</label>
                   <Select
                     value={transferForm.roomId ? String(transferForm.roomId) : ""}
-                    onValueChange={(v) => setTransferForm(f => ({ ...f, roomId: Number(v), bedId: "" }))}
+                    onValueChange={(v) => {
+                      setTransferForm(f => ({ ...f, roomId: Number(v), bedId: "" }));
+                      setTransferRoomSearch("");
+                      setTransferErrors((prev) => ({ ...prev, roomId: "" }));
+                    }}
+                    onOpenChange={(o) => { if (!o) setTransferRoomSearch(""); }}
                   >
                     <SelectTrigger aria-label="New room" className="rounded-lg"><SelectValue placeholder="Select room" /></SelectTrigger>
                     <SelectContent>
-                      {rooms
-                        .filter((r) => beds.filter((b) => Number(b.roomId) === Number(r.id) &&
-                          (!isBedOccupied(b) || Number(b.id) === Number(transferTarget?.bedId))).length > 0)
-                        .map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>)}
+                      {/* Search box — filters the room list as you type (same as the Check-In form). */}
+                      <div className="px-2 py-1.5 sticky top-0 bg-background z-10">
+                        <Input
+                          aria-label="Search room"
+                          placeholder="Search room..."
+                          value={transferRoomSearch}
+                          onChange={(e) => setTransferRoomSearch(e.target.value)}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          className="h-8 text-sm rounded-lg"
+                          autoFocus
+                        />
+                      </div>
+                      {transferRoomOptions.map((r) => (
+                        <SelectItem key={r.id} value={String(r.id)}>{r.roomNumber}</SelectItem>
+                      ))}
+                      {transferRoomOptions.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          {transferRoomSearch.trim() ? "No rooms found" : "No rooms with available beds"}
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                   {transferErrors.roomId && <p className="text-xs text-red-600">{transferErrors.roomId}</p>}
@@ -2938,7 +3288,7 @@ const handleAdd = async () => {
                     disabled={!transferForm.roomId}
                     onValueChange={(v) => setTransferForm(f => ({ ...f, bedId: Number(v) }))}
                   >
-                    <SelectTrigger aria-label="New bed" className="rounded-lg"><SelectValue placeholder={transferForm.roomId ? "Select bed" : "Select room first"} /></SelectTrigger>
+                    <SelectTrigger aria-label="New bed" className="rounded-lg"><SelectValue placeholder={transferForm.roomId ? (bedsLoading ? "Loading beds…" : "Select bed") : "Select room first"} /></SelectTrigger>
                     <SelectContent>
                       {beds
                         .filter((b) => Number(b.roomId) === Number(transferForm.roomId) &&

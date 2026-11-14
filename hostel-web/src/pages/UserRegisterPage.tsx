@@ -9,6 +9,7 @@ import {
   getPermissionCatalog,
   getUserPermissions,
   assignUserPermissions,
+  getUserRole,
 } from "@/lib/store";
 import { Branch, User, RegisterUserRequest, PermissionCatalogItem } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,27 @@ const EMPTY_FORM: UserForm = {
 const PHONE_LENGTH = 10;
 const sanitizePhoneInput = (raw: string) => raw.replace(/\D/g, "").slice(0, PHONE_LENGTH);
 const isValidPhone = (phone: string) => /^\d{10}$/.test(phone);
+
+/* ── Permissions the logged-in user holds (saved at login as the
+      "permissions" key in session/local storage). ── */
+const getMyPermissions = (): Set<string> => {
+  try {
+    const raw =
+      sessionStorage.getItem("permissions") ?? localStorage.getItem("permissions");
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set<string>(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set<string>();
+  }
+};
+
+/* Show only the permissions the logged-in user holds themselves.
+   SUPER_ADMIN can assign everything, so the list is left untouched. */
+const filterToMyPermissions = (list: PermissionCatalogItem[]) => {
+  if (getUserRole()?.toUpperCase() === "SUPER_ADMIN") return list;
+  const mine = getMyPermissions();
+  return list.filter((c) => mine.has(c.name));
+};
 
 /* ── Compact page-number sequence, e.g. [1,2,3,'…',9,10] ── */
 const getPageNumbers = (current: number, total: number): (number | "ellipsis")[] => {
@@ -184,9 +206,7 @@ const UserRegisterPage = () => {
      without an inline login (no email was given at check-in), passing
      { openAddUser, prefill: { name, phone, email, branchId }, role }
      via router state. Pre-fill the Create User form with what was
-     already collected and pop the Add dialog open, so the flow goes
-     straight from "checked in a tenant" to "give them a login" in one
-     step — mirrors the RoomsPage → TenantsPage openAddTenant handoff.
+     already collected and pop the Add dialog open.
      ── */
   useEffect(() => {
     const navState = location.state as
@@ -214,7 +234,8 @@ const UserRegisterPage = () => {
 
   /* ================= PERMISSIONS — CREATE DIALOG ================= */
 
-  // Loads the assignable catalog once a role is picked in the Create dialog.
+  // Loads the catalog once a role is picked, then keeps ONLY the
+  // permissions the logged-in user holds themselves.
   useEffect(() => {
     if (!addOpen || !form.role) {
       setPermCatalog([]);
@@ -226,7 +247,7 @@ const UserRegisterPage = () => {
     getPermissionCatalog()
       .then(list => {
         if (cancelled) return;
-        setPermCatalog(list);
+        setPermCatalog(filterToMyPermissions(list));
         setSelectedPerms(new Set());
       })
       .catch(() => { if (!cancelled) toast.error("Failed to load permissions"); })
@@ -247,7 +268,8 @@ const UserRegisterPage = () => {
   /* ================= PERMISSIONS — EDIT DIALOG ================= */
 
   // Loads the target user's real granted permissions from
-  // GET /permissions/user/{id} (same call PermissionManagementPage uses).
+  // GET /permissions/user/{id}, shown only for what the logged-in user holds.
+  // Hidden permissions the target already has are preserved by the backend.
   useEffect(() => {
     if (!editOpen || !editUser) {
       setEditPermCatalog([]);
@@ -259,8 +281,9 @@ const UserRegisterPage = () => {
     getUserPermissions(editUser.id)
       .then(res => {
         if (cancelled) return;
-        setEditPermCatalog(res.catalog);
-        setEditSelectedPerms(new Set(res.catalog.filter(c => c.granted).map(c => c.name)));
+        const visible = filterToMyPermissions(res.catalog);
+        setEditPermCatalog(visible);
+        setEditSelectedPerms(new Set(visible.filter(c => c.granted).map(c => c.name)));
       })
       .catch(() => { if (!cancelled) toast.error("Failed to load permissions"); })
       .finally(() => { if (!cancelled) setEditPermLoading(false); });
@@ -327,15 +350,8 @@ const UserRegisterPage = () => {
       };
       const created = await registerUser(payload);
 
-      // FIX: registerUser's response doesn't reliably expose `.id` (some
-      // backends return it nested, or just a success message), so the old
-      // code's `newUserId` came back undefined and the whole
-      // assignUserPermissions call was skipped — silently, with no error —
-      // even though checkboxes were ticked. That's why permissions never
-      // stuck on create.
-      // Now: try the common response shapes first, then fall back to
-      // looking the just-created user up by email, and surface an error
-      // if we still can't resolve an id instead of failing silently.
+      // registerUser's response doesn't reliably expose `.id`, so try the
+      // common shapes first, then fall back to looking the user up by email.
       let newUserId: number | undefined =
         (created as any)?.id ??
         (created as any)?.userId ??
@@ -477,7 +493,7 @@ const UserRegisterPage = () => {
           {grouped.map(([moduleName, items]) => {
             const meta = MODULE_META[moduleName] || DEFAULT_MODULE_META;
             const Icon = meta.icon;
-            
+
             return (
               <div key={moduleName} className="bg-white border border-slate-100 rounded-xl overflow-hidden shadow-sm shadow-slate-100/50 transition-all hover:shadow-md hover:border-slate-200/60">
                 <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/40 border-b border-slate-50">
@@ -486,26 +502,26 @@ const UserRegisterPage = () => {
                   </div>
                   <span className="text-[13px] font-bold text-slate-800">{moduleName}</span>
                 </div>
-                
+
                 <div className="p-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                   {items.map(item => {
                     const isSelected = selected.has(item.name);
                     return (
-                      <label 
-                        key={item.name} 
+                      <label
+                        key={item.name}
                         className={`group flex items-center justify-between p-2.5 rounded-lg border transition-all cursor-pointer select-none ${
-                          isSelected 
-                            ? 'bg-[#5200FF]/5 border-[#5200FF]/30 ring-1 ring-[#5200FF]/10' 
+                          isSelected
+                            ? 'bg-[#5200FF]/5 border-[#5200FF]/30 ring-1 ring-[#5200FF]/10'
                             : 'bg-transparent border-transparent hover:bg-slate-50'
                         }`}
                       >
                         <span className={`text-[12px] font-medium transition-colors ${isSelected ? 'text-[#5200FF]' : 'text-slate-600 group-hover:text-slate-900'}`}>
                           {item.label}
                         </span>
-                        
+
                         <div className={`relative flex items-center justify-center w-[18px] h-[18px] rounded transition-all ${
-                          isSelected 
-                            ? 'bg-[#5200FF]' 
+                          isSelected
+                            ? 'bg-[#5200FF]'
                             : 'bg-white border border-slate-300 group-hover:border-slate-400'
                         }`}>
                           {isSelected && (
@@ -545,10 +561,7 @@ const UserRegisterPage = () => {
     [page, totalPages],
   );
 
-  // Lighthouse contrast fix: text colors darkened so each badge meets the
-  // WCAG AA 4.5:1 ratio against its light background.
-  //   WARDEN: #1d4ed8 (blue-700)  on #eff6ff  ≈ 7:1   (was #3b82f6 ≈ 3.4:1)
-  //   TENANT: #166534 (green-800) on #dcfce7  ≈ 6.5:1 (was #22c55e ≈ 2:1)
+  // Contrast-safe badge colors (WCAG AA).
   const roleBadgeColor = (role?: string) => {
     if (role === "WARDEN") return { color: '#1d4ed8', bg: '#eff6ff' };
     return { color: '#166534', bg: '#dcfce7' }; // TENANT / other
@@ -560,48 +573,47 @@ const UserRegisterPage = () => {
     <div className="min-h-full bg-[#fcfcfc] text-gray-900 font-sans pb-10">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        .usr-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: 1500px; margin: 0 auto; }
+        .usr-wrap { font-family: 'Inter', sans-serif; padding: 20px 16px; max-width: 1500px; margin: 0 auto; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
 
-        /* Main Content Header */
-        .usr-main-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
-        .usr-main-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+        .usr-main-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+        .usr-main-title { font-size: 16px; font-weight: 700; color: #0f172a; }
 
-        .usr-controls { display: flex; align-items: center; gap: 12px; }
-        .usr-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
+        .usr-controls { display: flex; align-items: center; gap: 10px; }
+        .usr-btn-outline { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 14px; height: 34px; font-size: 12.5px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; transition: all 0.2s; }
         .usr-btn-outline:hover { background: #f8fafc; }
-        .usr-btn-primary { display: flex; align-items: center; gap: 8px; background: #5200FF; border: none; border-radius: 10px; padding: 0 16px; height: 38px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
+        .usr-btn-primary { display: flex; align-items: center; gap: 6px; background: #5200FF; border: none; border-radius: 10px; padding: 0 14px; height: 34px; font-size: 12.5px; font-weight: 600; color: #fff; cursor: pointer; transition: background 0.2s; }
         .usr-btn-primary:hover { background: #4200cc; }
 
-        /* Search & Filters */
-        .usr-filters-row { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
-        .usr-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 12px; height: 38px; background: #fff; width: 260px; }
-        .usr-search input { border: none; outline: none; width: 100%; font-size: 13px; background: transparent; }
+        .usr-filters-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+        .usr-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 12px; height: 34px; background: #fff; width: 240px; }
+        .usr-search input { border: none; outline: none; width: 100%; font-size: 12.5px; background: transparent; }
 
-        .usr-filter-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 14px; height: 38px; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; min-width: 140px; }
-        .usr-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #64748b; cursor: pointer; background: transparent; border: none; padding: 6px 12px; }
+        .usr-filter-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 14px; height: 34px; font-size: 12.5px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; min-width: 140px; }
+        .usr-clear-btn { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: #64748b; cursor: pointer; background: transparent; border: none; padding: 6px 10px; }
 
-        /* Table */
         .usr-table-container { background: #fff; border-radius: 16px; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
-        .usr-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
-        .usr-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 16px 24px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
-        .usr-table td { padding: 16px 24px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+        .usr-table { width: 100%; border-collapse: collapse; min-width: 0; }
+        .usr-table th { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; padding: 10px 12px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.4px; white-space: nowrap; }
+        .usr-table td { padding: 10px 12px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+        .usr-table th:first-child, .usr-table td:first-child { padding-left: 20px; }
+        .usr-table th:last-child,  .usr-table td:last-child  { padding-right: 20px; }
         .usr-table tr:last-child td { border-bottom: none; }
         .usr-table tr:hover { background: #fdfcff; }
 
-        .usr-avatar { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; }
-        .usr-name { font-size: 14px; font-weight: 600; color: #0f172a; }
-        .usr-phone { font-size: 12px; color: #64748b; margin-top: 4px; }
-        .usr-email { font-size: 13px; color: #475569; font-weight: 500; }
+        .usr-avatar { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+        .usr-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+        .usr-phone { font-size: 11px; color: #64748b; margin-top: 2px; }
+        .usr-email { font-size: 12.5px; color: #475569; font-weight: 500; overflow-wrap: anywhere; }
 
-        .usr-role-badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .usr-role-badge { display: inline-flex; align-items: center; justify-content: center; padding: 3px 10px; border-radius: 6px; font-size: 10.5px; font-weight: 600; }
 
-        .usr-branch-name { font-size: 13px; font-weight: 600; color: #0f172a; }
-        .usr-branch-loc { font-size: 12px; color: #64748b; margin-top: 2px; }
+        .usr-branch-name { font-size: 12.5px; font-weight: 600; color: #0f172a; white-space: nowrap; }
+        .usr-branch-loc { font-size: 11px; color: #64748b; margin-top: 2px; }
 
-        .usr-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .usr-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 20px; font-size: 10.5px; font-weight: 600; }
         .usr-status-badge.active { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
         .usr-status-badge.inactive { color: #ef4444; background: #fef2f2; border: 1px solid #fecaca; }
         .usr-status-badge.pending { color: #f97316; background: #fff7ed; border: 1px solid #fed7aa; }
@@ -609,22 +621,27 @@ const UserRegisterPage = () => {
         .usr-date { font-size: 12px; font-weight: 600; color: #0f172a; }
         .usr-time { font-size: 11px; color: #64748b; margin-top: 2px; }
 
-        .usr-action-btn { width: 32px; height: 32px; border-radius: 10px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; }
+        .usr-action-btn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; color: #64748b; background: #fff; cursor: pointer; transition: all 0.2s; }
         .usr-action-btn:hover { background: #f8fafc; color: #0f172a; }
         .usr-action-btn svg { flex-shrink: 0; }
 
-        /* Pagination */
-        .usr-pagination { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #f1f5f9; background: #fff; }
-        .usr-page-info { font-size: 13px; color: #64748b; }
-        .usr-page-controls { display: flex; align-items: center; gap: 8px; }
-        .usr-page-btn { min-width: 32px; height: 32px; border-radius: 10px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
+        .usr-pagination { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; border-top: 1px solid #f1f5f9; background: #fff; flex-wrap: wrap; gap: 8px; }
+        .usr-page-info { font-size: 12px; color: #64748b; }
+        .usr-page-controls { display: flex; align-items: center; gap: 6px; }
+        .usr-page-btn { min-width: 28px; height: 28px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 500; color: #475569; background: #fff; cursor: pointer; }
         .usr-page-btn:hover:not(:disabled) { background: #f8fafc; }
         .usr-page-btn.active { background: #5200FF; color: #fff; border-color: #5200FF; }
         .usr-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        /* #94a3b8 -> #64748b: fixes the Lighthouse contrast failure */
-        .usr-page-ellipsis { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #64748b; }
+        .usr-page-ellipsis { min-width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; color: #64748b; }
 
         .usr-footer-info { display: flex; align-items: center; gap: 8px; padding: 16px 20px; background: #f8fafc; border-radius: 12px; font-size: 13px; color: #5200FF; margin-top: 24px; font-weight: 500; }
+
+        @media (max-width: 767px) {
+          .usr-wrap { padding: 14px 10px 24px; }
+          .usr-table { min-width: 720px; }
+          .usr-table th:first-child, .usr-table td:first-child { padding-left: 14px; }
+          .usr-table th:last-child,  .usr-table td:last-child  { padding-right: 14px; }
+        }
       `}</style>
 
       <div className="usr-wrap">
@@ -634,8 +651,6 @@ const UserRegisterPage = () => {
           <div className="usr-main-title">All Registered Users</div>
 
           <div className="usr-controls">
-            {/* <button className="usr-btn-outline"><Download size={16} className="shrink-0" /> Export</button> */}
-
             <Dialog
               open={addOpen}
               onOpenChange={(v) => {
@@ -645,19 +660,10 @@ const UserRegisterPage = () => {
             >
               <DialogTrigger asChild>
                 <button className="usr-btn-primary">
-                  <Plus size={16} className="shrink-0" aria-hidden="true" /> Add New User
+                  <Plus size={15} className="shrink-0" aria-hidden="true" /> Add New User
                 </button>
               </DialogTrigger>
-              {/* FIX: rounded-2xl was on the same element as overflow-y-auto,
-                  so the scrollbar track ran flush against the right edge
-                  top-to-bottom and visually squared off the top-right /
-                  bottom-right corners (see screenshot). The rounding +
-                  clipping now lives on this OUTER wrapper (overflow-hidden,
-                  no scroll here), while a separate INNER div handles the
-                  scrolling. That keeps every corner rounded regardless of
-                  scrollbar. Widened to sm:max-w-2xl and the fields switched
-                  to a 2-column grid (landscape layout) so the form is much
-                  shorter and needs far less scrolling in the first place. */}
+              {/* Rounding/clipping lives on the outer wrapper; the inner div scrolls. */}
               <DialogContent className="mobile-form-dialog sm:max-w-xl md:max-w-3xl rounded-2xl overflow-hidden p-0 max-h-[85vh] flex flex-col">
                 <div className="px-6 pt-6">
                   <DialogHeader>
@@ -734,7 +740,7 @@ const UserRegisterPage = () => {
         {/* Filters */}
         <div className="usr-filters-row">
           <div className="usr-search">
-            <Search size={16} color="#94a3b8" className="shrink-0" aria-hidden="true" />
+            <Search size={15} color="#94a3b8" className="shrink-0" aria-hidden="true" />
             <input
               type="text"
               aria-label="Search users"
@@ -765,7 +771,6 @@ const UserRegisterPage = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    {/* text-slate-400 -> text-slate-600: Lighthouse contrast failure */}
                     <td colSpan={6} className="text-center py-12 text-slate-600">Loading users...</td>
                   </tr>
                 ) : filteredUsers.length === 0 ? (
@@ -780,7 +785,7 @@ const UserRegisterPage = () => {
                     return (
                       <tr key={user.id}>
                         <td>
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2.5">
                             <div className="usr-avatar" style={{ background: avatarColor.bg, color: avatarColor.color }} aria-hidden="true">
                               {getInitials(user.name)}
                             </div>
@@ -808,7 +813,7 @@ const UserRegisterPage = () => {
                           </div>
                         </td>
                         <td>
-                          <div className="flex gap-2">
+                          <div className="flex gap-1.5">
                             <button
                               type="button"
                               className="usr-action-btn"
@@ -816,16 +821,14 @@ const UserRegisterPage = () => {
                               title="Edit"
                               aria-label={`Edit ${user.email}`}
                             >
-                              <Pencil size={16} className="shrink-0" aria-hidden="true" />
+                              <Pencil size={14} className="shrink-0" aria-hidden="true" />
                             </button>
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <button type="button" className="usr-action-btn" title="Delete" aria-label={`Delete ${user.email}`}>
-                                  <Trash2 size={16} color="#ef4444" className="shrink-0" aria-hidden="true" />
+                                  <Trash2 size={14} color="#ef4444" className="shrink-0" aria-hidden="true" />
                                 </button>
                               </AlertDialogTrigger>
-                              {/* rounded-2xl matches the rest of the app's
-                                  destructive-confirm dialogs */}
                               <AlertDialogContent className="mobile-form-dialog rounded-2xl">
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Delete {user.email}?</AlertDialogTitle>
@@ -852,8 +855,6 @@ const UserRegisterPage = () => {
             <div className="usr-page-info">
               Showing {users.length === 0 ? 0 : page * pageSize + 1} to {Math.min((page + 1) * pageSize, totalCount)} of {totalCount} users
             </div>
-            {/* Lighthouse: "Buttons do not have an accessible name" — the
-                prev/next buttons were icon-only. They now carry aria-labels. */}
             <nav aria-label="Pagination" className="usr-page-controls">
               <button
                 type="button"
@@ -862,7 +863,7 @@ const UserRegisterPage = () => {
                 disabled={page === 0}
                 onClick={() => setPage(p => p - 1)}
               >
-                <ChevronLeft size={16} className="shrink-0" aria-hidden="true" />
+                <ChevronLeft size={15} className="shrink-0" aria-hidden="true" />
               </button>
 
               {pageNumbers.map((p, idx) =>
@@ -891,18 +892,11 @@ const UserRegisterPage = () => {
                 disabled={(page + 1) * pageSize >= totalCount}
                 onClick={() => setPage(p => p + 1)}
               >
-                <ChevronRight size={16} className="shrink-0" aria-hidden="true" />
+                <ChevronRight size={15} className="shrink-0" aria-hidden="true" />
               </button>
             </nav>
           </div>
         </div>
-
-        {/* <div className="usr-footer-info">
-          <div className="w-5 h-5 rounded-full border border-blue-200 flex items-center justify-center bg-blue-50 shrink-0">
-            <span className="text-[10px] font-bold">i</span>
-          </div>
-          You can add, edit, view, activate, deactivate or delete users and their permissions from here.
-        </div> */}
 
         {/* EDIT DIALOG */}
         <Dialog

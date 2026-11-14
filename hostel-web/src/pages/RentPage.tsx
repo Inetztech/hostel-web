@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback, useDeferredValue } from "react";
 import api from "@/lib/api";
 
 import {
@@ -38,13 +38,63 @@ import {
 } from "@/components/ui/select";
 
 import { toast } from "sonner";
-import { Search, RefreshCw, ChevronRight, ChevronDown, Check, X, MoreHorizontal } from "lucide-react";
+import { Search, RefreshCw, ChevronRight, ChevronDown, Check, X, MoreHorizontal, Download } from "lucide-react";
 import { computeRentBreakdown, type RentBreakdown } from "@/lib/RentCalculation";
 import { computeRentDue, NO_DUE_CONFIG, NO_DUE_RESULT, type RentDueResult } from "@/lib/rentDue";
-// NEW: per-hostel Rent Billing Mode (CALENDAR_MONTH | JOINING_DATE_CYCLE).
 import { parseLocalDate, fmtDate } from "@/lib/rentCycle";
 import { previewCycleRent, toISODate, type BranchRentConfig } from "@/lib/rentPreview";
 
+/* ══════════════════════════════════════════════════════════════════
+   PERFORMANCE NOTES (why this page is now fast)
+   1. fetchAllPages used page size 10 → hundreds of HTTP calls. Now 500
+      per request (1–2 calls per list instead of 50+).
+   2. Stale-while-revalidate cache: coming back to the page shows the
+      last data INSTANTLY, then refreshes in the background.
+   3. EB bills are only requested for rooms/flats that really have
+      tenants, with limited concurrency, and rows appear as results
+      arrive (no waiting for the slowest request).
+   4. Payment / Generate only refresh rents + tenants + damages
+      ("light" reload) instead of reloading everything.
+   5. Lookups use Maps (O(1)) instead of Array.find / filter per row.
+   6. Search typing is deferred so it never blocks the UI.
+
+   GENERATE (updated)
+   Every row without a rent record now has an ACTIVE "Generate" button,
+   and "ALL Generation" includes every row — even when the tenant's
+   rent cycle starts after today (e.g. 16 Nov / 17 Nov viewed on 13 Nov).
+   The page no longer blocks or skips these. If the backend refuses a
+   request, its message is shown in the error toast.
+
+   EXCEL REPORT
+   "Download Report" exports EVERY row that matches the current filters
+   (branch / room / month / year / search) — not just the visible page —
+   exactly as the table shows them, plus a totals row. It needs the
+   `xlsx` (SheetJS) package:  npm install xlsx
+   The library is loaded lazily on click, so it does not slow down the page.
+
+   PENDING AMT FIX
+   A tenant's check-in pending (Tenant.pendingAmount) used to be loaded
+   ONLY when the selected month was the current month, so for a tenant's
+   check-in month viewed later (e.g. October while it is November) the
+   PENDING AMT column showed "—" and nothing was added to TOTAL.
+   Now:
+     • the pending is loaded for the current month AND for each tenant's
+       own check-in month (when no rent record has been generated yet);
+     • in that check-in month it is shown in PENDING AMT and ADDED to TOTAL
+       (and therefore to PENDING).
+
+   EB CARRY-OVER (matches the EB Readings page)
+   An ACTIVE tenant whose month was never billed (no rent generated) moves
+   into the NEXT month's row once that month has an EB reading:
+     October  -> Mani only    (121u, ₹1,567)
+     November -> Balaji only  (EB ₹2,607 = Oct ₹1,567 + Nov ₹1,040)
+   The previous month's bills are fetched too so the carried amount can be
+   added to the current month's EB.
+   ══════════════════════════════════════════════════════════════════ */
+
+const BIG_PAGE = 500;      // rows per request when loading whole lists
+const EB_CONCURRENCY = 6;  // parallel EB-bill requests (browser limit is ~6/host)
+const CACHE_FRESH_MS = 15_000;
 
 type EBBillRow = TenantEBBill & {
   roomNumber: string;
@@ -53,6 +103,27 @@ type EBBillRow = TenantEBBill & {
   year: number;
 };
 
+type PageSnapshot = {
+  key: string;
+  ts: number;
+  rooms: Room[];
+  rents: Rent[];
+  tenants: Tenant[];
+  pendingDamages: Record<number, number>;
+  readings: EBReading[];
+  ebBills: Map<string, EBBillRow[]>;
+};
+
+// Module-level (survives navigating away and back) caches.
+let pageCache: PageSnapshot | null = null;
+const dueConfigCache = new Map<string, RentDueConfig>();
+
+const currentCacheKey = () =>
+  `${sessionStorage.getItem("token")}|${getUserRole()}|${getBranchId()}`;
+
+const getValidCache = (): PageSnapshot | null =>
+  pageCache && pageCache.key === currentCacheKey() ? pageCache : null;
+
 type RentRow = {
   tenantId: number;
   tenantName: string;
@@ -60,83 +131,41 @@ type RentRow = {
   roomNumber: string;
   flatNumber: string;
   displayEB: number;
+  ebCarryNote?: string;
   rentPerBed: number;
   damageAmount: number;
-  // Rent Due Model: ₹ due for overdue days (0 unless FIXED_DUE) and the number
-  // of days / ₹-per-day it was built from. Already included in total & pending.
   dueAmount?: number;
   dueDays?: number;
   duePerDay?: number;
   total: number;
   paid: number;
   pending: number;
-  // Unpaid balance of EARLIER months (already included in `pending`).
   previousPending: number;
-  // NEW: which months that previous balance comes from, e.g. "Sep 2026".
   previousLabel?: string;
   currentPending: number;
-  // The tenant's own "Pending (₹)" figure from the Tenants page
-  // (Tenant.pendingAmount), shown in its own PENDING AMT column.
-  // FIX: in the CHECK-IN month (no Rent record yet) only the part that is NOT
-  // this month's rent is shown here — the rent part of the check-in pending is
-  // already inside the RENT column, so it is treated as "already paid" credit.
-  // FIX: this is a balance as of TODAY, so it is only populated on the CURRENT
-  // month's row (0 for past months) — it is no longer repeated on every month.
   tenantPending?: number;
-  // NEW: part of the tenant's check-in Pending (₹) that is THIS month's unpaid
-  // rent (check-in month, no Rent record yet). Display-only note: it is already
-  // inside RENT / PENDING, so it is never added to TOTAL a second time.
   checkInRentPending?: number;
   rentRecord: Rent | undefined;
   unitId: number | undefined;
   amount: number;
   paymentStatus?: string;
-  // NEW: set (JOINING_DATE_CYCLE hostels only) when this row's rent cycle
-  // hasn't started yet, so "Generate" is blocked instead of failing on the server.
-  generateBlockedReason?: string;
-  // Daily-stay ("Rent + EB advance paid at check-in") settlement info.
-  // Only populated for tenantStay === "DAILY" rows that don't have a Rent
-  // record yet — once a Rent record exists for the period, that record is
-  // the source of truth and the row goes back through the normal fields
-  // above, so these stay undefined at that point.
   isDaily?: boolean;
   advanceEB?: number;
-  ebBalance?: number; // > 0 => refund owed to tenant, < 0 => tenant owes the difference
-  // true only for a row built from a raw, informational EB-reading
-  // checkout row (see "informationalRows" below).
+  ebBalance?: number;
   fromInformationalReading?: boolean;
 };
 
 function extractRoomNumber(bill: any): string {
-  return (
-    bill.roomNumber    ??
-    bill.room_number   ??
-    bill.roomNo        ??
-    ""
-  );
+  return bill.roomNumber ?? bill.room_number ?? bill.roomNo ?? "";
 }
 
 function extractFlatNumber(bill: any): string {
-  return (
-    bill.flatNumber    ??
-    bill.flat_number   ??
-    bill.flatNo        ??
-    ""
-  );
+  return bill.flatNumber ?? bill.flat_number ?? bill.flatNo ?? "";
 }
 
-// Mirrors EBReadingsPage.tsx's isInformationalReading exactly. A row
-// is an "informational" DAILY-settlement row IFF it carries a tenantId AND
-// isCheckout === true.
 const isInformationalReading = (reading: any) =>
   reading?.tenantId != null && reading?.isCheckout === true;
 
-// True when the tenant's check-in date is AFTER the last day of the
-// selected month/year, i.e. they were not living here yet. Such a tenant
-// must not be billed (rent or EB) for that month. Parses "YYYY-MM-DD"
-// manually to avoid timezone shifts from `new Date("YYYY-MM-DD")`.
-// (Also correct for JOINING_DATE_CYCLE: a cycle is identified by the
-// calendar month it STARTS in, so a later check-in month has no cycle yet.)
 const checkedInAfterMonth = (
   checkInDate: string | null | undefined,
   month: number,
@@ -145,12 +174,10 @@ const checkedInAfterMonth = (
   if (!checkInDate) return false;
   const [cy, cm, cd] = String(checkInDate).slice(0, 10).split("-").map(Number);
   if (!cy || !cm || !cd) return false;
-  const monthEnd = new Date(year, month, 0); // last day of selected month
+  const monthEnd = new Date(year, month, 0);
   return new Date(cy, cm - 1, cd) > monthEnd;
 };
 
-// NEW: true when (month, year) is the calendar month the tenant checked in.
-// Parses "YYYY-MM-DD" manually to avoid timezone shifts.
 const isCheckInMonth = (
   checkInDate: string | null | undefined,
   month: number,
@@ -163,11 +190,6 @@ const isCheckInMonth = (
 
 /* ══════════════════════════════════════════════════════════════════
    SEARCHABLE ROOM FILTER (toolbar "All Rooms" dropdown)
-   - Search box at the top filters the room list as you type
-   - "All Rooms" stays the first option while the search box is empty
-   - Keyboard: ↑ / ↓ to move, Enter to pick, Esc to close
-   - Closes on outside click / page scroll; search text is cleared on close
-   - The menu is position:fixed so the panel's overflow:hidden can never clip it
    ══════════════════════════════════════════════════════════════════ */
 const RoomFilterDropdown = ({
   value, onChange, options,
@@ -201,7 +223,6 @@ const RoomFilterDropdown = ({
     [sortedOptions, trimmed]
   );
 
-  // "All Rooms" is only offered while nothing is typed in the search box.
   const items = useMemo(
     () => [
       ...(trimmed ? [] : [{ id: "all", label: "All Rooms" }]),
@@ -236,7 +257,6 @@ const RoomFilterDropdown = ({
     closeMenu();
   };
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handle = (e: MouseEvent) => {
@@ -246,8 +266,6 @@ const RoomFilterDropdown = ({
     return () => document.removeEventListener("mousedown", handle);
   }, [open, closeMenu]);
 
-  // The menu is fixed-position, so close it if the page scrolls or resizes
-  // (scrolling inside the room list itself is fine).
   useEffect(() => {
     if (!open) return;
     const onScroll = (e: Event) => {
@@ -262,12 +280,10 @@ const RoomFilterDropdown = ({
     };
   }, [open, closeMenu]);
 
-  // Focus the search box when the menu opens
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
 
-  // Keep the highlighted row inside the visible scroll area
   useEffect(() => {
     if (!open || !listRef.current) return;
     const el = listRef.current.querySelector<HTMLElement>(`[data-idx="${activeIdx}"]`);
@@ -387,8 +403,6 @@ const ActionCell = ({
     if (!localAmount || isNaN(inputAmount) || inputAmount <= 0)
       return toast.error("Enter valid amount");
 
-    // Payment is validated and allocated atomically by the backend across
-    // older generated rents, this month's rent, and manual previous dues.
     if (inputAmount > bill.pending + 0.001) {
       toast.error(`Amount exceeds outstanding ₹${Math.round(bill.pending)}.`);
       return;
@@ -401,35 +415,27 @@ const ActionCell = ({
   };
 
   const showTxnId = localMode && localMode !== "CASH";
-  // Keep collection available when monthly rent is paid but manual previous dues remain.
   const isUnpaid = Boolean(rentRecord) && (
     (rentRecord.paymentStatus || "").toUpperCase() !== "PAID" ||
     (bill.tenantPending ?? 0) > 0 ||
     bill.previousPending > 0
   );
 
-  // A daily-stay tenant who has nothing outstanding (ebBalance >= 0,
-  // i.e. exactly settled or owed a refund) and no Rent record yet has
-  // nothing to generate or collect here.
   const isSettledDailyNoAction =
     !rentRecord && bill.isDaily && (bill.ebBalance ?? 0) >= 0 && (bill.tenantPending ?? 0) <= 0;
 
   if (isSettledDailyNoAction) {
-    // A11Y: was text-slate-400 (low contrast) — now text-slate-600.
     return <span className="text-[11px] text-slate-600">No action needed</span>;
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5">
       {!rentRecord && (
         <Button
           size="sm"
           variant="outline"
           aria-label={`Generate rent for ${bill.tenantName}`}
-          className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-0 disabled:opacity-60 disabled:cursor-not-allowed"
-          // NEW: JOINING_DATE_CYCLE hostels can't bill a cycle that hasn't started.
-          disabled={!!bill.generateBlockedReason}
-          title={bill.generateBlockedReason}
+          className="h-7 px-2 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-0"
           onClick={() => onGenerate(bill)}
         >
           Generate
@@ -437,14 +443,14 @@ const ActionCell = ({
       )}
 
       {isUnpaid && (
-        <div className="flex items-center gap-1.5 p-1 bg-slate-50 border border-slate-100 rounded-md">
+        <div className="grid grid-cols-2 items-center gap-1 p-1 bg-slate-50 border border-slate-100 rounded-md w-full">
           <Select
             value={localMode}
             onValueChange={(v: PaymentMode) => setLocalMode(v)}
           >
             <SelectTrigger
               aria-label={`Payment mode for ${bill.tenantName}`}
-              className="w-[80px] h-6 text-[10px] border-slate-200 focus:ring-0 shadow-none px-2"
+              className="w-full min-w-0 h-6 text-[10px] border-slate-200 focus:ring-0 shadow-none px-1.5"
             >
               <SelectValue placeholder="Mode" />
             </SelectTrigger>
@@ -457,12 +463,12 @@ const ActionCell = ({
 
           <input
             type="number"
-            placeholder="Amount"
+            placeholder="Amt"
             aria-label={`Payment amount for ${bill.tenantName}`}
             value={localAmount}
             onChange={(e) => setLocalAmount(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
-            className="border border-slate-200 rounded px-2 h-6 w-16 text-[10px] outline-none focus:border-indigo-400"
+            className="border border-slate-200 rounded px-1.5 h-6 w-full min-w-0 text-[10px] outline-none focus:border-indigo-400"
           />
 
           {showTxnId && (
@@ -473,15 +479,14 @@ const ActionCell = ({
               value={localTxnId}
               onChange={(e) => setLocalTxnId(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
-              className="border border-slate-200 rounded px-2 h-6 w-20 text-[10px] outline-none focus:border-indigo-400"
+              className="col-span-2 border border-slate-200 rounded px-1.5 h-6 w-full min-w-0 text-[10px] outline-none focus:border-indigo-400"
             />
           )}
 
-          {/* A11Y: green-600 with white text is below 4.5:1; green-700 passes. */}
           <Button
             size="sm"
             aria-label={`Record payment for ${bill.tenantName}`}
-            className="h-6 px-2 text-[10px] bg-green-700 hover:bg-green-800"
+            className="col-span-2 w-full h-6 px-2 text-[10px] bg-green-700 hover:bg-green-800"
             onClick={handlePay}
           >
             Pay
@@ -498,39 +503,50 @@ const RentPage = () => {
   const branchId  = getBranchId();
   const hasAccess = true;
 
-  const [rooms,          setRooms]          = useState<Room[]>([]);
-  const [rents,          setRents]          = useState<Rent[]>([]);
-  const [tenants,        setTenants]        = useState<Tenant[]>([]);
+  // Instant first paint: hydrate from the module cache when it is valid.
+  const initialCache = useMemo(() => getValidCache(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [rooms,          setRooms]          = useState<Room[]>(initialCache?.rooms ?? []);
+  const [rents,          setRents]          = useState<Rent[]>(initialCache?.rents ?? []);
+  const [tenants,        setTenants]        = useState<Tenant[]>(initialCache?.tenants ?? []);
+  const [loaded,         setLoaded]         = useState<boolean>(!!initialCache);
   const [selectedBranch, setSelectedBranch] = useState(
     role !== "ADMIN" && branchId ? String(branchId) : "all"
   );
   const [selectedRoom, setSelectedRoom] = useState("all");
 
-  // Active Business Model (Rent Due Model NO_DUE / FIXED_DUE + ₹ per day AND
-  // Rent Billing Mode CALENDAR_MONTH / JOINING_DATE_CYCLE), keyed by branch
-  // (unitId). Each branch belongs to ONE hostel, so a page listing branches
-  // of several hostels can mix both billing modes — the config is always
-  // resolved per row's branch. Always read from the backend, never hard-coded.
-  const [dueConfigByBranch, setDueConfigByBranch] = useState<Map<string, RentDueConfig>>(new Map());
+  const [dueConfigByBranch, setDueConfigByBranch] =
+    useState<Map<string, RentDueConfig>>(() => new Map(dueConfigCache));
 
-  const [ebBillsMap, setEbBillsMap] = useState<Map<string, EBBillRow[]>>(new Map());
+  const [ebBillsMap, setEbBillsMap] = useState<Map<string, EBBillRow[]>>(
+    () => new Map(initialCache?.ebBills ?? [])
+  );
+  const ebBillsMapRef = useRef(ebBillsMap);
+  ebBillsMapRef.current = ebBillsMap;
 
-  // The full, unfiltered raw EB-readings list (same source
-  // EBReadingsPage.tsx reads from). Needed because getTenantWiseEBBill
-  // only reflects a room/flat's *current* MONTHLY occupants and never
-  // echoes back a checked-out DAILY tenant's informational settlement row.
-  const [allEBReadings, setAllEBReadings] = useState<EBReading[]>([]);
+  const [allEBReadings, setAllEBReadings] = useState<EBReading[]>(initialCache?.readings ?? []);
 
-  // Damage shares that exist but haven't been billed into a Rent record yet.
-  // Keyed by tenantId.
-  const [pendingDamageMap, setPendingDamageMap] = useState<Map<number, number>>(new Map());
+  const [pendingDamageMap, setPendingDamageMap] = useState<Map<number, number>>(
+    () =>
+      new Map(
+        Object.entries(initialCache?.pendingDamages ?? {}).map(([k, v]) => [Number(k), Number(v)])
+      )
+  );
 
   const [search, setSearch] = useState("");
+  // Typing in the search box never blocks the UI: heavy row building uses the deferred value.
+  const deferredSearch = useDeferredValue(search);
   const [month,  setMonth]  = useState(new Date().getMonth() + 1);
   const [year,   setYear]   = useState(new Date().getFullYear());
 
-  const fetchedEBKeys = useRef<Set<string>>(new Set());
+  // True while the Excel report is being built (disables the button).
+  const [exporting, setExporting] = useState(false);
+
+  // Cached keys are treated as already fetched until a full reload clears them.
+  const fetchedEBKeys = useRef<Set<string>>(new Set(initialCache ? initialCache.ebBills.keys() : []));
+  const ebRunIds      = useRef<Map<string, number>>(new Map());
   const loadingRef    = useRef(false);
+  const queuedRef     = useRef<"none" | "light" | "full">("none");
 
   /* ── helpers ── */
   const normalizeStatus = (status?: string) => (status || "").toUpperCase();
@@ -538,9 +554,6 @@ const RentPage = () => {
   const currentYear  = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
 
-  // Rent can only be viewed / generated up to the CURRENT month. Later months
-  // haven't started, yet the Approximate EB mode would still hand back a bill
-  // row for every tenant — which made e.g. November show up in October.
   const yearOptions = Array.from(
     { length: 6 },
     (_, index) => currentYear - 5 + index
@@ -549,14 +562,8 @@ const RentPage = () => {
   const isFuturePeriod =
     year > currentYear || (year === currentYear && month > currentMonth);
 
-  // FIX: true only when the selected period IS the current calendar month.
-  // The tenant's own "Pending (₹)" is a balance as of TODAY, so it is shown
-  // only on this period's rows (see tenantPendingMap below).
   const isCurrentPeriod = year === currentYear && month === currentMonth;
 
-  // Hard stop: if the selected period is ever in the future (stale state,
-  // a saved filter, anything), snap straight back to the current month so
-  // Nov / Dec etc. can never be displayed before they start.
   useEffect(() => {
     if (year > currentYear) {
       setYear(currentYear);
@@ -566,11 +573,60 @@ const RentPage = () => {
     }
   }, [month, year, currentMonth, currentYear]);
 
-  const ebBills: EBBillRow[] = useMemo(() => {
+  const ebKey = `${month}-${year}`;
+
+  // Previous / next month of the selected period (EB carry-over).
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear  = month === 1 ? year - 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear  = month === 12 ? year + 1 : year;
+  const prevKey   = `${prevMonth}-${prevYear}`;
+  const prevLabel = new Date(prevYear, prevMonth - 1, 1).toLocaleString("en-US", {
+    month: "short",
+    year: "numeric",
+  });
+
+  // Raw EB bills of the selected month exactly as the backend returned them.
+  const rawEbBills: EBBillRow[] = useMemo(() => {
     if (isFuturePeriod) return [];
-    const key = `${month}-${year}`;
-    return ebBillsMap.get(key) ?? [];
-  }, [ebBillsMap, month, year, isFuturePeriod]);
+    return ebBillsMap.get(ebKey) ?? [];
+  }, [ebBillsMap, ebKey, isFuturePeriod]);
+
+  // EB for the selected period (and the previous month, used for the
+  // carry-over) is still being fetched.
+  const ebLoading =
+    !isFuturePeriod &&
+    rooms.length > 0 &&
+    (!ebBillsMap.has(ebKey) || !ebBillsMap.has(prevKey));
+
+  /* ── O(1) lookup indexes (replace Array.find / filter inside row loops) ── */
+  const roomById = useMemo(() => {
+    const m = new Map<string, Room>();
+    rooms.forEach((r) => m.set(String(r.id), r));
+    return m;
+  }, [rooms]);
+
+  const roomByNumber = useMemo(() => {
+    const m = new Map<string, Room>();
+    rooms.forEach((r) => { if (!m.has(r.roomNumber)) m.set(r.roomNumber, r); });
+    return m;
+  }, [rooms]);
+
+  const getRoomObj  = (roomNumber: string) => roomByNumber.get(roomNumber);
+  const getRoomById = (roomId: string | number) => roomById.get(String(roomId));
+
+  const resolveRoom = (roomNumber: string, roomId?: string | number): Room | undefined =>
+    getRoomObj(roomNumber) ?? (roomId ? getRoomById(roomId) : undefined);
+
+  const rentsByTenant = useMemo(() => {
+    const m = new Map<number, Rent[]>();
+    rents.forEach((r) => {
+      const k = Number(r.tenantId);
+      const arr = m.get(k);
+      if (arr) arr.push(r); else m.set(k, [r]);
+    });
+    return m;
+  }, [rents]);
 
   const tenantNameMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -590,25 +646,156 @@ const RentPage = () => {
     return map;
   }, [tenants]);
 
-  // The tenant's own "Pending (₹)" figure as shown on the Tenants page
-  // (Tenant.pendingAmount), keyed by tenantId.
-  // FIX: that figure is a balance as of TODAY, so it is only put on the
-  // CURRENT month's rows. For past months this map is empty (every read uses
-  // `?? 0`), so the same balance is no longer repeated in every month's
-  // PENDING AMT / TOTAL / PENDING. Older unpaid rent still shows under
-  // PREVIOUS DUE. (splitCheckInPending reads the RAW pending off the tenant
-  // itself so a past check-in month never wrongly looks fully paid.)
+  // Tenants grouped by room / by flat, so occupant lookups are not O(n²).
+  const tenantsByRoomId = useMemo(() => {
+    const m = new Map<string, Tenant[]>();
+    tenants.forEach((t) => {
+      const k = String(t.roomId);
+      const arr = m.get(k);
+      if (arr) arr.push(t); else m.set(k, [t]);
+    });
+    return m;
+  }, [tenants]);
+
+  const tenantsByFlatId = useMemo(() => {
+    const m = new Map<string, Tenant[]>();
+    tenants.forEach((t) => {
+      const room = roomById.get(String(t.roomId));
+      if (room?.flatId == null) return;
+      const k = String(room.flatId);
+      const arr = m.get(k);
+      if (arr) arr.push(t); else m.set(k, [t]);
+    });
+    return m;
+  }, [tenants, roomById]);
+
+  const getOccupants = (room: Room | undefined, rawRoomId: any): Tenant[] => {
+    const flatId = room?.flatId ?? null;
+    return flatId != null
+      ? tenantsByFlatId.get(String(flatId)) ?? []
+      : tenantsByRoomId.get(String(rawRoomId)) ?? [];
+  };
+
+  /* ── EB BILLS USED BY THE PAGE (after carry-over) ──
+     • DEFER: an ACTIVE monthly tenant whose selected-month rent is not
+       generated AND whose next month already has an EB reading is hidden
+       here; his share moves into the next month (e.g. Balaji in October).
+     • CARRY: an ACTIVE monthly tenant whose previous-month rent was never
+       generated gets last month's EB added on top of this month's EB
+       (e.g. Balaji in November: ₹1,567 + ₹1,040 = ₹2,607).
+     Checked-out tenants are never moved (Mani stays in October). */
+  const ebBills: EBBillRow[] = useMemo(() => {
+    if (isFuturePeriod) return rawEbBills;
+
+    const prevBills = ebBillsMap.get(prevKey) ?? [];
+
+    const billedThis = new Set(
+      rents
+        .filter((x) => Number(x.rentMonth) === month && Number(x.rentYear) === year)
+        .map((x) => Number(x.tenantId))
+    );
+    const billedPrev = new Set(
+      rents
+        .filter((x) => Number(x.rentMonth) === prevMonth && Number(x.rentYear) === prevYear)
+        .map((x) => Number(x.tenantId))
+    );
+
+    // Does this tenant's flat / room have a reading saved for the NEXT month?
+    const nextMonthHasReading = (tenant: Tenant): boolean => {
+      const room = roomById.get(String(tenant.roomId));
+      return allEBReadings.some(
+        (x: any) =>
+          Number(x.month) === nextMonth &&
+          Number(x.year) === nextYear &&
+          x.isCheckout !== true &&
+          (room?.flatId != null
+            ? Number(x.flatId) === Number(room.flatId)
+            : Number(x.roomId) === Number(tenant.roomId))
+      );
+    };
+
+    const out: EBBillRow[] = [];
+    for (const b of rawEbBills) {
+      const bAny = b as any;
+      if (bAny.tenantId == null) {
+        out.push(b);
+        continue;
+      }
+
+      const tid = Number(bAny.tenantId);
+      const tenant = tenantMap.get(tid);
+      const movable =
+        !!tenant && tenant.status !== "Checked_Out" && tenant.tenantStay !== "DAILY";
+
+      if (movable && !billedThis.has(tid) && nextMonthHasReading(tenant!)) {
+        continue; // this month's share is billed in the next month
+      }
+
+      if (movable && !billedPrev.has(tid)) {
+        const pb = prevBills.find((p: any) => Number(p.tenantId) === tid) as any;
+        const amt = Number(pb?.amount ?? 0);
+        if (pb && amt > 0) {
+          out.push({
+            ...b,
+            amount: Number(bAny.amount ?? 0) + amt,
+            carriedAmount: amt,
+            carriedLabel: prevLabel,
+          } as any);
+          continue;
+        }
+      }
+
+      out.push(b);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    rawEbBills,
+    ebBillsMap,
+    prevKey,
+    rents,
+    month,
+    year,
+    prevMonth,
+    prevYear,
+    nextMonth,
+    nextYear,
+    prevLabel,
+    tenantMap,
+    roomById,
+    allEBReadings,
+    isFuturePeriod,
+  ]);
+
+  /* Tenant.pendingAmount (check-in pending / carried-over pending).
+     It stays on the tenant until the first rent is generated (the backend then
+     converts it into rent credit). So it must be shown:
+       • in the CURRENT period, and
+       • in any past period from the tenant's check-in month onward, as long as
+         the tenant has NO rent record yet for that period or any earlier one
+         (e.g. joined 16-Sep, nothing generated -> still visible in Oct).
+     Once a rent exists up to the viewed month, old months are left alone. */
   const tenantPendingMap = useMemo(() => {
     const map = new Map<number, number>();
-    if (!isCurrentPeriod) return map;
-    tenants.forEach((t) => map.set(Number(t.id), Number(t.pendingAmount ?? 0)));
+    const viewIdx = year * 12 + month;
+    tenants.forEach((t) => {
+      const raw = Number(t.pendingAmount ?? 0);
+      if (isCurrentPeriod) {
+        map.set(Number(t.id), raw);
+        return;
+      }
+      if (t.tenantStay === "DAILY" || !t.checkInDate) return;
+      const [cy, cm] = String(t.checkInDate).slice(0, 10).split("-").map(Number);
+      if (!cy || !cm) return;
+      if (cy * 12 + cm > viewIdx) return; // joined after the viewed month
+      const hasRentUpToView = (rentsByTenant.get(Number(t.id)) ?? []).some(
+        (r) => Number(r.rentYear) * 12 + Number(r.rentMonth) <= viewIdx
+      );
+      if (!hasRentUpToView) map.set(Number(t.id), raw);
+    });
     return map;
-  }, [tenants, isCurrentPeriod]);
+  }, [tenants, isCurrentPeriod, month, year, rentsByTenant]);
 
-  // Tenant-specific monthly rent keyed by tenantId. Different tenants in the
-  // *same* room can be on different negotiated rents, so this must never be
-  // replaced by the room's default rentPerBed unless the tenant simply
-  // doesn't have their own rent value set.
   const tenantRentMap = useMemo(() => {
     const map = new Map<number, number>();
     tenants.forEach((t) => {
@@ -622,11 +809,6 @@ const RentPage = () => {
   const resolveTenantName = (tenantId: number): string =>
     tenantNameMap.get(tenantId) ?? `Tenant ${tenantId}`;
 
-  // NEW: Joining-date-cycle preview for one tenant / period, or null when the
-  // tenant's hostel bills by CALENDAR_MONTH (or the tenant is DAILY / has no
-  // check-in date) — null means "use the existing calendar logic".
-  // The config is looked up by the ROOM'S BRANCH, so two hostels can use
-  // different modes on the same page.
   const getCyclePreview = (
     tenantId: number,
     room?: Room,
@@ -647,13 +829,6 @@ const RentPage = () => {
     });
   };
 
-  // Prefers the tenant's own `monthlyRent` and only falls back to the
-  // room's rentPerBed when the tenant has no rent set.
-  //  • CALENDAR_MONTH hostel: the check-in month's flat monthlyRent is
-  //    pro-rated by days (see lib/rentCalculation.ts); later months are full.
-  //  • JOINING_DATE_CYCLE hostel: every cycle is the full monthlyRent.
-  // The backend independently recomputes the same figure when a Rent record
-  // is generated.
   const resolveTenantRent = (tenantId: number, room?: Room, forMonth = month, forYear = year): number => {
     const cyc = getCyclePreview(tenantId, room, forMonth, forYear);
     if (cyc) return cyc.rentAmount;
@@ -665,8 +840,6 @@ const RentPage = () => {
     return computeRentBreakdown(flatRent, tenant.checkInDate, forMonth, forYear).rentAmount;
   };
 
-  // Full breakdown (days in month, occupied days, daily rent, etc.)
-  // for the "Rent" cell tooltip/expansion on the Rent page (calendar mode).
   const resolveTenantRentBreakdown = (
     tenantId: number,
     room?: Room,
@@ -679,15 +852,6 @@ const RentPage = () => {
     return computeRentBreakdown(flatRent, tenant?.checkInDate, forMonth, forYear);
   };
 
-  // Rent Due for one tenant's row.
-  //  • A generated Rent record is the source of truth: its stored dueAmount /
-  //    dueDays (kept current by the backend until the rent is paid).
-  //  • Otherwise it's a live preview from the active Business Model — the same
-  //    figure the backend stores when the record is generated.
-  //      - JOINING_DATE_CYCLE: due date = the cycle's start date.
-  //      - CALENDAR_MONTH:     due date from the configured due day.
-  // NO_DUE always gives ₹0, and so does a DAILY-stay tenant (rent is settled
-  // at check-in).
   const resolveTenantDue = (
     tenantId: number,
     room: Room | undefined,
@@ -718,13 +882,6 @@ const RentPage = () => {
     return computeRentDue(cfg, tenant.checkInDate, month, year);
   };
 
-  // A "DAILY" stay tenant pays their full stay's Rent *and* an EB
-  // advance up front at check-in (Tenant.totalAmount / Tenant.ebAmount).
-  // That advance rent must never be re-billed on the Rent page. The only
-  // thing that still needs settling is the gap between the EB they
-  // advanced and what they actually used:
-  //   advanceRent = totalAmount - ebAmount   (falls back to amountPerDay*noOfDays)
-  //   ebBalance   = advanceEB - actualEB     ( >0 refund owed, <0 tenant owes more)
   const isDailyTenant = (tenant?: Tenant): boolean => tenant?.tenantStay === "DAILY";
 
   const computeDailyAdvance = (tenant: Tenant) => {
@@ -736,26 +893,9 @@ const RentPage = () => {
     return { advanceRent, advanceEB };
   };
 
-  // FIX (double-counted first-month rent):
-  // Tenant.pendingAmount at check-in = unpaid part of
-  // (advance + registration + first month's rent). That bill ALREADY contains
-  // this month's rent, so adding it on top of the RENT column counted the rent
-  // twice (e.g. 8,000 + 250 EB + 5,000 pending = 13,250 instead of 5,250 due).
-  //
-  // For a MONTHLY tenant in their CHECK-IN month (before a Rent record exists):
-  //   rentCredit   = part of this month's rent already paid at check-in
-  //   extraPending = leftover pending that is NOT rent (still shown in PENDING AMT)
-  // Any other tenant / month returns the pending shown for the period untouched.
-  // Assumes the check-in payment covers registration + advance first, and only
-  // the remainder goes to rent. Change the two Math.max lines if yours differs.
-  //
-  // FIX: the rent credit is always computed from the tenant's RAW pending (so a
-  // past check-in month never wrongly looks fully paid), while the extra
-  // pending that is DISPLAYED / ADDED to totals only appears on the current
-  // period (it is a balance as of today).
   const splitCheckInPending = (tenantId: number, rent: number) => {
     const tenant = tenantMap.get(tenantId);
-    const shown  = tenantPendingMap.get(tenantId) ?? 0; // 0 on past months
+    const shown  = tenantPendingMap.get(tenantId) ?? 0;
     if (!tenant || isDailyTenant(tenant) || !isCheckInMonth(tenant.checkInDate, month, year)) {
       return { extraPending: shown, rentCredit: 0 };
     }
@@ -766,8 +906,6 @@ const RentPage = () => {
     };
   };
 
-  // Mirrors EBReadingsPage.tsx's tenantLastBilledReadingAll — the
-  // highest currentReading ever saved for each tenant specifically.
   const tenantLastBilledReadingAll = useMemo(() => {
     const map = new Map<number, number>();
     allEBReadings.forEach((r: any) => {
@@ -780,11 +918,6 @@ const RentPage = () => {
     return map;
   }, [allEBReadings]);
 
-  // Recomputes a checked-out DAILY tenant's true proportional share
-  // of a shared meter window (previousReading -> currentReading) — the
-  // SAME segment math EBReadingsPage.tsx / CheckoutPage.tsx use. Only a
-  // fallback for when the backend hasn't persisted the derived
-  // unitsConsumed/ebAmount on the informational reading row itself.
   const calculateInformationalShare = useCallback(
     (
       targetTenantId: number,
@@ -861,12 +994,6 @@ const RentPage = () => {
     [tenantLastBilledReadingAll]
   );
 
-  // Same-period informational (checkout) EB readings, keyed by
-  // tenantId, one per tenant — the latest if there's more than one. A
-  // tenant who transferred rooms mid-period leaves this behind in their
-  // *old* room; the fix folds it straight into the tenant's normal row for
-  // their *current* room (see rowData below) — hoisted to component scope
-  // so handleGenerateAll can bill the same combined figure it displays.
   const informationalByTenant = useMemo(() => {
     const map = new Map<number, any>();
     allEBReadings.forEach((r: any) => {
@@ -881,12 +1008,6 @@ const RentPage = () => {
     return map;
   }, [allEBReadings, month, year]);
 
-  // Resolves the ₹ amount for one informational reading — prefers
-  // whatever the backend already persisted on the row, falling back to
-  // the same proportional-segment math only when neither is present.
-  // NOTE: the fallback uses a default rate (13) when the row has no ebRate,
-  // so it can disagree with the real bill. Never use it for a tenant whose
-  // backend EB bill already exists (see resolveTenantEB).
   const resolveInformationalAmount = useCallback(
     (tenantId: number, r: any): number => {
       const storedUnits  = Number(r.unitsConsumed ?? 0);
@@ -896,35 +1017,15 @@ const RentPage = () => {
       const prevReading = Number(r.previousReading ?? 0);
       const currReading = Number(r.currentReading ?? 0);
       const rate = Number(r.ebRate ?? 0) || 13;
-      const room = r.roomId != null ? getRoomById(r.roomId) : undefined;
-      const flatId = room?.flatId ?? null;
-      const occupants = flatId != null
-        ? tenants.filter((t) => {
-            const tRoom = rooms.find((rm) => rm.id === t.roomId);
-            return tRoom?.flatId != null && String(tRoom.flatId) === String(flatId);
-          })
-        : tenants.filter((t) => String(t.roomId) === String(r.roomId));
+      const room = r.roomId != null ? roomById.get(String(r.roomId)) : undefined;
+      const occupants = getOccupants(room, r.roomId);
 
       return calculateInformationalShare(tenantId, prevReading, currReading, rate, occupants).amount;
     },
-    [tenants, rooms, calculateInformationalShare]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roomById, tenantsByRoomId, tenantsByFlatId, calculateInformationalShare]
   );
 
-  // FIX: single place that decides a MONTHLY tenant's EB for the period.
-  //
-  // ROOT CAUSE of "EB Readings page = 520, Rent page = 884 / 1,404":
-  //   • The backend EB bill (getTenantWiseEBBill) for a checked-out tenant is
-  //     already correct (520) and matches the EB Readings page.
-  //   • The checkout reading row has no stored ebAmount / ebRate, so the page
-  //     recomputed it client-side with the default rate 13 -> 884, and then
-  //     either ADDED it (520 + 884 = 1,404) or REPLACED the bill with it (884).
-  //
-  // Rules now:
-  //   • Checked-out tenant, or a reading from the SAME room as the current
-  //     row -> the backend bill already covers that meter window. Use it
-  //     as-is; ignore the checkout reading.
-  //   • Tenant who transferred to a DIFFERENT room mid-period -> the old
-  //     room's checkout share is genuinely extra, so add it.
   const resolveTenantEB = (
     tenant: Tenant | undefined,
     room: Room | undefined,
@@ -944,25 +1045,50 @@ const RentPage = () => {
       return { eb: liveEB, usedInfo: false };
     }
 
-    // Genuine room transfer: add the old room's settlement.
     return {
       eb: liveEB + resolveInformationalAmount(tenantId, infoReading),
       usedInfo: true,
     };
   };
 
-  const reload = async () => {
-    if (loadingRef.current) return;
+  /* ── DATA LOADING ──
+     full  : rooms + rents + tenants + damages + EB readings (first load / manual refresh)
+     light : rents + tenants + damages only (after Generate / Payment) */
+  const reload = async (mode: "full" | "light" = "full") => {
+    if (loadingRef.current) {
+      // Never drop a refresh requested while another one is running.
+      if (queuedRef.current !== "full") queuedRef.current = mode;
+      return;
+    }
     loadingRef.current = true;
     try {
+      if (mode === "light") {
+        const [rentList, tenantList, pendingDamages] = await Promise.all([
+          fetchAllPages<Rent>(getRents, BIG_PAGE),
+          fetchAllPages<Tenant>(getTenants, BIG_PAGE),
+          getPendingDamageSummary().catch(() => ({} as Record<number, number>)),
+        ]);
+        setRents(rentList);
+        setTenants(tenantList);
+        setPendingDamageMap(
+          new Map(Object.entries(pendingDamages).map(([k, v]) => [Number(k), Number(v)]))
+        );
+        const cache = getValidCache();
+        if (cache) {
+          cache.rents = rentList;
+          cache.tenants = tenantList;
+          cache.pendingDamages = pendingDamages;
+          cache.ts = Date.now();
+        }
+        return;
+      }
+
       const [roomList, rentList, tenantList, pendingDamages, rawReadings] = await Promise.all([
-        fetchAllPages<Room>(getRooms),
-        fetchAllPages<Rent>(getRents),
-        fetchAllPages<Tenant>(getTenants),
+        fetchAllPages<Room>(getRooms, BIG_PAGE),
+        fetchAllPages<Rent>(getRents, BIG_PAGE),
+        fetchAllPages<Tenant>(getTenants, BIG_PAGE),
         getPendingDamageSummary().catch(() => ({} as Record<number, number>)),
-        // Raw EB readings, unfiltered — the only place a checked-out DAILY
-        // tenant's informational settlement row lives.
-        fetchAllPages<EBReading>(getEBReadings).catch(() => [] as EBReading[]),
+        fetchAllPages<EBReading>(getEBReadings, BIG_PAGE).catch(() => [] as EBReading[]),
       ]);
 
       const filteredRooms =
@@ -978,26 +1104,44 @@ const RentPage = () => {
       );
       setAllEBReadings(rawReadings);
 
-      // Any cached EB results keyed off the old room/tenant snapshot must be
-      // dropped and re-fetched.
+      // Stale-while-revalidate: keep the EB rows already on screen and only
+      // mark the keys as "needs refetch". They are swapped in when fresh.
       fetchedEBKeys.current = new Set();
-      setEbBillsMap(new Map());
+
+      const key = currentCacheKey();
+      pageCache = {
+        key,
+        ts: Date.now(),
+        rooms: filteredRooms,
+        rents: rentList,
+        tenants: tenantList,
+        pendingDamages,
+        readings: rawReadings,
+        ebBills: pageCache?.key === key ? pageCache.ebBills : new Map(),
+      };
     } catch {
       toast.error("Failed to load data");
     } finally {
       loadingRef.current = false;
+      setLoaded(true);
+      const queued = queuedRef.current;
+      if (queued !== "none") {
+        queuedRef.current = "none";
+        reload(queued);
+      }
     }
   };
 
   useEffect(() => {
-    reload();
+    // Fresh cache (just navigated away and back) → nothing to refetch.
+    const cache = getValidCache();
+    if (cache && Date.now() - cache.ts < CACHE_FRESH_MS) return;
+    reload("full");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load the Business Model (Rent Due + Rent Billing Mode) for every branch
-  // these rooms belong to. A failed lookup falls back to NO_DUE + calendar
-  // billing, i.e. nothing extra is ever charged and billing is unchanged.
-  // NOTE: getRentDueConfig must return the raw backend object so that
-  // `rentBillingMode` is preserved (see RentDueConfigDTO).
+  // Business Model (Rent Due + Billing Mode) per branch. Cached values are used
+  // immediately, then refreshed in the background.
   useEffect(() => {
     if (rooms.length === 0) return;
     let cancelled = false;
@@ -1007,10 +1151,11 @@ const RentPage = () => {
         try {
           return [id, (await getRentDueConfig(id)) ?? NO_DUE_CONFIG];
         } catch {
-          return [id, NO_DUE_CONFIG];
+          return [id, dueConfigCache.get(id) ?? NO_DUE_CONFIG];
         }
       })
     ).then((entries) => {
+      entries.forEach(([id, cfg]) => dueConfigCache.set(id, cfg));
       if (!cancelled) setDueConfigByBranch(new Map(entries));
     });
     return () => {
@@ -1018,172 +1163,195 @@ const RentPage = () => {
     };
   }, [rooms]);
 
+  // EB bills for the selected month AND the previous month (the previous
+  // month is needed to carry an unbilled share into the selected month).
   useEffect(() => {
     if (rooms.length === 0) return;
-
     if (isFuturePeriod) return;
 
-    const key = `${month}-${year}`;
-    if (fetchedEBKeys.current.has(key)) return;
-    fetchedEBKeys.current.add(key);
+    const ensureEB = (month: number, year: number) => {
+      const key = `${month}-${year}`;
+      if (fetchedEBKeys.current.has(key)) return;
+      fetchedEBKeys.current.add(key);
 
-    const loadEBForMonth = async () => {
-      try {
-        const flatIds = [
-          ...new Set(
-            rooms.map((r) => r.flatId).filter((id): id is number => !!id)
-          ),
-        ];
-        const standaloneRooms = rooms.filter((r) => !r.flatId);
+      const myRun = (ebRunIds.current.get(key) ?? 0) + 1;
+      ebRunIds.current.set(key, myRun);
+      const stillCurrent = () => ebRunIds.current.get(key) === myRun;
 
-        const tenantRoomLookup = new Map<number, Room>();
-        tenants.forEach((t) => {
-          const room = rooms.find((r) => String(r.id) === String(t.roomId));
-          if (room) tenantRoomLookup.set(Number(t.id), room);
-        });
+      // Only rooms that have (or had) a tenant who was already checked in by
+      // the end of this month need an EB request. Empty rooms are skipped.
+      const activeRoomIds = new Set<string>();
+      tenants.forEach((t) => {
+        if (t.roomId == null) return;
+        if (checkedInAfterMonth(t.checkInDate, month, year)) return;
+        activeRoomIds.add(String(t.roomId));
+      });
 
-        const getTenantWiseEBBillWithMonthYear = (params: any) =>
-          getTenantWiseEBBill(params);
+      const flatIds = [
+        ...new Set(
+          rooms
+            .filter((r) => r.flatId && activeRoomIds.has(String(r.id)))
+            .map((r) => r.flatId as number)
+        ),
+      ];
+      const standaloneRooms = rooms.filter(
+        (r) => !r.flatId && activeRoomIds.has(String(r.id))
+      );
 
-        const flatBillResults = await Promise.all(
-          flatIds.map(async (flatId) => {
-            try {
-              // IMPORTANT: month & year must be passed through so the
-              // backend can filter EB readings for the selected period.
-              const bills = await getTenantWiseEBBillWithMonthYear({
-                flatId,
-                roomId: null,
-                month,
-                year,
-              });
-              if (!bills || bills.length === 0) return [] as EBBillRow[];
+      const tenantRoomLookup = new Map<number, Room>();
+      tenants.forEach((t) => {
+        const room = roomById.get(String(t.roomId));
+        if (room) tenantRoomLookup.set(Number(t.id), room);
+      });
 
-              return bills
-                .filter((b: any) => {
-                  if (b.tenantId != null) {
-                    const room = tenantRoomLookup.get(Number(b.tenantId));
-                    if (room) return String(room.flatId) === String(flatId);
-                  }
-                  const echoedRoomNumber = extractRoomNumber(b);
-                  if (echoedRoomNumber) {
-                    const room = rooms.find((r) => r.roomNumber === echoedRoomNumber);
-                    if (room) return String(room.flatId) === String(flatId);
-                  }
-                  return false;
-                })
-                .map((b): EBBillRow => {
-                  const bAny = b as any;
+      const roomByNumberLocal = roomByNumber;
 
-                  let roomNumber = extractRoomNumber(bAny);
-                  let flatNumber = extractFlatNumber(bAny);
+      const flatJob = (flatId: number) => async (): Promise<EBBillRow[]> => {
+        try {
+          const bills = await getTenantWiseEBBill({ flatId, roomId: null, month, year });
+          if (!bills || bills.length === 0) return [];
 
-                  if (!roomNumber && bAny.tenantId) {
-                    const room = tenantRoomLookup.get(Number(bAny.tenantId));
-                    if (room) roomNumber = room.roomNumber;
-                  }
+          return bills
+            .filter((b: any) => {
+              if (b.tenantId != null) {
+                const room = tenantRoomLookup.get(Number(b.tenantId));
+                if (room) return String(room.flatId) === String(flatId);
+              }
+              const echoedRoomNumber = extractRoomNumber(b);
+              if (echoedRoomNumber) {
+                const room = roomByNumberLocal.get(echoedRoomNumber);
+                if (room) return String(room.flatId) === String(flatId);
+              }
+              return false;
+            })
+            .map((b): EBBillRow => {
+              const bAny = b as any;
+              let roomNumber = extractRoomNumber(bAny);
+              let flatNumber = extractFlatNumber(bAny);
 
-                  if (!flatNumber) {
-                    flatNumber = String(flatId);
-                  }
+              if (!roomNumber && bAny.tenantId) {
+                const room = tenantRoomLookup.get(Number(bAny.tenantId));
+                if (room) roomNumber = room.roomNumber;
+              }
+              if (!flatNumber) flatNumber = String(flatId);
 
-                  return {
-                    ...b,
-                    roomNumber,
-                    flatNumber,
-                    month,
-                    year,
-                  };
-                });
-            } catch {
-              return [] as EBBillRow[];
+              return { ...b, roomNumber, flatNumber, month, year };
+            });
+        } catch {
+          return [];
+        }
+      };
+
+      const roomJob = (room: Room) => async (): Promise<EBBillRow[]> => {
+        try {
+          const bills = await getTenantWiseEBBill({ roomId: room.id, flatId: null, month, year });
+          if (!bills || bills.length === 0) return [];
+
+          const roomTenantIds = new Set(
+            (tenantsByRoomId.get(String(room.id)) ?? []).map((t) => Number(t.id))
+          );
+
+          return bills
+            .filter((b: any) => {
+              if (b.tenantId != null) return roomTenantIds.has(Number(b.tenantId));
+              const echoedRoomNumber = extractRoomNumber(b);
+              if (echoedRoomNumber) return echoedRoomNumber === room.roomNumber;
+              return false;
+            })
+            .map((b): EBBillRow => {
+              const bAny = b as any;
+              const flatNumber =
+                extractFlatNumber(bAny) ||
+                (room as any).flatNumber ||
+                (room as any).flatName ||
+                "";
+              return { ...b, roomNumber: room.roomNumber, flatNumber, month, year };
+            });
+        } catch {
+          return [];
+        }
+      };
+
+      const jobs: (() => Promise<EBBillRow[]>)[] = [
+        ...flatIds.map(flatJob),
+        ...standaloneRooms.map(roomJob),
+      ];
+
+      // Merge job results in job order and drop duplicate tenants.
+      const merge = (results: (EBBillRow[] | undefined)[]): EBBillRow[] => {
+        const seen = new Set<number>();
+        const out: EBBillRow[] = [];
+        for (const list of results) {
+          if (!list) continue;
+          for (const b of list as any[]) {
+            if (b.tenantId != null) {
+              const tid = Number(b.tenantId);
+              if (seen.has(tid)) continue;
+              seen.add(tid);
             }
-          })
-        );
+            out.push(b);
+          }
+        }
+        return out;
+      };
 
-        const roomBillResults = await Promise.all(
-          standaloneRooms.map(async (room) => {
-            try {
-              const bills = await getTenantWiseEBBillWithMonthYear({
-                roomId: room.id,
-                flatId: null,
-                month,
-                year,
-              });
-              if (!bills || bills.length === 0) return [] as EBBillRow[];
-
-              const roomTenantIds = new Set(
-                tenants
-                  .filter((t) => String(t.roomId) === String(room.id))
-                  .map((t) => Number(t.id))
-              );
-
-              return bills
-                .filter((b: any) => {
-                  if (b.tenantId != null) return roomTenantIds.has(Number(b.tenantId));
-                  const echoedRoomNumber = extractRoomNumber(b);
-                  if (echoedRoomNumber) return echoedRoomNumber === room.roomNumber;
-                  return false;
-                })
-                .map((b): EBBillRow => {
-                  const bAny = b as any;
-
-                  const roomNumber = room.roomNumber;
-                  const flatNumber =
-                    extractFlatNumber(bAny) ||
-                    (room as any).flatNumber ||
-                    (room as any).flatName ||
-                    "";
-
-                  return {
-                    ...b,
-                    roomNumber,
-                    flatNumber,
-                    month,
-                    year,
-                  };
-                });
-            } catch {
-              return [] as EBBillRow[];
-            }
-          })
-        );
-
-        const rawBills = [...flatBillResults.flat(), ...roomBillResults.flat()];
-        const seenTenants = new Set<number>();
-        const bills = rawBills.filter((b: any) => {
-          if (b.tenantId == null) return true;
-          const tid = Number(b.tenantId);
-          if (seenTenants.has(tid)) return false;
-          seenTenants.add(tid);
-          return true;
-        });
-
+      const publish = (bills: EBBillRow[]) => {
         setEbBillsMap((prev) => {
           const next = new Map(prev);
           next.set(key, bills);
           return next;
         });
-      } catch {
+      };
+
+      // If this month is already on screen (cached), only swap at the very end
+      // to avoid flicker. First-time loads show rows progressively.
+      const hadExisting = ebBillsMapRef.current.has(key);
+
+      const run = async () => {
+        if (jobs.length === 0) {
+          if (stillCurrent()) publish([]);
+          return;
+        }
+
+        const results: (EBBillRow[] | undefined)[] = new Array(jobs.length);
+        let next = 0;
+        let sinceFlush = 0;
+
+        const worker = async () => {
+          while (true) {
+            const i = next++;
+            if (i >= jobs.length) return;
+            results[i] = await jobs[i]();
+            sinceFlush++;
+            if (!hadExisting && sinceFlush >= EB_CONCURRENCY && stillCurrent()) {
+              sinceFlush = 0;
+              publish(merge(results));
+            }
+          }
+        };
+
+        await Promise.all(
+          Array.from({ length: Math.min(EB_CONCURRENCY, jobs.length) }, worker)
+        );
+
+        if (!stillCurrent()) return;
+        const finalBills = merge(results);
+        publish(finalBills);
+
+        const cache = getValidCache();
+        if (cache) cache.ebBills = new Map(cache.ebBills).set(key, finalBills);
+      };
+
+      run().catch(() => {
         toast.error("Failed to load EB data");
-        setEbBillsMap((prev) => {
-          const next = new Map(prev);
-          next.set(key, []);
-          return next;
-        });
-      }
+        if (stillCurrent()) publish([]);
+      });
     };
 
-    loadEBForMonth();
+    ensureEB(month, year);
+    ensureEB(prevMonth, prevYear);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rooms, tenants, month, year, isFuturePeriod]);
-
-  const getRoomObj = (roomNumber: string) =>
-    rooms.find((r) => r.roomNumber === roomNumber);
-
-  const getRoomById = (roomId: string | number) =>
-    rooms.find((r) => String(r.id) === String(roomId));
-
-  const resolveRoom = (roomNumber: string, roomId?: string | number): Room | undefined =>
-    getRoomObj(roomNumber) ?? (roomId ? getRoomById(roomId) : undefined);
 
   const getRentStatus = (
     tenantId: number,
@@ -1192,12 +1360,12 @@ const RentPage = () => {
   ): Rent | undefined => {
     const room = resolveRoom(roomNumber, roomId);
     if (!room) return undefined;
-    const matches = rents.filter(
+    const roomKey = String(room.id);
+    const matches = (rentsByTenant.get(tenantId) ?? []).filter(
       (r) =>
-        Number(r.tenantId) === tenantId &&
         Number(r.rentMonth) === month &&
         Number(r.rentYear) === year &&
-        String(r.roomId) === String(room.id)
+        String(r.roomId) === roomKey
     );
     if (matches.length === 0) return undefined;
     const paid = matches.find(
@@ -1218,15 +1386,13 @@ const RentPage = () => {
   const computePreviousPending = (
     tenantId: number,
     beforeMonth: number,
-    beforeYear: number,
-    allRents: Rent[]
+    beforeYear: number
   ): { previousPending: number; prevUnpaidRents: Rent[] } => {
-    const prevRents = allRents.filter(
+    const prevRents = (rentsByTenant.get(tenantId) ?? []).filter(
       (r) =>
-        Number(r.tenantId) === tenantId &&
-        (Number(r.rentYear) < beforeYear ||
-          (Number(r.rentYear) === beforeYear &&
-            Number(r.rentMonth) < beforeMonth))
+        Number(r.rentYear) < beforeYear ||
+        (Number(r.rentYear) === beforeYear &&
+          Number(r.rentMonth) < beforeMonth)
     );
 
     const byKey = new Map<string, Rent>();
@@ -1263,8 +1429,6 @@ const RentPage = () => {
     return { previousPending, prevUnpaidRents };
   };
 
-  // NEW: "Sep 2026" / "Aug 2026, Sep 2026" — the months a previous balance
-  // is made of, oldest first. Shown under the PREVIOUS DUE amount.
   const previousMonthsLabel = (rs: Rent[]): string =>
     [...rs]
       .sort(
@@ -1276,6 +1440,7 @@ const RentPage = () => {
       .join(", ");
 
   const filteredBills = useMemo(() => {
+    const q = deferredSearch.toLowerCase();
     return ebBills.filter((bill) => {
       if (role !== "ADMIN" && branchId) {
         const room =
@@ -1283,7 +1448,7 @@ const RentPage = () => {
           (() => {
             const bAny = bill as any;
             if (!bAny.tenantId) return undefined;
-            const tenant = tenants.find((t) => Number(t.id) === Number(bAny.tenantId));
+            const tenant = tenantMap.get(Number(bAny.tenantId));
             return tenant ? getRoomById(tenant.roomId) : undefined;
           })();
         if (!room || String(room.unitId) !== String(branchId)) return false;
@@ -1291,34 +1456,26 @@ const RentPage = () => {
       const bAny = bill as any;
       return `${bAny.tenantName ?? ""} ${bill.roomNumber} ${bill.flatNumber}`
         .toLowerCase()
-        .includes(search.toLowerCase());
+        .includes(q);
     });
-  }, [ebBills, role, branchId, rooms, tenants, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ebBills, role, branchId, roomByNumber, roomById, tenantMap, deferredSearch]);
 
   const rowData = useMemo((): RentRow[] => {
-    // A month that hasn't started has nothing to bill or collect — no rows of
-    // any kind (EB rows, rent records, checkout rows or damage-only rows).
     if (isFuturePeriod) return [];
 
-    // Tenant IDs whose checkout settlement (informationalByTenant, above)
-    // got folded straight into their current-room row while building
-    // ebRows below. Tracked so the informationalRows branch further down
-    // doesn't also render them a second time as their own row.
+    const q = deferredSearch.toLowerCase();
     const mergedInformationalTenantIds = new Set<number>();
 
     const ebRows: RentRow[] = filteredBills
       .map((bill): RentRow | null => {
       const b = bill as any;
 
-      // A bill with no tenantId means the backend found no *current*
-      // occupant for this room/flat. It stamps a placeholder name
-      // ("Unassigned"), which used to render as a ghost row. The real
-      // identity lives in the informationalRows branch below.
       if (b.tenantId == null) return null;
 
       let room = resolveRoom(bill.roomNumber);
       if (!room && b.tenantId) {
-        const tenant = tenants.find((t) => Number(t.id) === Number(b.tenantId));
+        const tenant = tenantMap.get(Number(b.tenantId));
         if (tenant) room = getRoomById(tenant.roomId);
       }
 
@@ -1329,27 +1486,17 @@ const RentPage = () => {
         room?.id
       );
 
-      // A tenant who checks in AFTER the selected month wasn't living
-      // here yet, so no rent/EB row is shown for that month — unless a Rent
-      // record was already generated for it (that record stays the source
-      // of truth).
       if (!rentRecord && checkedInAfterMonth(tenant?.checkInDate, month, year)) {
         return null;
       }
 
       const liveEB = b.amount ?? 0;
 
-      // Daily-stay tenants who haven't had a Rent record generated for this
-      // period yet are handled on a separate branch — their "rent" is the
-      // advance already collected at check-in, and only the EB shortfall
-      // (if any) plus any pending damage is outstanding.
       if (tenant && isDailyTenant(tenant) && !rentRecord) {
         const { advanceRent, advanceEB } = computeDailyAdvance(tenant);
         const ebBalance = advanceEB - liveEB;
         const additionalEBDue = ebBalance < 0 ? -ebBalance : 0;
         const displayDamage = pendingDamageMap.get(Number(b.tenantId)) ?? 0;
-        // The RENT column shows the full amount the tenant actually paid
-        // at check-in (rent + EB advance together).
         const totalPaidAtCheckIn = tenant.totalAmount ?? advanceRent + advanceEB;
 
         const flatNumber =
@@ -1387,9 +1534,6 @@ const RentPage = () => {
         };
       }
 
-      // Uses the tenant's own monthlyRent (falls back to the room's default
-      // only if unset). Calendar hostels pro-rate the check-in month;
-      // joining-date-cycle hostels bill the full cycle rent.
       const rentPerBed = resolveTenantRent(Number(b.tenantId), room);
 
       const recordTotal  = rentRecord ? Number(rentRecord.totalAmount  || 0) : 0;
@@ -1399,18 +1543,8 @@ const RentPage = () => {
 
       const isPaid = normalizeStatus(rentRecord?.paymentStatus) === "PAID";
 
-      // Once a Rent row is generated, rentRecord.ebAmount is frozen at the
-      // EB reading of that moment. For any rent that hasn't been fully paid
-      // yet, prefer the *current* EB reading (bill.amount) over the frozen
-      // recordEB and recompute total/pending off that live number. A PAID
-      // rent still shows exactly what was actually billed and collected.
-
       let displayEB = rentRecord ? (isPaid ? recordEB : liveEB) : liveEB;
 
-      // FIX: a same-period checkout settlement is only added for a genuine
-      // room transfer. For a checked-out / same-room tenant the backend bill
-      // is already correct and is used as-is (see resolveTenantEB).
-      // Skip once PAID: that figure is already final and collected.
       const infoReading = informationalByTenant.get(Number(b.tenantId));
       if (infoReading && !isPaid) {
         const resolved = resolveTenantEB(tenant, room, displayEB, infoReading, Number(b.tenantId));
@@ -1419,29 +1553,18 @@ const RentPage = () => {
       }
 
       const displayRent   = rentRecord ? recordRent   : rentPerBed;
-      // Rent Due Model: due amount for overdue days (₹0 under NO_DUE).
       const due = resolveTenantDue(Number(b.tenantId), room, rentRecord);
-      // Once a Rent row exists, its damageAmount is the source of truth.
-      // Until then, fall back to unbilled DamageTenant shares for this tenant.
       const displayDamage = rentRecord
         ? recordDamage
         : (pendingDamageMap.get(Number(b.tenantId)) ?? 0);
 
-      // FIX: check-in month (no Rent record yet) — split the tenant's check-in
-      // pending so this month's rent is not counted twice.
-      //   rentCredit   -> already paid toward this month's rent
-      //   extraPending -> pending that is NOT rent (shown in PENDING AMT)
-      // Once a Rent record exists the backend owns the numbers, so the raw
-      // tenant pending is used exactly as before.
-      // (rawTenantPending is 0 on past months — see tenantPendingMap.)
       const rawTenantPending = tenantPendingMap.get(Number(b.tenantId)) ?? 0;
-      // CHANGE: current check-in month, no Rent record yet -> show the tenant's
-      // FULL pending (e.g. 10,500) in PENDING AMT. TOTAL stays rent + EB (+damage/due)
-      // and PENDING = full pending + EB (+damage/due), because the rent is already
-      // inside that pending balance.
+
+      // Not generated yet + this is the tenant's own check-in month (current OR
+      // past period): the tenant's check-in pending must be SHOWN in PENDING AMT
+      // and ADDED to TOTAL.
       const showFullCheckInPending =
         !rentRecord &&
-        isCurrentPeriod &&
         !!tenant &&
         !isDailyTenant(tenant) &&
         isCheckInMonth(tenant.checkInDate, month, year);
@@ -1449,42 +1572,31 @@ const RentPage = () => {
       const { extraPending, rentCredit } = rentRecord
         ? { extraPending: rawTenantPending, rentCredit: 0 }
         : showFullCheckInPending
-        ? { extraPending: rawTenantPending, rentCredit: Math.max(0, displayRent - rawTenantPending) }
+        ? { extraPending: rawTenantPending, rentCredit: 0 }
         : splitCheckInPending(Number(b.tenantId), displayRent);
       const tenantPendingAmt = extraPending;
-      // The slice of the tenant's pending that was folded into this month's
-      // rent. Not needed when the full pending is shown above.
       const checkInRentPending =
         rentRecord || showFullCheckInPending ? 0 : Math.max(0, rawTenantPending - extraPending);
 
-      // TOTAL = rent + EB + damage + due + (non-rent) tenant Pending Amount.
+      // Tenant pending is now always added on top of this period's charges.
       const displayTotal  = (rentRecord
         ? (isPaid ? recordTotal : displayRent + displayEB + displayDamage + due.dueAmount)
         : rentPerBed + displayEB + displayDamage + due.dueAmount) +
-        (showFullCheckInPending ? 0 : tenantPendingAmt);
+        tenantPendingAmt;
 
-      // No Rent record yet: the rent already paid at check-in counts as paid.
       const currentPaid   = rentRecord ? Number(rentRecord.paidAmount || 0) : rentCredit;
       const currentStatus = normalizeStatus(rentRecord?.paymentStatus);
 
-      // PENDING = TOTAL - paid. A fully paid Rent record still leaves the
-      // tenant's Pending Amount outstanding (it isn't stored on the record).
       const currentPending = rentRecord
         ? currentStatus === "PAID"
           ? tenantPendingAmt
           : currentStatus === "PARTIAL"
           ? displayTotal - currentPaid
           : displayTotal
-        : showFullCheckInPending
-        ? displayEB + displayDamage + due.dueAmount + tenantPendingAmt
         : Math.max(0, displayTotal - rentCredit);
 
-      // FIX: earlier months' unpaid balance is carried whether or not THIS
-      // month's Rent record has been generated yet. Before, an ungenerated
-      // month forced previousPending to 0, so e.g. Sep's unpaid ₹2,000 was
-      // missing from Oct's row until Oct was generated.
       const { previousPending, prevUnpaidRents } =
-        computePreviousPending(Number(b.tenantId), month, year, rents);
+        computePreviousPending(Number(b.tenantId), month, year);
 
       const flatNumber =
         bill.flatNumber ||
@@ -1496,10 +1608,10 @@ const RentPage = () => {
           return flatBill?.flatNumber ?? String(room.flatId);
         })();
 
-      // NEW: joining-date-cycle hostels can't bill a cycle that hasn't started.
-      const cyclePreview = !rentRecord ? getCyclePreview(Number(b.tenantId), room) : null;
-      const generateBlockedReason =
-        cyclePreview && !cyclePreview.billable ? cyclePreview.reason : undefined;
+      const ebCarryNote =
+        !rentRecord && Number(b.carriedAmount ?? 0) > 0
+          ? `incl. ${b.carriedLabel}: ₹${new Intl.NumberFormat("en-IN").format(Math.round(Number(b.carriedAmount)))}`
+          : undefined;
 
       return {
         tenantId:      b.tenantId,
@@ -1509,6 +1621,7 @@ const RentPage = () => {
         flatNumber,
         rentPerBed:    displayRent,
         displayEB,
+        ebCarryNote,
         damageAmount:  displayDamage,
         dueAmount:     due.dueAmount,
         dueDays:       due.dueDays,
@@ -1518,16 +1631,13 @@ const RentPage = () => {
         previousPending,
         previousLabel: previousMonthsLabel(prevUnpaidRents),
         currentPending,
-        // PENDING = this month's outstanding + earlier months' unpaid balance.
         pending:       previousPending + currentPending,
         tenantPending: tenantPendingAmt,
         checkInRentPending,
         rentRecord,
         unitId:        room?.unitId,
-        // The resolved displayEB so "Generate" bills the same figure shown.
         amount:        displayEB,
         paymentStatus: rentRecord?.paymentStatus,
-        generateBlockedReason,
       };
       })
       .filter((r): r is RentRow => r !== null);
@@ -1537,7 +1647,7 @@ const RentPage = () => {
         const bAny = b as any;
         let room = resolveRoom(b.roomNumber);
         if (!room && bAny.tenantId) {
-          const tenant = tenants.find((t) => Number(t.id) === Number(bAny.tenantId));
+          const tenant = tenantMap.get(Number(bAny.tenantId));
           if (tenant) room = getRoomById(tenant.roomId);
         }
         return `${bAny.tenantId}-${room?.id ?? b.roomNumber}`;
@@ -1545,34 +1655,33 @@ const RentPage = () => {
     );
 
     const currentMonthRentMap = new Map<string, Rent>();
-    rents
-      .filter(
-        (r) => Number(r.rentMonth) === month && Number(r.rentYear) === year
-      )
-      .forEach((r) => {
-        const key      = `${r.tenantId}-${r.roomId}`;
-        const existing = currentMonthRentMap.get(key);
-        if (!existing) {
+    rents.forEach((r) => {
+      if (Number(r.rentMonth) !== month || Number(r.rentYear) !== year) return;
+      const key      = `${r.tenantId}-${r.roomId}`;
+      const existing = currentMonthRentMap.get(key);
+      if (!existing) {
+        currentMonthRentMap.set(key, r);
+      } else {
+        const es = normalizeStatus(existing.paymentStatus);
+        const ns = normalizeStatus(r.paymentStatus);
+        if (
+          ns === "PAID" ||
+          (ns === "PARTIAL" && es === "PENDING") ||
+          (ns === "PARTIAL" &&
+            es === "PARTIAL" &&
+            Number(r.paidAmount || 0) > Number(existing.paidAmount || 0))
+        ) {
           currentMonthRentMap.set(key, r);
-        } else {
-          const es = normalizeStatus(existing.paymentStatus);
-          const ns = normalizeStatus(r.paymentStatus);
-          if (
-            ns === "PAID" ||
-            (ns === "PARTIAL" && es === "PENDING") ||
-            (ns === "PARTIAL" &&
-              es === "PARTIAL" &&
-              Number(r.paidAmount || 0) > Number(existing.paidAmount || 0))
-          ) {
-            currentMonthRentMap.set(key, r);
-          }
         }
-      });
+      }
+    });
 
     const orphanRows: RentRow[] = Array.from(currentMonthRentMap.values())
       .filter((r) => {
         const key = `${r.tenantId}-${r.roomId}`;
         if (ebTenantRoomKeys.has(key)) return false;
+
+        if (!tenantMap.has(Number(r.tenantId))) return false;
 
         if (role !== "ADMIN" && branchId) {
           const room = getRoomById(r.roomId);
@@ -1586,7 +1695,7 @@ const RentPage = () => {
         const searchStr    = `${resolvedName} ${room?.roomNumber ?? ""} ${
           (room as any)?.flatNumber ?? ""
         }`.toLowerCase();
-        return searchStr.includes(search.toLowerCase());
+        return searchStr.includes(q);
       })
       .map((r) => {
         const room        = getRoomById(r.roomId);
@@ -1608,8 +1717,7 @@ const RentPage = () => {
         const { previousPending, prevUnpaidRents } = computePreviousPending(
           Number(r.tenantId),
           month,
-          year,
-          rents
+          year
         );
 
         return {
@@ -1638,10 +1746,6 @@ const RentPage = () => {
         };
       });
 
-    // DAILY-stay tenants who have a checkout/settlement EB reading for this
-    // exact month/year, and have no current room to fold it into (fully
-    // checked out of the property). Pulled straight from the raw EB readings
-    // list, classified with isInformationalReading.
     const informationalRows: RentRow[] = Array.from(informationalByTenant.entries())
       .map(([tenantIdRaw, r]) => {
         const tenantId = Number(tenantIdRaw);
@@ -1649,7 +1753,6 @@ const RentPage = () => {
 
         const tenant   = tenantMap.get(tenantId);
 
-        // Only DAILY-stay tenants settle through this flow.
         if (!tenant || !isDailyTenant(tenant)) return null;
 
         const room =
@@ -1664,22 +1767,14 @@ const RentPage = () => {
         const searchStr = `${resolvedName} ${room?.roomNumber ?? ""} ${
           (room as any)?.flatNumber ?? ""
         }`.toLowerCase();
-        if (!searchStr.includes(search.toLowerCase())) return null;
+        if (!searchStr.includes(q)) return null;
 
         const prevReading = Number(r.previousReading ?? 0);
         const currReading = Number(r.currentReading ?? 0);
         const rate = Number(r.ebRate ?? 0) || 13;
 
-        const flatId = room?.flatId ?? null;
-        const occupants = flatId != null
-          ? tenants.filter((t) => {
-              const tRoom = rooms.find((rm) => rm.id === t.roomId);
-              return tRoom?.flatId != null && String(tRoom.flatId) === String(flatId);
-            })
-          : tenants.filter((t) => String(t.roomId) === String(r.roomId));
+        const occupants = getOccupants(room, r.roomId);
 
-        // Prefer a real value the backend already persisted on this row;
-        // only recompute client-side when both are missing/zero.
         const storedUnits  = Number(r.unitsConsumed ?? 0);
         const storedAmount = Number(r.ebAmount ?? 0);
 
@@ -1728,8 +1823,6 @@ const RentPage = () => {
       })
       .filter((r): r is RentRow => r !== null);
 
-    // Tenants with an unbilled damage share but no EB bill row and no Rent
-    // row yet for this month would otherwise never show up on this page.
     const coveredTenantIds = new Set<number>([
       ...ebRows.map((r) => r.tenantId),
       ...orphanRows.map((r) => r.tenantId),
@@ -1737,10 +1830,17 @@ const RentPage = () => {
     ]);
 
     const damageOnlyRows: RentRow[] = Array.from(pendingDamageMap.entries())
-      .filter(([tenantId, amount]) => amount > 0 && !coveredTenantIds.has(Number(tenantId)))
+      .filter(
+        ([tenantId, amount]) =>
+          amount > 0 &&
+          !coveredTenantIds.has(Number(tenantId)) &&
+          tenantMap.has(Number(tenantId))
+      )
       .map(([tenantId]) => {
-        const tenant = tenants.find((t) => Number(t.id) === Number(tenantId));
-        const room   = tenant ? getRoomById(tenant.roomId) : undefined;
+        const tenant = tenantMap.get(Number(tenantId));
+        if (!tenant) return null;
+
+        const room   = getRoomById(tenant.roomId);
 
         if (role !== "ADMIN" && branchId && (!room || String(room.unitId) !== String(branchId))) {
           return null;
@@ -1750,11 +1850,9 @@ const RentPage = () => {
         const searchStr = `${resolvedName} ${room?.roomNumber ?? ""} ${
           (room as any)?.flatNumber ?? ""
         }`.toLowerCase();
-        if (!searchStr.includes(search.toLowerCase())) return null;
+        if (!searchStr.includes(q)) return null;
 
         const damageAmount = pendingDamageMap.get(Number(tenantId)) ?? 0;
-        // Uses the tenant's own monthlyRent so a damage-only row shows their
-        // actual rent too. A daily-stay tenant's "rent" is their already-paid advance.
         const rentPerBed = tenant && isDailyTenant(tenant)
           ? (tenant.totalAmount ?? (() => {
               const { advanceRent, advanceEB } = computeDailyAdvance(tenant);
@@ -1762,7 +1860,6 @@ const RentPage = () => {
             })())
           : resolveTenantRent(Number(tenantId), room);
 
-        // FIX: same check-in-month split as the main rows (no double-counted rent).
         const { extraPending, rentCredit } = splitCheckInPending(Number(tenantId), rentPerBed);
         const damageOnlyTotal   = rentPerBed + damageAmount + extraPending;
         const damageOnlyPending = Math.max(0, damageOnlyTotal - rentCredit);
@@ -1770,6 +1867,7 @@ const RentPage = () => {
         return {
           tenantId:      Number(tenantId),
           tenantName:    resolvedName,
+          tenantPhone:   tenantPhoneMap.get(Number(tenantId)) ?? "",
           roomNumber:    room?.roomNumber ?? "—",
           flatNumber:    (room as any)?.flatNumber ?? "-",
           displayEB:     0,
@@ -1802,12 +1900,32 @@ const RentPage = () => {
       });
     }
 
+    allRows = [...allRows].sort((a, b) => {
+      const ra = a.roomNumber && a.roomNumber !== "—" ? a.roomNumber : null;
+      const rb = b.roomNumber && b.roomNumber !== "—" ? b.roomNumber : null;
+      if (ra === null && rb === null) return a.tenantName.localeCompare(b.tenantName);
+      if (ra === null) return 1;
+      if (rb === null) return -1;
+
+      const byRoom = ra.localeCompare(rb, undefined, { numeric: true, sensitivity: "base" });
+      if (byRoom !== 0) return byRoom;
+
+      return a.tenantName.localeCompare(b.tenantName, undefined, { sensitivity: "base" });
+    });
+
     return allRows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     filteredBills,
+    ebBills,
     rooms,
+    roomById,
+    roomByNumber,
     tenants,
     tenantMap,
+    tenantsByRoomId,
+    tenantsByFlatId,
+    rentsByTenant,
     selectedBranch,
     selectedRoom,
     month,
@@ -1815,7 +1933,7 @@ const RentPage = () => {
     isFuturePeriod,
     isCurrentPeriod,
     rents,
-    search,
+    deferredSearch,
     tenantNameMap,
     tenantRentMap,
     tenantPendingMap,
@@ -1834,7 +1952,7 @@ const RentPage = () => {
         : rooms.filter((r) => String(r.unitId) === selectedBranch);
     return scoped
       .map((r) => ({ id: r.id, label: r.roomNumber }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
   }, [rooms, selectedBranch]);
 
   const branchOptions = useMemo(() => {
@@ -1850,29 +1968,158 @@ const RentPage = () => {
     return Array.from(unique.values());
   }, [rooms]);
 
+  /* ── Row status (single source of truth for the table AND the Excel report) ── */
+  const getRowStatus = (row: RentRow): { sStatus: string; statusClass: string; displayStatus: string } => {
+    if (row.isDaily && !row.rentRecord) {
+      const owesEB = (row.ebBalance ?? 0) < 0;
+      return {
+        sStatus: owesEB ? "EB_DUE" : "SETTLED",
+        statusClass: owesEB ? "overdue" : "paid",
+        displayStatus: owesEB ? "EB Due" : "Settled",
+      };
+    }
+
+    const sStatus = row.rentRecord?.paymentStatus
+      ? normalizeStatus(row.rentRecord.paymentStatus)
+      : "UNGENERATED";
+    let statusClass = "ungenerated";
+    let displayStatus = sStatus;
+
+    const isOverdueMock = (sStatus === "PENDING" || sStatus === "PARTIAL") && (row.pending > 0);
+    if (sStatus === "PAID" && ((row.tenantPending ?? 0) > 0 || row.previousPending > 0)) { statusClass = "overdue"; displayStatus = "Previous Due"; }
+    else if (sStatus === "PAID") { statusClass = "paid"; displayStatus = "Paid"; }
+    else if (isOverdueMock) { statusClass = "overdue"; displayStatus = "Overdue"; }
+    else if (sStatus === "PENDING" || sStatus === "PARTIAL") { statusClass = "pending"; displayStatus = sStatus === "PARTIAL" ? "Partial" : "Pending"; }
+    else if (row.pending > 0) { statusClass = "ungenerated"; displayStatus = "Not Generated"; }
+    else { statusClass = "not-due"; displayStatus = "Not Due"; }
+
+    return { sStatus, statusClass, displayStatus };
+  };
+
+  /* ── EXCEL REPORT ──
+     Exports every row matching the current filters (not only the visible page),
+     using the same numbers the table shows, plus a totals row. */
+  const handleDownloadReport = async () => {
+    if (exporting) return;
+    if (isFuturePeriod) {
+      return toast.error(`No report for ${MONTHS[month - 1]} ${year} — that month hasn't started yet`);
+    }
+    if (rowData.length === 0) {
+      return toast.error("No rent records to export for the selected filters");
+    }
+
+    setExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+
+      const branchNameById = new Map<string, string>();
+      branchOptions.forEach((b: any) => branchNameById.set(String(b.id), b.name));
+
+      const num = (v: number | undefined | null) => Math.round(Number(v ?? 0));
+
+      const header = [
+        "S.No", "Tenant", "Phone", "Branch", "Flat", "Room", "Room Type", "Stay Type",
+        "Rent (₹)", "EB (₹)", "Damage (₹)", "Due Days", "Due (₹)",
+        "Pending Amt (₹)", "Previous Due (₹)", "Previous Due Months",
+        "Total (₹)", "Paid (₹)", "Pending (₹)", "Status",
+      ];
+
+      const body = rowData.map((row, i) => {
+        const roomObj = getRoomObj(row.roomNumber) || getRoomById(row.rentRecord?.roomId ?? 0);
+        const { displayStatus } = getRowStatus(row);
+        const pendingAmt = (row.tenantPending ?? 0) > 0
+          ? row.tenantPending ?? 0
+          : (row.checkInRentPending ?? 0);
+
+        return [
+          i + 1,
+          row.tenantName,
+          row.tenantPhone,
+          branchNameById.get(String(row.unitId)) ?? "",
+          row.flatNumber,
+          row.roomNumber,
+          roomObj?.hostelType === "AC" ? "AC" : "Non-AC",
+          row.isDaily ? "Daily" : "Monthly",
+          num(row.rentPerBed),
+          num(row.displayEB),
+          num(row.damageAmount),
+          row.dueDays ?? 0,
+          num(row.dueAmount),
+          num(pendingAmt),
+          num(row.previousPending),
+          row.previousLabel ?? "",
+          num(row.total),
+          num(row.paid),
+          num(Math.max(0, row.pending)),
+          displayStatus,
+        ];
+      });
+
+      const sum = (col: number) => body.reduce((s, r) => s + Number(r[col] || 0), 0);
+      const totalsRow = [
+        "", "TOTAL", "", "", "", "", "", "",
+        sum(8), sum(9), sum(10), "", sum(12),
+        sum(13), sum(14), "",
+        sum(16), sum(17), sum(18), "",
+      ];
+
+      const title = `Rent Report - ${MONTHS[month - 1]} ${year}`;
+      const aoa: (string | number)[][] = [
+        [title],
+        [`Generated on ${new Date().toLocaleString("en-IN")}  |  ${rowData.length} record(s)`],
+        [],
+        header,
+        ...body,
+        totalsRow,
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = [
+        { wch: 6 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 8 }, { wch: 8 },
+        { wch: 10 }, { wch: 10 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 9 },
+        { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 22 }, { wch: 11 }, { wch: 11 },
+        { wch: 12 }, { wch: 14 },
+      ];
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: header.length - 1 } },
+      ];
+      // Freeze the title + header rows so the header stays visible while scrolling.
+      (ws as any)["!freeze"] = { xSplit: 0, ySplit: 4 };
+      (ws as any)["!views"] = [{ state: "frozen", ySplit: 4 }];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, `${MONTHS[month - 1].slice(0, 3)} ${year}`);
+      XLSX.writeFile(wb, `Rent_Report_${MONTHS[month - 1]}_${year}.xlsx`);
+
+      toast.success(`Report downloaded (${rowData.length} records)`);
+    } catch (e: any) {
+      const missingLib = /xlsx|Failed to fetch dynamically imported module|Cannot find module/i.test(String(e?.message ?? e));
+      toast.error(
+        missingLib
+          ? "Excel library missing — run: npm install xlsx"
+          : "Failed to generate report"
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleGenerate = async (bill: RentRow) => {
     if (isFuturePeriod) {
       return toast.error(`Rent can't be generated for ${MONTHS[month - 1]} ${year} — that month hasn't started yet`);
     }
-    // NEW: joining-date-cycle hostel whose cycle hasn't started yet.
-    if (bill.generateBlockedReason) {
-      return toast.error(bill.generateBlockedReason);
-    }
     let room = getRoomObj(bill.roomNumber);
     if (!room) {
-      const tenant = tenants.find((t) => Number(t.id) === bill.tenantId);
+      const tenant = tenantMap.get(bill.tenantId);
       if (tenant) room = getRoomById(tenant.roomId);
     }
 
     if (!room) return toast.error("Room not found for this tenant");
 
-    // For a daily-stay tenant, Rent was already collected at check-in —
-    // only the EB shortfall (if any) should be billed here.
-    const tenant = tenants.find((t) => Number(t.id) === bill.tenantId);
+    const tenant = tenantMap.get(bill.tenantId);
     const isDaily = tenant && isDailyTenant(tenant);
     const rentAmount = isDaily ? 0 : resolveTenantRent(bill.tenantId, room);
-    // bill.amount holds the EB figure. For a row built from an informational
-    // reading, the computed EB share is already in bill.displayEB / bill.amount.
     const ebAmount = isDaily ? Math.max(0, -(bill.ebBalance ?? 0)) : bill.amount;
 
     try {
@@ -1885,9 +2132,8 @@ const RentPage = () => {
         ebAmount,
       });
       toast.success(`Rent generated for ${bill.tenantName}`);
-      reload();
+      reload("light");
     } catch (e: any) {
-      // The server rejects cycles that are before joining / not started yet.
       toast.error(e?.response?.data?.message || "Failed to generate rent");
     }
   };
@@ -1898,53 +2144,34 @@ const RentPage = () => {
     }
     if (!confirm("Generate rent for all tenants?")) return;
 
-    // NEW: tenants skipped because their joining-date cycle hasn't started.
-    let skippedCycle = 0;
-
     const billsToGenerate = ebBills.filter((bill) => {
       const bAny = bill as any;
       let room = getRoomObj(bill.roomNumber);
       if (!room && bAny.tenantId) {
-        const tenant = tenants.find((t) => Number(t.id) === Number(bAny.tenantId));
+        const tenant = tenantMap.get(Number(bAny.tenantId));
         if (tenant) room = getRoomById(tenant.roomId);
       }
-      // Never generate for a tenant who checks in after the selected month.
       const billTenant = bAny.tenantId != null ? tenantMap.get(Number(bAny.tenantId)) : undefined;
       if (checkedInAfterMonth(billTenant?.checkInDate, month, year)) return false;
       if (getRentStatus(bAny.tenantId, bill.roomNumber, room?.id)) return false;
-
-      // NEW: skip (don't fail the batch for) cycles that haven't started.
-      if (bAny.tenantId != null) {
-        const cyc = getCyclePreview(Number(bAny.tenantId), room);
-        if (cyc && !cyc.billable) {
-          skippedCycle++;
-          return false;
-        }
-      }
       return true;
     });
 
-    // Tenant IDs whose checkout settlement gets folded into their
-    // current-room bill in the main pass below — tracked so the second
-    // pass doesn't also generate a duplicate record for the same reading.
     const mergedInformationalTenantIds = new Set<number>();
 
     try {
-      // allSettled: one tenant failing must not abort the rest of the batch.
       const results = await Promise.allSettled(
         billsToGenerate.map(async (bill) => {
           const b = bill as any;
           let room = getRoomObj(bill.roomNumber);
           if (!room && b.tenantId) {
-            const tenant = tenants.find((t) => Number(t.id) === Number(b.tenantId));
+            const tenant = tenantMap.get(Number(b.tenantId));
             if (tenant) room = getRoomById(tenant.roomId);
           }
           if (!room) return;
 
-          const tenant = tenants.find((t) => Number(t.id) === Number(b.tenantId));
+          const tenant = tenantMap.get(Number(b.tenantId));
           if (tenant && isDailyTenant(tenant)) {
-            // Skip daily-stay tenants who don't owe an EB shortfall.
-            // Anyone who does owe is billed for the shortfall only, rentAmount 0.
             const { advanceEB } = computeDailyAdvance(tenant);
             const ebBalance = advanceEB - (b.amount ?? 0);
             if (ebBalance >= 0) return;
@@ -1959,9 +2186,6 @@ const RentPage = () => {
             return;
           }
 
-          // FIX: same EB resolution as the Rent table — the backend bill is
-          // used as-is for a checked-out / same-room tenant, and the old
-          // room's settlement is only added for a genuine room transfer.
           const infoReading = informationalByTenant.get(Number(b.tenantId));
           const resolved = resolveTenantEB(tenant, room, b.amount ?? 0, infoReading, Number(b.tenantId));
           const ebAmount = resolved.eb;
@@ -1979,24 +2203,20 @@ const RentPage = () => {
       );
       const failed = results.filter((r) => r.status === "rejected").length;
 
-      // "Generate All" is driven off ebBills, which never includes a
-      // checked-out tenant's informational reading. Sweep those in as a
-      // second pass — only for tenants not already folded in above.
       await Promise.all(
         Array.from(informationalByTenant.entries()).map(async ([tenantIdRaw, r]) => {
           const tenantId = Number(tenantIdRaw);
           if (mergedInformationalTenantIds.has(tenantId)) return;
 
-          const tenant = tenants.find((t) => Number(t.id) === tenantId);
+          const tenant = tenantMap.get(tenantId);
           if (!tenant || !isDailyTenant(tenant)) return;
           const room =
             (r.roomId != null ? getRoomById(r.roomId) : undefined) ??
             getRoomById(tenant.roomId);
           if (!room) return;
 
-          const alreadyHasRent = rents.some(
+          const alreadyHasRent = (rentsByTenant.get(tenantId) ?? []).some(
             (rr) =>
-              Number(rr.tenantId) === tenantId &&
               Number(rr.rentMonth) === month &&
               Number(rr.rentYear) === year &&
               String(rr.roomId) === String(room.id)
@@ -2021,14 +2241,13 @@ const RentPage = () => {
       );
 
       const notes: string[] = [];
-      if (skippedCycle > 0) notes.push(`${skippedCycle} skipped (cycle not started)`);
       if (failed > 0) notes.push(`${failed} failed`);
       if (notes.length > 0) {
         toast.warning(`Rents generated — ${notes.join(", ")}`);
       } else {
         toast.success("All rents generated");
       }
-      reload();
+      reload("light");
     } catch {
       toast.error("Failed generating rents");
     }
@@ -2048,7 +2267,7 @@ const RentPage = () => {
         transactionId: txnId,
       });
       toast.success("Payment recorded");
-      await reload();
+      await reload("light");
     } catch (e: any) {
       toast.error(e?.response?.data?.message ?? "Payment failed");
     }
@@ -2058,22 +2277,16 @@ const RentPage = () => {
   const pageSize = 10;
   const paginatedRows = rowData.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
-  // Total page count, used both to bound the "Next" button and to build
-  // the numbered page list below.
   const totalPages = Math.max(1, Math.ceil(rowData.length / pageSize));
 
-  // Go back to page 1 whenever a filter changes, and never sit on a page
-  // that no longer exists (e.g. after the row count shrinks).
   useEffect(() => {
     setCurrentPage(0);
-  }, [selectedBranch, selectedRoom, month, year, search]);
+  }, [selectedBranch, selectedRoom, month, year, deferredSearch]);
 
   useEffect(() => {
     if (currentPage > totalPages - 1) setCurrentPage(totalPages - 1);
   }, [currentPage, totalPages]);
 
-  // Windowed list of 1-indexed page numbers with "..." collapsing for
-  // longer runs — e.g. [1, 2, 3, 4, '...', 53].
   const getPageNumbers = (current: number, total: number): (number | "...")[] => {
     if (total <= 7) {
       return Array.from({ length: total }, (_, i) => i + 1);
@@ -2093,16 +2306,17 @@ const RentPage = () => {
     [currentPage, totalPages]
   );
 
+  // True while nothing can be shown yet (first load, or EB bills still arriving).
+  const isLoadingData = !loaded || (ebLoading && rowData.length === 0);
+
   return (
     <div className="min-h-full w-full min-w-0 bg-[#fcfcfc] text-slate-900 font-sans pb-10">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        .rt-wrap { font-family: 'Inter', sans-serif; padding: 24px 32px; max-width: none; margin: 0 auto; }
+        .rt-wrap { font-family: 'Inter', sans-serif; padding: 20px 10px; max-width: none; margin: 0 auto; }
 
         .rt-header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
         .rt-title { font-size: 24px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-        /* A11Y: all #64748b / #94a3b8 greys below were bumped to #475569 or
-           #64748b-on-white so they clear the 4.5:1 contrast ratio. */
         .rt-subtitle { font-size: 13px; color: #475569; font-weight: 500; }
 
         .rt-layout { display: flex; flex-direction: column; gap: 24px; align-items: stretch; }
@@ -2112,12 +2326,23 @@ const RentPage = () => {
         .rt-panel-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
         .rt-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; }
 
-        /* min-width raised 1350 -> 1450 for the new PREVIOUS DUE column. */
-        .rt-table { width: 100%; border-collapse: collapse; min-width: 1450px; }
-        .rt-table th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 14px 20px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.5px; }
-        .rt-table td { padding: 14px 20px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+        .rt-table { width: 100%; table-layout: fixed; border-collapse: collapse; min-width: 0; }
+        .rt-table th { font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; padding: 12px 8px; text-align: left; border-bottom: 1px solid #f1f5f9; background: #fafafa; letter-spacing: 0.3px; line-height: 1.35; vertical-align: middle; overflow-wrap: normal; word-break: normal; hyphens: none; }
+        .rt-table td { padding: 10px 8px; border-bottom: 1px solid #f8fafc; vertical-align: middle; font-size: 12px; overflow-wrap: normal; word-break: normal; hyphens: none; }
         .rt-table tr:hover { background: #fdfcff; }
         .rt-empty { color: #475569; }
+        .rt-table .rt-value { font-size: 12px; }
+        .rt-table .rt-tenant-name { font-size: 12px; line-height: 1.25; }
+        .rt-table .rt-tenant-phone { font-size: 10px; }
+        .rt-table .rt-room { font-size: 12px; }
+        .rt-table .rt-room-type { white-space: nowrap; font-size: 10px; padding: 2px 5px; }
+        .rt-table .rt-tenant-name { overflow-wrap: normal; word-break: normal; }
+        .rt-table .rt-avatar { display: none; }
+        @media (min-width: 1500px) { .rt-table .rt-avatar { display: flex; width: 26px; height: 26px; font-size: 10px; margin-right: 8px; } }
+        .rt-table .rt-status { padding: 2px 0; font-size: 10.5px; gap: 4px; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+        .rt-table .rt-status::before { flex-shrink: 0; }
+        .rt-table td.rt-actions-cell { overflow-wrap: normal; }
+        @media (max-width: 1199px) { .rt-table { min-width: 1000px; } }
 
         .rt-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-right: 12px; flex-shrink: 0; }
         .rt-tenant-name { font-size: 13px; font-weight: 600; color: #0f172a; }
@@ -2125,8 +2350,6 @@ const RentPage = () => {
 
         .rt-room { font-size: 13px; font-weight: 600; color: #0f172a; }
         .rt-room-type { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 4px; }
-        .rt-branch { font-size: 13px; font-weight: 500; color: #0f172a; }
-        .rt-branch-sub { font-size: 11px; color: #475569; margin-top: 2px; }
         .rt-value { font-size: 13px; font-weight: 600; color: #0f172a; }
         .rt-value.muted { color: #64748b; font-weight: 500; }
         .rt-date { font-size: 13px; font-weight: 500; color: #475569; }
@@ -2144,7 +2367,6 @@ const RentPage = () => {
         .rt-status.ungenerated { color: #475569; }
         .rt-status.ungenerated::before { background: #475569; }
 
-        /* EB-balance badges for daily-stay tenants */
         .rt-eb-badge { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 20px; display: inline-block; }
         .rt-eb-badge.refund { color: #15803d; background: #f0fdf4; }
         .rt-eb-badge.due    { color: #be123c; background: #fef2f2; }
@@ -2155,9 +2377,14 @@ const RentPage = () => {
         .rt-sum-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #e2e8f0; }
         .rt-sum-item:last-child { border-bottom: none; }
 
-        /* ── Searchable room filter dropdown ──
-           The menu is position:fixed (top/left/width set from JS) so the
-           panel's overflow:hidden can't clip it. */
+        /* Loading indicator */
+        .rt-loading-cell { padding: 40px 0; text-align: center; color: #475569; font-size: 13px; }
+        .rt-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #e2e8f0; border-top-color: #5200FF; border-radius: 50%; animation: rt-spin 0.7s linear infinite; vertical-align: -3px; margin-right: 8px; }
+        @keyframes rt-spin { to { transform: rotate(360deg); } }
+        .rt-refresh-bar { height: 2px; background: linear-gradient(90deg, transparent, #5200FF, transparent); background-size: 200% 100%; animation: rt-bar 1s linear infinite; }
+        @keyframes rt-bar { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+        @media (prefers-reduced-motion: reduce) { .rt-spinner, .rt-refresh-bar { animation: none; } }
+
         .rt-room-dd { position: relative; }
         .rt-room-trigger {
           display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -2195,7 +2422,6 @@ const RentPage = () => {
         .rt-room-check { width: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .rt-room-empty { padding: 12px 10px; font-size: 12.5px; color: #64748b; text-align: center; }
 
-        /* Pagination bar can hold many numbered buttons (1 2 3 4 … 53). */
         .rt-page-row { flex-wrap: wrap; }
         .rt-page-btn {
           width: 32px; height: 32px; min-width: 32px; border-radius: 6px;
@@ -2209,10 +2435,9 @@ const RentPage = () => {
         .rt-page-btn.active { background: #5200FF; border-color: #5200FF; color: #fff; }
         .rt-page-ellipsis { cursor: default; color: #64748b; }
 
-        /* Rent mobile responsive layout: desktop unchanged. */
         .rt-wrap, .rt-layout, .rt-content, .rt-panel { min-width: 0; }
         .rt-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        .rt-table-scroll:focus-visible { outline: 2px solid #5200FF; outline-offset: -2px; }
+        .rt-table-scroll:focus, .rt-table-scroll:focus-visible { outline: none; }
         @media (max-width: 767px) {
           .rt-wrap { width: 100%; max-width: 100%; padding: 14px 10px 24px; }
           .rt-layout { width: 100%; gap: 12px; }
@@ -2220,7 +2445,7 @@ const RentPage = () => {
           .rt-header { margin-bottom: 14px; }
           .rt-title { font-size: 20px; }
           .rt-panel { width: 100%; max-width: 100%; margin-bottom: 12px; border-radius: 12px; }
-          .rt-panel-header { padding: 14px 12px; gap: 10px; }
+          .rt-panel-header { padding: 14px 12px; gap: 10px; flex-wrap: wrap; }
           .rt-panel-title { font-size: 15px; }
           .rt-panel-header button { min-height: 36px; font-size: 12px; white-space: nowrap; }
           .rent-mobile-filters {
@@ -2236,8 +2461,8 @@ const RentPage = () => {
           .rt-room-trigger { font-size: 12px; padding: 0 8px; }
           .rent-mobile-filters > div:has(input) { grid-column: 1 / -1; }
           .rent-mobile-filters > button { grid-column: 1 / -1; justify-self: start; margin-left: 0 !important; min-height: 36px; }
-          .rt-table { min-width: 1450px; }
-          .rt-table th, .rt-table td { padding: 12px 14px; }
+          .rt-table { min-width: 1000px; }
+          .rt-table th, .rt-table td { padding: 10px 8px; }
           .rent-mobile-pagination { padding: 12px !important; gap: 10px; flex-wrap: wrap; }
           .rent-mobile-pagination > div { font-size: 12px; }
           .rent-mobile-pagination nav { margin-left: auto; max-width: 100%; }
@@ -2265,6 +2490,22 @@ const RentPage = () => {
               <div className="rt-panel-header">
                 <h2 className="rt-panel-title">Rent Collection</h2>
                 <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                    onClick={handleDownloadReport}
+                    disabled={exporting || isLoadingData || rowData.length === 0}
+                    aria-label={`Download rent report for ${MONTHS[month - 1]} ${year} as Excel`}
+                    title={
+                      rowData.length === 0
+                        ? "No records to export"
+                        : `Download all ${rowData.length} record(s) as Excel`
+                    }
+                  >
+                    <Download size={14} aria-hidden="true" />
+                    {exporting ? "Preparing…" : "Download Report"}
+                  </Button>
                   {hasAccess && (
                     <Button size="sm" className="h-8 bg-[#5200FF] hover:bg-[#4200cc] text-white" onClick={handleGenerateAll}>
                        ALL Generation
@@ -2273,12 +2514,14 @@ const RentPage = () => {
                 </div>
               </div>
 
+              {/* Thin bar while fresh data is being fetched behind already-visible rows */}
+              {(loadingRef.current || ebLoading) && rowData.length > 0 && (
+                <div className="rt-refresh-bar" role="progressbar" aria-label="Refreshing rent data" />
+              )}
+
               <div className="rent-mobile-filters flex items-center gap-3 p-4 border-b border-[#f1f5f9] bg-white flex-wrap">
                 <div className="flex bg-white border border-[#e2e8f0] rounded-md overflow-hidden h-9 w-[150px]">
                   <Select value={selectedBranch} onValueChange={(v) => { setSelectedBranch(v); setSelectedRoom("all"); }} disabled={!hasAccess || (role !== "ADMIN" && role !== "SUPER_ADMIN")}>
-                    {/* A11Y: Radix renders each trigger as a <button role="combobox">
-                        with no text label of its own, which Lighthouse flags as
-                        "Buttons do not have an accessible name". */}
                     <SelectTrigger aria-label="Filter by branch" className="border-0 shadow-none focus:ring-0 text-sm h-full w-full font-medium text-slate-600">
                       <SelectValue placeholder="All Branches" />
                     </SelectTrigger>
@@ -2291,7 +2534,6 @@ const RentPage = () => {
                   </Select>
                 </div>
 
-                {/* Room filter with a search box (see RoomFilterDropdown above). */}
                 <RoomFilterDropdown
                   value={selectedRoom}
                   onChange={setSelectedRoom}
@@ -2304,15 +2546,13 @@ const RentPage = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {MONTHS.map((m, i) => (
-                        <SelectItem
-                          key={i}
-                          value={String(i + 1)}
-                          disabled={year === currentYear && i + 1 > currentMonth}
-                        >
-                          {m}
-                        </SelectItem>
-                      ))}
+                      {MONTHS.map((m, i) => ({ m, num: i + 1 }))
+                        .filter(({ num }) => !(year === currentYear && num > currentMonth))
+                        .map(({ m, num }) => (
+                          <SelectItem key={num} value={String(num)}>
+                            {m}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -2323,7 +2563,6 @@ const RentPage = () => {
                     onValueChange={(v) => {
                       const y = Number(v);
                       setYear(y);
-                      // Switching to the current year must never leave a later month selected.
                       if (y === currentYear && month > currentMonth) setMonth(currentMonth);
                     }}
                   >
@@ -2365,22 +2604,32 @@ const RentPage = () => {
                 </button>
               </div>
 
-              <div className="rt-table-scroll overflow-x-auto" role="region" aria-label="Scrollable rent collection table" tabIndex={0}>
+              <div className="rt-table-scroll overflow-x-auto" role="region" aria-label="Scrollable rent collection table" aria-busy={isLoadingData} tabIndex={0}>
                 <table className="rt-table">
                   <caption className="sr-only">Rent collection for {MONTHS[month - 1]} {year}</caption>
+                  <colgroup>
+                    <col style={{ width: "14%" }} />  {/* TENANT */}
+                    <col style={{ width: "7%" }} />   {/* ROOM */}
+                    <col style={{ width: "8%" }} />   {/* RENT */}
+                    <col style={{ width: "6%" }} />   {/* EB */}
+                    <col style={{ width: "7%" }} />   {/* DAMAGE */}
+                    <col style={{ width: "7%" }} />   {/* DUE */}
+                    <col style={{ width: "7%" }} />   {/* PENDING AMT */}
+                    <col style={{ width: "7%" }} />   {/* PREVIOUS DUE */}
+                    <col style={{ width: "6%" }} />   {/* TOTAL */}
+                    <col style={{ width: "10%" }} />  {/* STATUS */}
+                    <col style={{ width: "8%" }} />   {/* PENDING */}
+                    <col style={{ width: "13%" }} />  {/* ACTIONS */}
+                  </colgroup>
                   <thead>
                     <tr>
                       <th scope="col">TENANT</th>
                       <th scope="col">ROOM</th>
-                      <th scope="col">BRANCH</th>
                       <th scope="col">RENT (₹)</th>
                       <th scope="col">EB (₹)</th>
                       <th scope="col">DAMAGE (₹)</th>
                       <th scope="col">DUE (₹)</th>
-                      {/* Tenant's Pending (₹) from the Tenants page; included in TOTAL.
-                          Shown on the CURRENT month's rows only. */}
                       <th scope="col">PENDING AMT (₹)</th>
-                      {/* NEW: unpaid balance of earlier months; included in PENDING */}
                       <th scope="col">PREVIOUS DUE (₹)</th>
                       <th scope="col">TOTAL (₹)</th>
                       <th scope="col">STATUS</th>
@@ -2390,40 +2639,21 @@ const RentPage = () => {
                   </thead>
                   <tbody>
                     {paginatedRows.length === 0 ? (
-                      <tr><td colSpan={13} className="text-center py-12 rt-empty">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
+                      isLoadingData ? (
+                        <tr>
+                          <td colSpan={12} className="rt-loading-cell" role="status">
+                            <span className="rt-spinner" aria-hidden="true" />
+                            Loading rent data for {MONTHS[month - 1]} {year}…
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr><td colSpan={12} className="text-center py-12 rt-empty">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
+                      )
                     ) : (
                       paginatedRows.map((row, i) => {
-                        // Daily-stay tenants who haven't had a Rent record
-                        // generated yet get their own status — "EB Due" when
-                        // they owe the shortfall, otherwise "Settled".
-                        let sStatus: string;
-                        let statusClass: string;
-                        let displayStatus: string;
-
-                        if (row.isDaily && !row.rentRecord) {
-                          const owesEB = (row.ebBalance ?? 0) < 0;
-                          sStatus = owesEB ? "EB_DUE" : "SETTLED";
-                          statusClass = owesEB ? "overdue" : "paid";
-                          displayStatus = owesEB ? "EB Due" : "Settled";
-                        } else {
-                          sStatus = row.rentRecord?.paymentStatus ? normalizeStatus(row.rentRecord.paymentStatus) : "UNGENERATED";
-                          statusClass = "ungenerated";
-                          displayStatus = sStatus;
-
-                          const isOverdueMock = (sStatus === "PENDING" || sStatus === "PARTIAL") && (row.pending > 0);
-                          if (sStatus === "PAID" && ((row.tenantPending ?? 0) > 0 || row.previousPending > 0)) { statusClass = "overdue"; displayStatus = "Previous Due"; }
-                          else if (sStatus === "PAID") { statusClass = "paid"; displayStatus = "Paid"; }
-                          else if (isOverdueMock) { statusClass = "overdue"; displayStatus = "Overdue"; }
-                          else if (sStatus === "PENDING" || sStatus === "PARTIAL") { statusClass = "pending"; displayStatus = sStatus === "PARTIAL" ? "Partial" : "Pending"; }
-                          // FIX: an ungenerated row that still has money pending used to say
-                          // "Not Due", which is misleading. It means rent isn't generated yet.
-                          else if (row.pending > 0) { statusClass = "ungenerated"; displayStatus = "Not Generated"; }
-                          else { statusClass = "not-due"; displayStatus = "Not Due"; }
-                        }
+                        const { statusClass, displayStatus } = getRowStatus(row);
 
                         const initials = row.tenantName.substring(0, 2).toUpperCase();
-                        // A11Y: the -600 text shades on -100 backgrounds were under
-                        // 4.5:1 (emerald/rose/amber especially); darker shades used.
                         const colors = ['bg-indigo-100 text-indigo-700', 'bg-emerald-100 text-emerald-700', 'bg-rose-100 text-rose-700', 'bg-amber-100 text-amber-800'];
                         const avatarClass = colors[i % colors.length];
 
@@ -2447,15 +2677,9 @@ const RentPage = () => {
                                 {isAc ? 'AC' : 'Non-AC'}
                               </div>
                             </td>
-                            <td>
-                              <div className="rt-branch">{branchOptions.find(b => String(b.id) === String(row.unitId))?.name || "Main Branch"}</div>
-                            </td>
 
                             <td>
                               <span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.rentPerBed))}</span>
-                              {/* Sub-label behind the rent figure:
-                                  • JOINING_DATE_CYCLE hostel → the billing cycle's dates
-                                  • CALENDAR_MONTH hostel     → pro-ration for the check-in month */}
                               {!row.isDaily && (() => {
                                 const cyc = getCyclePreview(row.tenantId, roomObj);
                                 if (cyc) {
@@ -2480,7 +2704,9 @@ const RentPage = () => {
                             </td>
                             <td>
                               <span className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(row.displayEB))}</span>
-                              {/* Daily-stay only: EB advance vs. actual usage (replaces the old EB BALANCE column). */}
+                              {row.ebCarryNote && (
+                                <div className="text-[10px] text-indigo-700 mt-0.5">{row.ebCarryNote}</div>
+                              )}
                               {row.isDaily && row.ebBalance !== undefined && row.ebBalance !== 0 && (
                                 <div className="mt-1">
                                   {row.ebBalance > 0 ? (
@@ -2499,15 +2725,12 @@ const RentPage = () => {
                               </span>
                             </td>
                             <td>
-                              {/* Due Amount, shown separately from rent/EB/damage; it is
-                                  part of TOTAL and PENDING only when it is above ₹0
-                                  (i.e. FIXED_DUE with overdue days). */}
                               {(row.dueAmount ?? 0) > 0 ? (
                                 <>
                                   <span className="rt-value text-rose-700">
                                     {new Intl.NumberFormat('en-IN').format(Math.round(row.dueAmount ?? 0))}
                                   </span>
-                                  <div className="text-[10px] text-rose-700 mt-0.5">
+                                  <div className="text-[10px] text-rose-700 mt-0.5 whitespace-nowrap">
                                     {row.dueDays} day{row.dueDays === 1 ? "" : "s"} × ₹{new Intl.NumberFormat('en-IN').format(row.duePerDay ?? 0)}
                                   </div>
                                 </>
@@ -2516,18 +2739,15 @@ const RentPage = () => {
                               )}
                             </td>
                             <td>
-                              {/* Tenant's Pending (₹). In the check-in month only the
-                                  non-rent part is shown (rent part is already in RENT).
-                                  Current month only — see tenantPendingMap. */}
                               {(row.tenantPending ?? 0) > 0 ? (
-                                <span className="rt-value text-rose-700">
+                                <span
+                                  className="rt-value text-rose-700"
+                                  title="Tenant's pending amount (from check-in). Included in TOTAL."
+                                >
                                   {new Intl.NumberFormat('en-IN').format(Math.round(row.tenantPending ?? 0))}
                                 </span>
                               ) : (row.checkInRentPending ?? 0) > 0 ? (
                                 <>
-                                  {/* Check-in month: the tenant's pending is part of this
-                                      month's unpaid rent, so it is shown as a note only
-                                      (it is already inside RENT / PENDING). */}
                                   <span
                                     className="rt-value text-rose-700"
                                     title="Tenant's pending from check-in. Already counted in this month's rent, so it is not added to TOTAL again."
@@ -2541,8 +2761,6 @@ const RentPage = () => {
                               )}
                             </td>
                             <td>
-                              {/* NEW: unpaid balance carried from earlier months
-                                  (e.g. Sep ₹2,000 shown on Oct). Included in PENDING. */}
                               {row.previousPending > 0 ? (
                                 <>
                                   <span className="rt-value text-rose-700">
@@ -2561,7 +2779,7 @@ const RentPage = () => {
                             <td>
                               <div className="rt-value">{new Intl.NumberFormat('en-IN').format(Math.round(Math.max(0, row.pending)))}</div>
                             </td>
-                            <td>
+                            <td className="rt-actions-cell">
                               <ActionCell bill={row} rentRecord={row.rentRecord} onGenerate={handleGenerate} onPayment={handlePayment} />
                             </td>
                           </tr>
@@ -2576,8 +2794,6 @@ const RentPage = () => {
                 <div className="text-[13px] text-[#475569]" aria-live="polite">
                   Showing {paginatedRows.length === 0 ? 0 : currentPage * pageSize + 1} to {Math.min((currentPage + 1) * pageSize, rowData.length)} of {rowData.length} records
                 </div>
-                {/* Numbered pagination row (1 2 3 … n). Prev/Next stay on
-                    either end and disable correctly at the first/last page. */}
                 <nav aria-label="Pagination" className="flex gap-2 rt-page-row">
                   <button
                     type="button"
