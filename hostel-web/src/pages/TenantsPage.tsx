@@ -2241,24 +2241,19 @@ const handleAdd = async () => {
         .tn-table tr:hover { background: #fdfcff; }
 
         /* ── Compact main tenants table (5 columns: Tenant, Phone, Room & Bed, Status, Actions) ──
-           Fixed layout + explicit column widths so every row lines up. Higher specificity
-           (.tn-table.tn-table-compact) beats the base and mobile min-width rules. */
+           ALIGNMENT: every header cell and every data cell of a column share exactly the same
+           horizontal padding and text-align, so the header text starts on the same vertical
+           line as the data below it. The old per-column nth-child padding overrides (which
+           pushed some columns' left edge out of line) have been removed; widths are set once
+           in the <colgroup>. Higher specificity (.tn-table.tn-table-compact) beats the base
+           and mobile min-width rules. */
         .tn-table.tn-table-compact { min-width: 0; table-layout: fixed; width: 100%; }
-        .tn-table.tn-table-compact th { padding: 14px 8px; }
-        .tn-table.tn-table-compact td { padding: 14px 8px; white-space: nowrap; vertical-align: middle; }
+        .tn-table.tn-table-compact th,
+        .tn-table.tn-table-compact td { padding: 14px 12px; text-align: left; vertical-align: middle; white-space: nowrap; box-sizing: border-box; }
         .tn-table.tn-table-compact th:first-child,
-        .tn-table.tn-table-compact td:first-child { padding-left: 16px; }
+        .tn-table.tn-table-compact td:first-child { padding-left: 20px; }
         .tn-table.tn-table-compact th:last-child,
-        .tn-table.tn-table-compact td:last-child { padding-right: 16px; }
-        /* Extra breathing room before the Status and Actions columns so
-           Room & Bed | Status | Actions no longer look joined together. */
-        .tn-table.tn-table-compact th:nth-child(4),
-        .tn-table.tn-table-compact td:nth-child(4),
-        .tn-table.tn-table-compact th:nth-child(5),
-        .tn-table.tn-table-compact td:nth-child(5) { padding-left: 16px; }
-        /* A little extra space between Phone and Room & Bed (3rd column). */
-        .tn-table.tn-table-compact th:nth-child(3),
-        .tn-table.tn-table-compact td:nth-child(3) { padding-left: 24px; }
+        .tn-table.tn-table-compact td:last-child { padding-right: 20px; text-align: center; }
         /* Single-line, ellipsised text so rows never wrap and stay the same height */
         .tn-table.tn-table-compact .tn-room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         /* Tenant name and email also wrap instead of being cut with "…" (emails have no
@@ -2277,7 +2272,12 @@ const handleAdd = async () => {
         .tn-table.tn-table-compact .tn-notice-tag { white-space: nowrap; }
         .tn-table.tn-table-compact .tn-type-badge { white-space: nowrap; }
         .tn-table.tn-table-compact .tn-action-btn { width: 30px; height: 30px; flex-shrink: 0; }
-        .tn-actions-cell { display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px; }
+        /* The Status badge is inline-flex; keep it (and the notice tag under it) flush-left
+           so it lines up with the STATUS header. */
+        .tn-table.tn-table-compact td .tn-status-badge { display: inline-flex; }
+        .tn-table.tn-table-compact td .tn-notice-tag { justify-content: flex-start; }
+        /* ACTIONS: header text and the icon row are both centred in the same column. */
+        .tn-actions-cell { display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px; width: 100%; }
         @media (max-width: 640px) {
           .tn-table.tn-table-compact { min-width: 700px; }
         }
@@ -2642,24 +2642,25 @@ const handleAdd = async () => {
             In "Room Wise" mode tenants are ordered by room (ascending), then by name (A–Z),
             without separate room header rows.
             ROOM & BED shows the room name/number together with the bed number (e.g. "101 - Bed 1").
-            Check-in date, rent/total and pending amount are available in the View dialog. */}
+            Check-in date, rent/total and pending amount are available in the View dialog.
+            Header and data cells of each column share the same padding / alignment (see CSS). */}
         <div className="tn-table-container">
           <div className="overflow-x-auto">
             <table className="tn-table tn-table-compact">
               <colgroup>
                 <col />
-                <col style={{ width: 116 }} />
-                <col style={{ width: 190 }} />
-                <col style={{ width: 110 }} />
+                <col style={{ width: 150 }} />
+                <col style={{ width: 170 }} />
+                <col style={{ width: 150 }} />
                 <col style={{ width: 232 }} />
               </colgroup>
               <thead>
                 <tr>
-                  <th>TENANT</th>
-                  <th>PHONE</th>
-                  <th>ROOM & BED</th>
-                  <th>STATUS</th>
-                  <th style={{ textAlign: 'center' }}>ACTIONS</th>
+                  <th scope="col">TENANT</th>
+                  <th scope="col">PHONE</th>
+                  <th scope="col">ROOM & BED</th>
+                  <th scope="col">STATUS</th>
+                  <th scope="col">ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
