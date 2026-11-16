@@ -3078,11 +3078,29 @@ export const getTenantWiseEBBill = async ({
   if (!roomId && !flatId) throw new Error("roomId or flatId required");
   if (!month || !year) throw new Error("month and year required");
 
-  const url = roomId
-    ? `/eb-readings/tenant-wise-bill/room?roomId=${roomId}&month=${month}&year=${year}`
-    : `/eb-readings/tenant-wise-bill/flat?flatId=${flatId}&month=${month}&year=${year}`;
+  const path = roomId
+    ? "/eb-readings/tenant-wise-bill/room"
+    : "/eb-readings/tenant-wise-bill/flat";
+  const base: Record<string, any> = roomId
+    ? { roomId, month, year }
+    : { flatId, month, year };
 
-  return (await api.get(url)).data?.data ?? [];
+  // The backend now returns a Page (10 per page). The EB page's carry-over and
+  // flat logic needs every tenant of the room/flat, so walk the pages. Most
+  // rooms are a single request.
+  const SIZE = 10;
+  const all: TenantEBBill[] = [];
+  for (let pg = 0; ; pg++) {
+    const res = await api.get(path, { params: { ...base, page: pg, size: SIZE } });
+    const data = res.data?.data;
+
+    // Tolerate the old plain-array shape too (e.g. during a staged deploy).
+    if (Array.isArray(data)) return data;
+
+    all.push(...(data?.content ?? []));
+    if (data?.last !== false || !data?.content?.length) break;
+  }
+  return all;
 };
 
 export const recordPayment = async (

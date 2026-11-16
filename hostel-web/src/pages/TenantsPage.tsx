@@ -2005,17 +2005,30 @@ const handleAdd = async () => {
     }
   };
 
+  /* Excel import.
+     - On success the list is reloaded.
+     - On failure the list is ALSO reloaded: the backend saves rows one by one, so
+       the rows before/after a failing row may already be stored and must show up.
+     - The chosen file is ALWAYS forgotten afterwards (finally), so the next click
+       on "Import Excel" opens the file chooser again instead of silently
+       re-uploading the old file. */
   const performExcelImport = async (file: File) => {
     try {
       await importTenantsExcel(file);
       toast.success("Excel imported successfully");
-      setExcelFile(null);
-      if (excelInputRef.current) excelInputRef.current.value = "";
       setPage(0);
       await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds()]);
       window.dispatchEvent(new Event("beds-updated"));
     } catch (e: any) {
       toast.error(extractError(e, "Excel import failed"), { duration: 8000 });
+      setPage(0);
+      try {
+        await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds()]);
+        window.dispatchEvent(new Event("beds-updated"));
+      } catch { /* the refresh is best-effort */ }
+    } finally {
+      setExcelFile(null);
+      if (excelInputRef.current) excelInputRef.current.value = "";
     }
   };
 

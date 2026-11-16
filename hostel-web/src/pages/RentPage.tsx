@@ -92,7 +92,7 @@ import { previewCycleRent, toISODate, type BranchRentConfig } from "@/lib/rentPr
    added to the current month's EB.
    ══════════════════════════════════════════════════════════════════ */
 
-const BIG_PAGE = 500;      // rows per request when loading whole lists
+const BIG_PAGE = 10;      // rows per request when loading whole lists
 const EB_CONCURRENCY = 6;  // parallel EB-bill requests (browser limit is ~6/host)
 const CACHE_FRESH_MS = 15_000;
 
