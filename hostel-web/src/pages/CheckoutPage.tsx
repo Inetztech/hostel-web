@@ -1,15 +1,16 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import {
-  getRooms,
-  getTenants,
+  getAllRooms,
+  getAllBranches,
+  getAllActiveTenants,
+  getAllTenantsByRoom,
+  getAllEBReadings,
+  invalidateListCache,
   getCheckoutSummary,
   checkoutTenant,
   getUserRole,
-  getEBReadings,
   updateBedStatus,
   getBranchId,
-  getBranches,
-  fetchAllPages,
   getBusinessModel,
 } from "@/lib/store";
 
@@ -388,8 +389,11 @@ const PendingRentDialog = ({
 
 const CheckoutPage = () => {
   const [rooms, setRooms]                         = useState<Room[]>([]);
+  // Active tenants only (what the left-hand list shows).
   const [tenants, setTenants]                     = useState<Tenant[]>([]);
-  const [allTenants, setAllTenants]                = useState<Tenant[]>([]);
+  // Tenants (ALL statuses) of the selected tenant's room / flat ONLY.
+  // Loaded on selection, not on page load.
+  const [allTenants, setAllTenants]               = useState<Tenant[]>([]);
   const [branches, setBranches]                   = useState<Branch[]>([]);
   const [selectedTenantId, setSelectedTenantId]   = useState<string>("");
   // Defaults to today; the user can edit it from the "Check-Out Date" card.
@@ -445,17 +449,19 @@ const CheckoutPage = () => {
   const branchId = getBranchId();
   const isAdmin  = role === "ADMIN";
 
-  const reload = async () => {
+  // PERFORMANCE: rooms / active tenants / branches come from short-lived,
+  // de-duplicated caches in the store, so a remount (React StrictMode) or
+  // re-opening the page does not refetch everything. `force` bypasses the
+  // cache after a write (checkout).
+  const reload = async (force = false) => {
     try {
-      const [roomList, allTenantList, allBranches] = await Promise.all([
-        fetchAllPages<Room>(getRooms, 10),
-        fetchAllPages<Tenant>(getTenants, 10),
-        fetchAllPages<Branch>(getBranches, 10),
+      if (force) invalidateListCache();
+
+      const [roomList, activeTenants, allBranches] = await Promise.all([
+        getAllRooms(),
+        getAllActiveTenants(),
+        getAllBranches(),
       ]);
-
-      const activeTenants = allTenantList.filter((t) => t.status === "Active");
-
-      setAllTenants(allTenantList);
 
       const filteredRooms =
         role === "ADMIN"
@@ -488,6 +494,8 @@ const CheckoutPage = () => {
   };
 
   const didLoad = useRef(false);
+  // Stale-click guard: only the latest tenant selection may write state.
+  const selectSeq = useRef(0);
 
   useEffect(() => {
     if (didLoad.current) return;
@@ -542,18 +550,11 @@ const CheckoutPage = () => {
   //      reading among the room's MONTHLY tenants, then the tenant's own.
   // AC readings are per ROOM even inside a shared-meter flat.
   //
-  // FIX (AC Previous jumped 20 -> 60 for roommates of a different room):
-  // a flat checkout writes a copy of the checkout row onto EVERY room of
-  // the flat (the main meter is shared), and those sibling copies used to
-  // carry the checked-out tenant's AC value (Anbu: 50 -> 60 in
-  // W1-ROOM-1). The old floor was the maximum acCurrentReading over every
-  // row of the room, checkout rows included, so W1-ROOM-2 (AC 20) read 60.
-  //
-  // Now a CHECKOUT row only counts for this room's AC meter when a tenant
-  // of THIS room provably owns it (tenantId belongs to a tenant of this
-  // room). Genuine EB-page rows always count. The room's own tenants'
+  // A CHECKOUT row only counts for this room's AC meter when a tenant of
+  // THIS room provably owns it (tenantId belongs to a tenant of this room).
+  // Genuine EB-page rows always count. The room's own tenants'
   // acCheckoutReading values are an additional, trustworthy floor. This
-  // also protects against sibling rows saved before the backend fix.
+  // protects against sibling rows a flat checkout writes onto every room.
   // ───────────────────────────────────────────────────────────────────
   const computeAcPrevious = (
     roomId: number,
@@ -613,15 +614,6 @@ const CheckoutPage = () => {
 
   // ───────────────────────────────────────────────────────────────────
   // MAIN-METER PREVIOUS READING for a checkout.
-  //
-  // FIX (Balaji / Mani, room G6):
-  //   Oct : Mani checked out at 8623 (Oct bill 8382 -> 8623, shared by
-  //         Balaji + Mani = 120.5 units each, ALREADY billed in October).
-  //   Nov : Balaji checks out at 8703.
-  // The old code took the lowest previousReading over EVERY reading of
-  // the meter (8382), so Balaji's checkout re-charged October's segment:
-  //   120.5 + 80 = 200.5 units (201) = ₹2,607     <- wrong
-  // Correct: 8623 -> 8703 = 80 units = ₹1,040.
   //
   // Rules (the same billing window the backend uses: one window per month):
   //   1. A genuine EB-page entry exists (isCheckout === false)
@@ -717,7 +709,21 @@ const CheckoutPage = () => {
       : joinReading;
   };
 
+  // ───────────────────────────────────────────────────────────────────
+  // Select a tenant.
+  //
+  // PERFORMANCE:
+  //   • the business model, the room/flat tenants, the EB readings and the
+  //     pending rents are fetched IN PARALLEL (they used to be sequential);
+  //   • only the tenants of this room (or this flat) are loaded, not every
+  //     tenant in the system;
+  //   • selectSeq guards against a slow response for an earlier click
+  //     overwriting the state of a later click.
+  // ───────────────────────────────────────────────────────────────────
   const handleSelectTenant = async (tenantId: string) => {
+    const seq = ++selectSeq.current;
+    const isStale = () => seq !== selectSeq.current;
+
     try {
       setSelectedTenantId(tenantId);
       setSummary({ pendingRents: [], totalRentDue: 0, advancePaid: 0 });
@@ -735,6 +741,7 @@ const CheckoutPage = () => {
       setBusinessModelNote(null);
       setApproxRateOverride(null);
       setFixedOverride(null);
+      setAllTenants([]);
 
       const numericTenantId = Number(tenantId);
       const selected = tenants.find((t) => Number(t.id) === numericTenantId);
@@ -742,24 +749,36 @@ const CheckoutPage = () => {
 
       setMaintenanceCharge(selected.tenantStay === "DAILY" ? 0 : 1000);
 
-      const room   = rooms.find((r) => Number(r.id) === Number(selected.roomId));
+      const room = rooms.find((r) => Number(r.id) === Number(selected.roomId));
+
+      // Whose tenants do the EB splits need? The whole flat if the room
+      // belongs to a flat, otherwise just this room.
+      const roomIdsToLoad: number[] =
+        room?.flatId != null
+          ? rooms
+              .filter((r) => Number(r.flatId) === Number(room.flatId))
+              .map((r) => Number(r.id))
+          : [Number(selected.roomId)];
 
       // Load the hostel's Business Model so this page follows the same
       // Extract / Approximate / Fixed mode the backend bills with.
-      // `loadedBm` is also used below to decide whether AC readings apply.
-      let loadedBm: BusinessModelLite | null = null;
-      const hostelIdForModel = resolveHostelId(room, selected);
-      if (hostelIdForModel == null) {
-        setBusinessModel(null);
-        setBusinessModelNote("Hostel could not be determined — using Extract mode.");
-      } else {
+      const loadBusinessModel = async (): Promise<BusinessModelLite | null> => {
+        const hostelIdForModel = resolveHostelId(room, selected);
+        if (hostelIdForModel == null) {
+          if (!isStale()) {
+            setBusinessModel(null);
+            setBusinessModelNote("Hostel could not be determined — using Extract mode.");
+          }
+          return null;
+        }
         try {
-          const bm = await getBusinessModel(hostelIdForModel);
-          loadedBm = (bm as BusinessModelLite) ?? null;
-          setBusinessModel(loadedBm);
+          const bm = ((await getBusinessModel(hostelIdForModel)) as BusinessModelLite) ?? null;
+          if (!isStale()) setBusinessModel(bm);
+          return bm;
         } catch (bmErr: any) {
           const status = bmErr?.response?.status;
           console.warn("Business model not available, using Extract mode:", bmErr);
+          if (isStale()) return null;
           setBusinessModel(null);
           if (status === 404) {
             // No model configured for this hostel yet -> plain Extract, no warning.
@@ -773,8 +792,28 @@ const CheckoutPage = () => {
               `Business model could not be loaded (${status ?? "network error"}) — using Extract mode.`
             );
           }
+          return null;
         }
-      }
+      };
+
+      // Everything the page needs, fetched IN PARALLEL.
+      const [loadedBm, scopeTenantLists, allReadings, checkout] = await Promise.all([
+        loadBusinessModel(),
+        Promise.all(roomIdsToLoad.map((id) => getAllTenantsByRoom(id))),
+        getAllEBReadings(),
+        getCheckoutSummary(numericTenantId, selected.advance ?? 0),
+      ]);
+
+      if (isStale()) return; // the user already clicked another tenant
+
+      // De-duplicate, and make sure the selected tenant is present.
+      const byId = new Map<number, Tenant>();
+      scopeTenantLists.flat().forEach((t) => byId.set(Number(t.id), t));
+      if (!byId.has(numericTenantId)) byId.set(numericTenantId, selected);
+      const scopeTenants = Array.from(byId.values());
+
+      setAllTenants(scopeTenants);
+      setEbReadingsAll(allReadings);
 
       // ROOM property: an AC room behaves exactly like a non-AC room, so no AC
       // previous reading is prepared. FLAT property: unchanged.
@@ -782,22 +821,17 @@ const CheckoutPage = () => {
         String(loadedBm?.propertyType ?? "").toUpperCase() === "ROOM";
       const isAcRoom = room?.hostelType === "AC" && !isRoomProperty;
 
-      const allReadings = await fetchAllPages<EBReading>(getEBReadings, 10);
-      setEbReadingsAll(allReadings);
-
       if (isAcRoom) {
-        // AC units stay per-room even inside a shared-meter flat, so this
-        // is unaffected by the flat-vs-room split below.
+        // AC units stay per-room even inside a shared-meter flat.
         setAcPrev(
           String(
-            computeAcPrevious(Number(selected.roomId), selected, allReadings, allTenants)
+            computeAcPrevious(Number(selected.roomId), selected, allReadings, scopeTenants)
           )
         );
       }
 
       // The main-meter "Previous" reading is derived by the effect below
-      // (computeFinalPrevious) so it also follows the Check-Out Date: a
-      // different month means a different billing window.
+      // (computeFinalPrevious) so it also follows the Check-Out Date.
 
       const roomOwnReadings = allReadings.filter(
         (r) => Number(r.roomId) === Number(selected.roomId)
@@ -814,8 +848,6 @@ const CheckoutPage = () => {
       if (relevantReadings.length > 0) {
         setMeterScope(usingFlatLevelReadings ? "flat" : "room");
       }
-
-      const checkout = await getCheckoutSummary(numericTenantId);
 
       const rents       = checkout?.pendingRents ?? [];
       const unpaidRents = rents.filter((r) => r.paymentStatus !== "PAID");
@@ -837,6 +869,7 @@ const CheckoutPage = () => {
 
       setTenantEBDue(totalEBDue);
     } catch (error) {
+      if (isStale()) return;
       console.error("Checkout fetch error:", error);
       toast.error("Failed to fetch checkout data");
       const selected = tenants.find((t) => Number(t.id) === Number(tenantId));
@@ -1674,6 +1707,9 @@ const CheckoutPage = () => {
 
       toast.success(`${selectedTenant.name} checked out successfully`);
 
+      // Invalidate any in-flight selection so it cannot repopulate state.
+      selectSeq.current++;
+
       setSelectedTenantId("");
       setCheckOutDate(getTodayISO());
       setFinalPrev("");
@@ -1691,8 +1727,11 @@ const CheckoutPage = () => {
       setBusinessModelNote(null);
       setApproxRateOverride(null);
       setFixedOverride(null);
+      setAllTenants([]);
+      setEbReadingsAll([]);
 
-      await reload();
+      // Force refresh: the checkout changed tenants, beds and EB rows.
+      await reload(true);
     } catch (err: any) {
       console.error("Checkout error:", err);
       toast.error(err.message ?? "Checkout failed");
