@@ -152,6 +152,27 @@ const page = (res: any) => ({
 
 const d = (res: any) => res.data.data;
 
+// ─────────────────────────────────────────────────────────────────────
+// Shared public calls. Identical calls made at (almost) the same time —
+// e.g. React StrictMode running an effect twice in dev, or Home + Property
+// pages asking for the same thing — share ONE request. The result is kept
+// for a few seconds only, and a failure is never kept.
+// ─────────────────────────────────────────────────────────────────────
+const sharedCalls = new Map<string, Promise<any>>();
+
+const sharedCall = <T>(key: string, fn: () => Promise<T>, ttlMs = 5000): Promise<T> => {
+  const hit = sharedCalls.get(key);
+  if (hit) return hit as Promise<T>;
+
+  const promise = fn().catch((err) => {
+    sharedCalls.delete(key);
+    throw err;
+  });
+  sharedCalls.set(key, promise);
+  setTimeout(() => sharedCalls.delete(key), ttlMs);
+  return promise;
+};
+
 const guard = () => {
   const role = getUserRole();
   if (!["SUPER_ADMIN", "ADMIN", "WARDEN", "TENANT"].includes(role))
@@ -1093,7 +1114,7 @@ export const fetchHostels = async (pg = 0, size = 10): Promise<{ content: Hostel
 export const getHostels = fetchHostels;
 
 export const getHostelById = async (id: number): Promise<Hostel> =>
-  (await api.get(`/hostels/${id}`)).data.data;
+  sharedCall(`hostel-${id}`, async () => (await api.get(`/hostels/${id}`)).data.data);
 
 export const createHostel = async (data: HostelRequest): Promise<Hostel> =>
   { guard(); return (await api.post("/hostels", data)).data.data; };
@@ -1185,7 +1206,9 @@ export const deleteHostelWithAdmin = async (id: number): Promise<void> =>
 
 
 export const getHostelImages = async (hostelId: number): Promise<HostelImageDTO[]> =>
-  d(await api.get(`/hostel-images/${hostelId}`));
+  sharedCall(`hostel-images-${hostelId}`, async () =>
+    d(await api.get(`/hostel-images/${hostelId}`))
+  );
 
 export const uploadHostelImages = async (
   hostelId: number,
@@ -1195,29 +1218,38 @@ export const uploadHostelImages = async (
   const fd = new FormData();
   files.forEach((f) => fd.append("files", f));
   fd.append("imageType", imageType);
-  return d(await api.post(`/hostel-images/${hostelId}/upload`, fd, {
+  const res = d(await api.post(`/hostel-images/${hostelId}/upload`, fd, {
     headers: { "Content-Type": "multipart/form-data" },
   }));
+  sharedCalls.delete(`hostel-images-${hostelId}`);
+  return res;
 };
 
 export const updateHostelImage = async (
   hostelId: number,
   imageId: number,
   data: { imageType?: string; displayOrder?: number }
-): Promise<HostelImageDTO> =>
-  d(await api.put(`/hostel-images/${hostelId}/${imageId}`, null, { params: data }));
+): Promise<HostelImageDTO> => {
+  const res = d(await api.put(`/hostel-images/${hostelId}/${imageId}`, null, { params: data }));
+  sharedCalls.delete(`hostel-images-${hostelId}`);
+  return res;
+};
 
 export const setPrimaryHostelImage = async (
   hostelId: number,
   imageId: number
-): Promise<HostelImageDTO> =>
-  d(await api.put(`/hostel-images/${hostelId}/${imageId}/primary`));
+): Promise<HostelImageDTO> => {
+  const res = d(await api.put(`/hostel-images/${hostelId}/${imageId}/primary`));
+  sharedCalls.delete(`hostel-images-${hostelId}`);
+  return res;
+};
 
 export const reorderHostelImages = async (
   hostelId: number,
   orderedImageIds: number[]
 ): Promise<void> => {
   await api.put(`/hostel-images/${hostelId}/reorder`, orderedImageIds);
+  sharedCalls.delete(`hostel-images-${hostelId}`);
 };
 
 export const deleteHostelImage = async (
@@ -1225,6 +1257,7 @@ export const deleteHostelImage = async (
   imageId: number
 ): Promise<void> => {
   await api.delete(`/hostel-images/${hostelId}/${imageId}`);
+  sharedCalls.delete(`hostel-images-${hostelId}`);
 };
 const branchesCache = new Map<string, { data: { content: Branch[]; totalElements: number }; ts: number }>();
 const branchesInFlight = new Map<string, Promise<{ content: Branch[]; totalElements: number }>>();
@@ -1544,6 +1577,8 @@ export const markAbsconded = async (
   if (reason?.trim()) params.reason = reason.trim();
   const res = await api.put(`/tenants/${tenantId}/mark-absconded`, null, { params });
   invalidateListCache();
+  // the public absconded list (PropertyDetailPage) must not serve a stale copy
+  sharedCalls.clear();
   return d(res);
 };
 
@@ -2317,24 +2352,28 @@ export async function getPublicStartingPrices(
 ): Promise<Record<number, number>> {
   if (hostelIds.length === 0) return {};
 
-  const res = await api.get("/rooms/public/starting-prices", {
-    params: { hostelIds },
-    paramsSerializer: { indexes: null }, // -> hostelIds=1&hostelIds=2, matches @RequestParam List<Integer>
-  });
+  const ids = [...new Set(hostelIds)].sort((a, b) => a - b);
 
-  return res.data.data as Record<number, number>;
+  return sharedCall(`starting-prices-${ids.join(",")}`, async () => {
+    const res = await api.get("/rooms/public/starting-prices", {
+      params: { hostelIds: ids },
+      paramsSerializer: { indexes: null }, // -> hostelIds=1&hostelIds=2, matches @RequestParam List<Integer>
+    });
+    return res.data.data as Record<number, number>;
+  });
 }
 
 
 
 export const getPublicRoomTypesForHostel = async (
   hostelId: number | string
-): Promise<PublicRoomTypeSummary[]> => {
-  const res = await api.get("/rooms/public/room-types", {
-    params: { hostelId: Number(hostelId) },
+): Promise<PublicRoomTypeSummary[]> =>
+  sharedCall(`public-room-types-${Number(hostelId)}`, async () => {
+    const res = await api.get("/rooms/public/room-types", {
+      params: { hostelId: Number(hostelId) },
+    });
+    return res.data?.data ?? [];
   });
-  return res.data?.data ?? [];
-};
 
 
 export const forgotPassword = async (email: string): Promise<string> => {

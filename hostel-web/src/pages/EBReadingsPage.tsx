@@ -1252,6 +1252,28 @@ const EBReadingsPage = () => {
           (flatId != null ? Number(x.flatId) === Number(flatId) : Number(x.roomId) === Number(roomId))
       );
 
+    // True when this room/flat has a normal (non-checkout) reading in the
+    // SELECTED month. A month that holds only a checkout reading has not
+    // been fully read yet, so its still-living tenants are not billed here.
+    const hasGenuineReadingThisMonth = (
+      flatId: number | null | undefined,
+      roomId: number | null | undefined
+    ) => {
+      const flatRoomIds = flatId != null
+        ? new Set(rooms.filter(rm => Number(rm.flatId) === Number(flatId)).map(rm => Number(rm.id)))
+        : null;
+      return allReadings.some(
+        x =>
+          Number(x.month) === selMonth &&
+          Number(x.year) === selYear &&
+          x.isCheckout !== true &&
+          (flatId != null
+            ? Number(x.flatId) === Number(flatId) ||
+              (x.roomId != null && flatRoomIds!.has(Number(x.roomId)))
+            : Number(x.roomId) === Number(roomId))
+      );
+    };
+
     const prevMonthHasReading = (flatId: number | null | undefined, roomId: number | null | undefined) => {
       const flatRoomIds = flatId != null
         ? new Set(rooms.filter(rm => Number(rm.flatId) === Number(flatId)).map(rm => Number(rm.id)))
@@ -1276,6 +1298,12 @@ const EBReadingsPage = () => {
       const t = tenantById.get(Number(tenantId));
       if (!t || t.status === "Checked_Out") return false;
       if (billedCurrent.has(Number(tenantId))) return false;
+
+      // The month holds ONLY a checkout reading -> the active tenant is not
+      // billed yet. Hide them now; their share is carried into the next
+      // month's bill.
+      if (!hasGenuineReadingThisMonth(flatId, roomId)) return true;
+
       return nextMonthHasReading(flatId, roomId);
     };
 
