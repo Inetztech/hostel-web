@@ -758,14 +758,14 @@ export const addTenant = async (data: TenantRequest | FormData): Promise<Tenant>
   return res;
 };
 
-export const importTenantsExcel = async (file: File): Promise<string> => {
-  guard();
-  const fd = new FormData();
-  fd.append("file", file);
-  const res = d(await api.post("/tenants/import", fd));
-  invalidateListCache();
-  return res;
-};
+// export const importTenantsExcel = async (file: File): Promise<string> => {
+//   guard();
+//   const fd = new FormData();
+//   fd.append("file", file);
+//   const res = d(await api.post("/tenants/import", fd));
+//   invalidateListCache();
+//   return res;
+// };
 
 /**
  * Downloads the tenant list (.xlsx) for the given filters. The backend
@@ -2382,4 +2382,37 @@ export const forgotPassword = async (email: string): Promise<string> => {
 
 export const resetPassword = async (token: string, newPassword: string): Promise<string> => {
   return d(await api.post("/auth/reset-password", { token, newPassword }));
+};
+
+
+export const resolveAbsconded = async (
+  tenantId: number,
+  status: "ACTIVE" | "CHECKED_OUT",
+  note?: string
+): Promise<Tenant> => {
+  guard();
+  const params: Record<string, string> = { status };
+  if (note?.trim()) params.note = note.trim();
+  const res = await api.put(`/tenants/${tenantId}/absconded-status`, null, { params });
+  invalidateListCache();
+  sharedCalls.clear(); // public absconded list must not serve a stale copy
+  return d(res);
+};
+
+
+export const importTenantsExcel = async (file: File, updateExisting = true): Promise<string> => {
+  guard();
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = d(await api.post("/tenants/import", fd, { params: { updateExisting } }));
+  invalidateListCache();
+  return res;
+};
+
+/** Tenants of the sheet that are already saved (matched by phone), as "Name (phone)". */
+export const checkImportDuplicates = async (file: File): Promise<string[]> => {
+  guard();
+  const fd = new FormData();
+  fd.append("file", file);
+  return d(await api.post("/tenants/import/check", fd)) ?? [];
 };

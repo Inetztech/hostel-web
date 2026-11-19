@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState, useRef, useCallback, useReducer } from "r
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   addTenant, updateTenant, deleteTenant,
-  importTenantsExcel, getUserRole, getBranchId,
-  checkFraud, markAbsconded,
+  importTenantsExcel, checkImportDuplicates, getUserRole, getBranchId,
+  checkFraud, markAbsconded, resolveAbsconded,
   getPendingTenants, approveAndAllocateTenant,
   cancelCheckoutNotice, fetchTenantsInNoticePeriod,
   transferTenantRoomBed, getTenantTransferHistory, extractTenantDocument,
@@ -27,7 +27,7 @@ import {
   Users, ShieldCheck, UserX, FileCheck2,
   Download, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, Check, X, ClipboardCheck,
   CalendarClock, Ban, ArrowRightCircle, MoreHorizontal, CalendarDays,
-  ArrowLeftRight, History, Loader2, FileSpreadsheet,
+  ArrowLeftRight, History, Loader2, FileSpreadsheet, RotateCcw,
 } from "lucide-react";
 import api from "@/lib/api";
 import CheckoutReportButton from "@/components/CheckoutReportButton";
@@ -1234,9 +1234,25 @@ const TenantsPage = () => {
   const [abscondTarget, setAbscondTarget] = useState<Tenant | null>(null);
   const [abscondReason, setAbscondReason] = useState("");
 
+  /* Change an ABSCONDED tenant to Active (returned) or Checked Out. */
+  const [resolveOpen,   setResolveOpen]   = useState(false);
+  const [resolveTarget, setResolveTarget] = useState<Tenant | null>(null);
+  const [resolveStatus, setResolveStatus] = useState<"ACTIVE" | "CHECKED_OUT" | "">("");
+  const [resolveNote,   setResolveNote]   = useState("");
+  const [resolving,     setResolving]     = useState(false);
+
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const autoImportOnSelectRef = useRef(false);
+
+  /* Excel import: when the sheet contains tenants that are already saved
+     (matched by phone), ask Yes / No before importing.
+       Yes -> existing tenants are updated AND new ones are added.
+       No  -> only the new tenants are added; existing ones are left untouched. */
+  const [importDupOpen, setImportDupOpen] = useState(false);
+  const [importDupFile, setImportDupFile] = useState<File | null>(null);
+  const [importDupList, setImportDupList] = useState<string[]>([]);
+  const [importChecking, setImportChecking] = useState(false);
 
   /* True while the tenant-list .xlsx is being generated/downloaded. */
   const [exporting, setExporting] = useState(false);
@@ -1859,6 +1875,29 @@ const handleAdd = async () => {
     }
   };
 
+  /* Absconded -> Active (tenant returned, previous bed must still be free)
+     or Absconded -> Checked Out (stay formally closed). */
+  const handleResolveAbsconded = async () => {
+    if (!resolveTarget) return;
+    if (!resolveStatus) { toast.error("Select Active or Checked Out"); return; }
+    setResolving(true);
+    try {
+      await resolveAbsconded(resolveTarget.id, resolveStatus, resolveNote);
+      toast.success(
+        `${resolveTarget.name} is now ${resolveStatus === "ACTIVE" ? "Active" : "Checked Out"}`
+      );
+      setResolveOpen(false);
+      setResolveTarget(null);
+      setResolveStatus("");
+      setResolveNote("");
+      await Promise.all([loadTenantsRef.current(), reloadBeds()]);
+    } catch (e: any) {
+      toast.error(extractError(e, "Failed to change status"));
+    } finally {
+      setResolving(false);
+    }
+  };
+
   const handleApprove = async () => {
     if (!approveTarget) return;
     if (!approveForm.roomId || !approveForm.bedId) {
@@ -2012,10 +2051,14 @@ const handleAdd = async () => {
      - The chosen file is ALWAYS forgotten afterwards (finally), so the next click
        on "Import Excel" opens the file chooser again instead of silently
        re-uploading the old file. */
-  const performExcelImport = async (file: File) => {
+  const performExcelImport = async (file: File, updateExisting = true) => {
     try {
-      await importTenantsExcel(file);
-      toast.success("Excel imported successfully");
+      await importTenantsExcel(file, updateExisting);
+      toast.success(
+        updateExisting
+          ? "Excel imported successfully (existing tenants updated, new tenants added)"
+          : "Excel imported successfully (only new tenants added, existing tenants skipped)"
+      );
       setPage(0);
       await Promise.all([loadTenantsRef.current(undefined, 0), reloadBeds()]);
       window.dispatchEvent(new Event("beds-updated"));
@@ -2032,13 +2075,50 @@ const handleAdd = async () => {
     }
   };
 
+  /* Looks for tenants of the sheet that are already saved. None -> import straight
+     away; some -> show the Yes / No dialog first. */
+  const startExcelImport = async (file: File) => {
+    setImportChecking(true);
+    try {
+      const existing = await checkImportDuplicates(file);
+      if (existing.length > 0) {
+        setImportDupFile(file);
+        setImportDupList(existing);
+        setImportDupOpen(true);
+        return;
+      }
+    } catch {
+      // If the check itself fails, fall through to a normal import; the backend
+      // still validates every row.
+    } finally {
+      setImportChecking(false);
+    }
+    await performExcelImport(file, true);
+  };
+
+  const cancelExcelImport = () => {
+    setImportDupOpen(false);
+    setImportDupFile(null);
+    setImportDupList([]);
+    setExcelFile(null);
+    if (excelInputRef.current) excelInputRef.current.value = "";
+  };
+
+  const confirmExcelImport = async (updateExisting: boolean) => {
+    const file = importDupFile;
+    setImportDupOpen(false);
+    setImportDupFile(null);
+    setImportDupList([]);
+    if (file) await performExcelImport(file, updateExisting);
+  };
+
   const handleExcelImport = async () => {
     if (!excelFile) {
       autoImportOnSelectRef.current = true;
       excelInputRef.current?.click();
       return;
     }
-    await performExcelImport(excelFile);
+    await startExcelImport(excelFile);
   };
 
   /* Downloads the tenant list as .xlsx using the filters currently selected
@@ -2362,7 +2442,7 @@ const handleAdd = async () => {
                 if (!file) return;
                 if (file.size > MAX_FILE_SIZE) { toast.error("File size must be below 10 MB"); e.target.value = ""; return; }
                 setExcelFile(file);
-                if (wantsAutoImport) performExcelImport(file);
+                if (wantsAutoImport) startExcelImport(file);
               }} />
 
             {/* Export the (filtered) tenant list as an .xlsx download */}
@@ -2373,8 +2453,11 @@ const handleAdd = async () => {
               {exporting ? "Exporting..." : "Export Excel"}
             </button>
 
-            <button className="tn-btn-outline" onClick={handleExcelImport}>
-              <Download size={16} className="shrink-0" aria-hidden="true" /> Import Excel
+            <button className="tn-btn-outline" onClick={handleExcelImport} disabled={importChecking}>
+              {importChecking
+                ? <Loader2 size={16} className="shrink-0 animate-spin" aria-hidden="true" />
+                : <Download size={16} className="shrink-0" aria-hidden="true" />}
+              {importChecking ? "Checking..." : "Import Excel"}
             </button>
 
             <Dialog open={addOpen} onOpenChange={(open) => {
@@ -2781,6 +2864,15 @@ const handleAdd = async () => {
                               </button>
                             )}
 
+                            {/* Absconded tenant came back (-> Active) or is closed out (-> Checked Out) */}
+                            {t.status === "Absconded" && (
+                              <button className="tn-action-btn"
+                                onClick={() => { setResolveTarget(t); setResolveStatus(""); setResolveNote(""); setResolveOpen(true); }}
+                                title="Change Absconded Status" aria-label="Change absconded status">
+                                <RotateCcw size={16} color="#16a34a" strokeWidth={2} className="shrink-0" />
+                              </button>
+                            )}
+
                             {/* Submit Checkout Notice removed: admin/warden are not
                                 permitted to create a notice on a tenant's behalf.
                                 See TenantController — only POST /tenants/me/checkout-notice
@@ -3056,6 +3148,55 @@ const handleAdd = async () => {
             <Button variant="outline" className="rounded-lg" onClick={() => setAbscondOpen(false)}>Cancel</Button>
             <Button variant="destructive" className="rounded-lg" onClick={handleMarkAbsconded}>
               Confirm — Mark Absconded
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Absconded Status Dialog */}
+      <Dialog open={resolveOpen} onOpenChange={(open) => {
+        setResolveOpen(open);
+        if (!open) { setResolveTarget(null); setResolveStatus(""); setResolveNote(""); }
+      }}>
+        <DialogContent className="rounded-2xl [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-700">
+              <RotateCcw className="h-5 w-5 shrink-0" /> Change Absconded Status
+            </DialogTitle>
+            <DialogDescription>
+              Active puts the tenant back into their previous bed (it must still be free).
+              Checked Out closes the stay without any bed change.
+            </DialogDescription>
+          </DialogHeader>
+          {resolveTarget && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">
+                Tenant: <span className="text-foreground">{resolveTarget.name}</span>
+                {" "}· Room {resolveTarget.roomNumber ?? roomNo(resolveTarget.roomId)}
+                {" "}· Bed {resolveTarget.bedNumber ?? bedNo(resolveTarget.bedId)}
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">New status *</label>
+                <Select value={resolveStatus} onValueChange={(v) => setResolveStatus(v as "ACTIVE" | "CHECKED_OUT")}>
+                  <SelectTrigger aria-label="New status" className="rounded-lg"><SelectValue placeholder="Select status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">Active (tenant returned)</SelectItem>
+                    <SelectItem value="CHECKED_OUT">Checked Out</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Note (optional)</label>
+                <Input aria-label="Status change note" className="rounded-lg"
+                  placeholder="e.g. Cleared pending dues on 19 Nov"
+                  value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" className="rounded-lg" onClick={() => setResolveOpen(false)} disabled={resolving}>Cancel</Button>
+            <Button className="rounded-lg" onClick={handleResolveAbsconded} disabled={resolving}>
+              {resolving ? "Saving..." : "Update Status"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3446,6 +3587,39 @@ const handleAdd = async () => {
               <Button variant="outline" className="rounded-lg" onClick={() => setHistoryOpen(false)}>Close</Button>
             </DialogFooter>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* EXCEL IMPORT — existing tenants found: Yes / No */}
+      <Dialog open={importDupOpen} onOpenChange={(open) => { if (!open) cancelExcelImport(); }}>
+        <DialogContent className="sm:max-w-[520px] rounded-2xl [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="h-5 w-5 shrink-0" /> Tenants already saved
+            </DialogTitle>
+            <DialogDescription>
+              {importDupList.length} tenant(s) in this file already exist (matched by phone number).
+              Do you want to save them again as updated records?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-0.5">
+            {importDupList.slice(0, 50).map((d, i) => <p key={i}>{d}</p>)}
+            {importDupList.length > 50 && (
+              <p className="text-slate-500">…and {importDupList.length - 50} more</p>
+            )}
+          </div>
+
+          <div className="text-xs text-slate-600 space-y-1">
+            <p><span className="font-semibold">Yes</span> — update the existing tenants and add the new ones.</p>
+            <p><span className="font-semibold">No</span> — add only the new tenants; existing ones are left unchanged.</p>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="ghost" className="rounded-lg" onClick={cancelExcelImport}>Cancel</Button>
+            <Button variant="outline" className="rounded-lg" onClick={() => confirmExcelImport(false)}>No</Button>
+            <Button className="rounded-lg" onClick={() => confirmExcelImport(true)}>Yes</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
