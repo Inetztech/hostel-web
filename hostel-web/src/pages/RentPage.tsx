@@ -90,6 +90,14 @@ import { previewCycleRent, toISODate, type BranchRentConfig } from "@/lib/rentPr
      November -> Balaji only  (EB ₹2,607 = Oct ₹1,567 + Nov ₹1,040)
    The previous month's bills are fetched too so the carried amount can be
    added to the current month's EB.
+
+   DUE COLUMN (Business Model)
+   The DUE column follows the branch's Business Model "Rent Due" mode:
+     • FIXED_DUE → DUE column shown; due (days × per-day) is added to TOTAL.
+     • NO_DUE    → DUE column hidden; no due is added to TOTAL; the Excel
+                   report leaves the Due columns out as well.
+   If a NO_DUE branch still has an OLD generated record that carries a due
+   amount, the column stays visible so TOTAL always adds up.
    ══════════════════════════════════════════════════════════════════ */
 
 const BIG_PAGE = 10;      // rows per request when loading whole lists
@@ -187,6 +195,10 @@ const isCheckInMonth = (
   const [cy, cm] = String(checkInDate).slice(0, 10).split("-").map(Number);
   return cy === year && cm === month;
 };
+
+// True only when the Business Model's Rent Due mode is FIXED_DUE.
+const isFixedDue = (cfg?: RentDueConfig | null): boolean =>
+  String((cfg as any)?.rentDueMode ?? "").toUpperCase() === "FIXED_DUE";
 
 /* ══════════════════════════════════════════════════════════════════
    SEARCHABLE ROOM FILTER (toolbar "All Rooms" dropdown)
@@ -857,6 +869,7 @@ const RentPage = () => {
     room: Room | undefined,
     rentRecord: Rent | undefined
   ): RentDueResult => {
+    // A generated record keeps what was billed.
     if (rentRecord) {
       return {
         dueDate: rentRecord.dueDate ?? null,
@@ -868,6 +881,10 @@ const RentPage = () => {
     const tenant = tenantMap.get(Number(tenantId));
     if (!tenant || isDailyTenant(tenant)) return NO_DUE_RESULT;
 
+    // NO_DUE (or config not loaded yet) => no due at all.
+    const cfg = dueConfigByBranch.get(String(room?.unitId)) ?? NO_DUE_CONFIG;
+    if (!isFixedDue(cfg)) return NO_DUE_RESULT;
+
     const cyc = getCyclePreview(tenantId, room);
     if (cyc) {
       return {
@@ -878,7 +895,6 @@ const RentPage = () => {
       } as RentDueResult;
     }
 
-    const cfg = dueConfigByBranch.get(String(room?.unitId)) ?? NO_DUE_CONFIG;
     return computeRentDue(cfg, tenant.checkInDate, month, year);
   };
 
@@ -1968,6 +1984,24 @@ const RentPage = () => {
     return Array.from(unique.values());
   }, [rooms]);
 
+  /* DUE column is shown only when a branch in view uses FIXED_DUE.
+     (If an old generated record still carries a due amount, the column is kept
+     so TOTAL always adds up.) */
+  const showDueColumn = useMemo(() => {
+    if (rowData.length === 0) {
+      const ids =
+        selectedBranch !== "all"
+          ? [selectedBranch]
+          : Array.from(dueConfigByBranch.keys());
+      return ids.some((id) => isFixedDue(dueConfigByBranch.get(id)));
+    }
+    return rowData.some(
+      (r) =>
+        isFixedDue(dueConfigByBranch.get(String(r.unitId))) ||
+        (r.dueAmount ?? 0) > 0
+    );
+  }, [rowData, dueConfigByBranch, selectedBranch]);
+
   /* ── Row status (single source of truth for the table AND the Excel report) ── */
   const getRowStatus = (row: RentRow): { sStatus: string; statusClass: string; displayStatus: string } => {
     if (row.isDaily && !row.rentRecord) {
@@ -1998,7 +2032,8 @@ const RentPage = () => {
 
   /* ── EXCEL REPORT ──
      Exports every row matching the current filters (not only the visible page),
-     using the same numbers the table shows, plus a totals row. */
+     using the same numbers the table shows, plus a totals row.
+     The Due columns are left out when the DUE column is hidden (NO_DUE). */
   const handleDownloadReport = async () => {
     if (exporting) return;
     if (isFuturePeriod) {
@@ -2064,25 +2099,31 @@ const RentPage = () => {
       ];
 
       const title = `Rent Report - ${MONTHS[month - 1]} ${year}`;
+
+      // Columns 11 (Due Days) and 12 (Due ₹) are removed when the DUE column is hidden.
+      const dropCols = showDueColumn ? [] : [11, 12];
+      const strip = <T,>(r: T[]): T[] => r.filter((_, i) => !dropCols.includes(i));
+
+      const finalHeader = strip(header);
       const aoa: (string | number)[][] = [
         [title],
         [`Generated on ${new Date().toLocaleString("en-IN")}  |  ${rowData.length} record(s)`],
         [],
-        header,
-        ...body,
-        totalsRow,
+        finalHeader,
+        ...body.map((r) => strip(r)),
+        strip(totalsRow),
       ];
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      ws["!cols"] = [
+      ws["!cols"] = strip([
         { wch: 6 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 8 }, { wch: 8 },
         { wch: 10 }, { wch: 10 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 9 },
         { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 22 }, { wch: 11 }, { wch: 11 },
         { wch: 12 }, { wch: 14 },
-      ];
+      ]);
       ws["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: header.length - 1 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: finalHeader.length - 1 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: finalHeader.length - 1 } },
       ];
       // Freeze the title + header rows so the header stays visible while scrolling.
       (ws as any)["!freeze"] = { xSplit: 0, ySplit: 4 };
@@ -2308,6 +2349,9 @@ const RentPage = () => {
 
   // True while nothing can be shown yet (first load, or EB bills still arriving).
   const isLoadingData = !loaded || (ebLoading && rowData.length === 0);
+
+  // Number of visible table columns (DUE is optional).
+  const colCount = showDueColumn ? 12 : 11;
 
   return (
     <div className="min-h-full w-full min-w-0 bg-[#fcfcfc] text-slate-900 font-sans pb-10">
@@ -2608,18 +2652,18 @@ const RentPage = () => {
                 <table className="rt-table">
                   <caption className="sr-only">Rent collection for {MONTHS[month - 1]} {year}</caption>
                   <colgroup>
-                    <col style={{ width: "14%" }} />  {/* TENANT */}
-                    <col style={{ width: "7%" }} />   {/* ROOM */}
-                    <col style={{ width: "8%" }} />   {/* RENT */}
-                    <col style={{ width: "6%" }} />   {/* EB */}
-                    <col style={{ width: "7%" }} />   {/* DAMAGE */}
-                    <col style={{ width: "7%" }} />   {/* DUE */}
-                    <col style={{ width: "7%" }} />   {/* PENDING AMT */}
-                    <col style={{ width: "7%" }} />   {/* PREVIOUS DUE */}
-                    <col style={{ width: "6%" }} />   {/* TOTAL */}
-                    <col style={{ width: "10%" }} />  {/* STATUS */}
-                    <col style={{ width: "8%" }} />   {/* PENDING */}
-                    <col style={{ width: "13%" }} />  {/* ACTIONS */}
+                    <col style={{ width: showDueColumn ? "14%" : "16%" }} />  {/* TENANT */}
+                    <col style={{ width: "7%" }} />                           {/* ROOM */}
+                    <col style={{ width: showDueColumn ? "8%" : "9%" }} />    {/* RENT */}
+                    <col style={{ width: showDueColumn ? "6%" : "7%" }} />    {/* EB */}
+                    <col style={{ width: "7%" }} />                           {/* DAMAGE */}
+                    {showDueColumn && <col style={{ width: "7%" }} />}        {/* DUE */}
+                    <col style={{ width: showDueColumn ? "7%" : "8%" }} />    {/* PENDING AMT */}
+                    <col style={{ width: showDueColumn ? "7%" : "8%" }} />    {/* PREVIOUS DUE */}
+                    <col style={{ width: showDueColumn ? "6%" : "7%" }} />    {/* TOTAL */}
+                    <col style={{ width: "10%" }} />                          {/* STATUS */}
+                    <col style={{ width: showDueColumn ? "8%" : "9%" }} />    {/* PENDING */}
+                    <col style={{ width: showDueColumn ? "13%" : "14%" }} />  {/* ACTIONS */}
                   </colgroup>
                   <thead>
                     <tr>
@@ -2628,7 +2672,7 @@ const RentPage = () => {
                       <th scope="col">RENT (₹)</th>
                       <th scope="col">EB (₹)</th>
                       <th scope="col">DAMAGE (₹)</th>
-                      <th scope="col">DUE (₹)</th>
+                      {showDueColumn && <th scope="col">DUE (₹)</th>}
                       <th scope="col">PENDING AMT (₹)</th>
                       <th scope="col">PREVIOUS DUE (₹)</th>
                       <th scope="col">TOTAL (₹)</th>
@@ -2641,13 +2685,13 @@ const RentPage = () => {
                     {paginatedRows.length === 0 ? (
                       isLoadingData ? (
                         <tr>
-                          <td colSpan={12} className="rt-loading-cell" role="status">
+                          <td colSpan={colCount} className="rt-loading-cell" role="status">
                             <span className="rt-spinner" aria-hidden="true" />
                             Loading rent data for {MONTHS[month - 1]} {year}…
                           </td>
                         </tr>
                       ) : (
-                        <tr><td colSpan={12} className="text-center py-12 rt-empty">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
+                        <tr><td colSpan={colCount} className="text-center py-12 rt-empty">No rent records found for {MONTHS[month - 1]} {year}.</td></tr>
                       )
                     ) : (
                       paginatedRows.map((row, i) => {
@@ -2724,20 +2768,22 @@ const RentPage = () => {
                                   : '—'}
                               </span>
                             </td>
-                            <td>
-                              {(row.dueAmount ?? 0) > 0 ? (
-                                <>
-                                  <span className="rt-value text-rose-700">
-                                    {new Intl.NumberFormat('en-IN').format(Math.round(row.dueAmount ?? 0))}
-                                  </span>
-                                  <div className="text-[10px] text-rose-700 mt-0.5 whitespace-nowrap">
-                                    {row.dueDays} day{row.dueDays === 1 ? "" : "s"} × ₹{new Intl.NumberFormat('en-IN').format(row.duePerDay ?? 0)}
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="rt-value muted">—</span>
-                              )}
-                            </td>
+                            {showDueColumn && (
+                              <td>
+                                {(row.dueAmount ?? 0) > 0 ? (
+                                  <>
+                                    <span className="rt-value text-rose-700">
+                                      {new Intl.NumberFormat('en-IN').format(Math.round(row.dueAmount ?? 0))}
+                                    </span>
+                                    <div className="text-[10px] text-rose-700 mt-0.5 whitespace-nowrap">
+                                      {row.dueDays} day{row.dueDays === 1 ? "" : "s"} × ₹{new Intl.NumberFormat('en-IN').format(row.duePerDay ?? 0)}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="rt-value muted">—</span>
+                                )}
+                              </td>
+                            )}
                             <td>
                               {(row.tenantPending ?? 0) > 0 ? (
                                 <span

@@ -9,6 +9,7 @@ import {
   transferTenantRoomBed, getTenantTransferHistory, extractTenantDocument,
   exportTenantsExcel,
 } from "@/lib/store";
+import AbscondedListButton from "@/components/AbscondedListButton";
 import { Room, Bed, Tenant, IdProofType, Branch, FraudCheckResponse, TenantStay, TenantTransferRequest, TenantTransferResponse } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2444,6 +2445,9 @@ const handleAdd = async () => {
                 setExcelFile(file);
                 if (wantsAutoImport) startExcelImport(file);
               }} />
+
+            
+            <AbscondedListButton />
 
             {/* Export the (filtered) tenant list as an .xlsx download */}
             <button className="tn-btn-outline" onClick={handleExportExcel} disabled={exporting}>

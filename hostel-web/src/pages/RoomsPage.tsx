@@ -1196,14 +1196,30 @@ const RoomsPage = () => {
           .rm-wrap { padding: 14px 10px 28px; width: 100%; max-width: 100%; }
           .rm-layout, .rm-main, .rm-table-container { width: 100%; min-width: 0; max-width: 100%; }
           .rm-layout { gap: 12px; margin-top: 0; }
-          .rm-main-header { display: flex; flex-wrap: nowrap; gap: 10px; margin-bottom: 12px; }
+
+          /* Header: title on the left, compact "Add Room" button on the right
+             (same layout as the Branch page's "Add Branch" button). */
+          .rm-main-header {
+            display: flex !important; flex-direction: row !important;
+            align-items: center !important; justify-content: space-between !important;
+            flex-wrap: nowrap !important; gap: 10px; margin-bottom: 12px;
+          }
+          .rm-main-header .rm-page-title { font-size: 18px; flex: 1 1 auto; min-width: 0; }
+          .rm-main-header .rm-main-header-right {
+            display: flex !important; flex: 0 0 auto !important;
+            width: auto !important; margin-left: auto; gap: 8px;
+          }
+          .rm-main-header .rm-main-header-right .rm-btn-primary {
+            width: auto !important; flex: 0 0 auto !important;
+            height: 34px; padding: 0 12px; font-size: 12px; gap: 6px;
+            white-space: nowrap; border-radius: 8px;
+          }
+
           .rm-branch-dropdown-wrap { display: block; width: 100%; min-width: 0; }
           .rm-branch-dropdown-trigger { width: 100%; min-width: 0; max-width: 100%; height: 40px; }
           .rm-branch-dropdown-trigger-left { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .rm-branch-dropdown-menu { width: 100%; max-width: 100%; }
-          .rm-main-header-right { display: flex; gap: 10px; }
-          .rm-main-header-right > button, .rm-main-header-right > [data-state] { min-width: 0; }
-          .rm-btn-outline, .rm-btn-primary { min-width: 0; height: 40px; padding: 0 14px; justify-content: center; font-size: 12px; white-space: nowrap; }
+          .rm-btn-outline { min-width: 0; height: 40px; padding: 0 14px; justify-content: center; font-size: 12px; white-space: nowrap; }
           .rm-filters-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-bottom: 14px; }
           .rm-search-main { width: 100%; min-width: 0; grid-column: 1 / -1; height: 40px; }
           .rm-search-main input { min-width: 0; }
