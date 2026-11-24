@@ -98,6 +98,15 @@ import { previewCycleRent, toISODate, type BranchRentConfig } from "@/lib/rentPr
                    report leaves the Due columns out as well.
    If a NO_DUE branch still has an OLD generated record that carries a due
    amount, the column stays visible so TOTAL always adds up.
+
+   WHOLE RUPEES (payment fix)
+   Every amount on this page (rent, EB, damage, due, total, paid, pending)
+   is rounded to whole rupees, and a payment must be a whole number of
+   rupees that does not exceed the (rounded) outstanding. This matches the
+   backend, which rejects paise ("Previous pending dues must be paid in
+   whole rupees"). Previously a decimal EB (e.g. ₹409.6) made the table show
+   ₹12,410 while the real outstanding was ₹12,409.6, so paying the shown
+   amount was blocked.
    ══════════════════════════════════════════════════════════════════ */
 
 const BIG_PAGE = 10;      // rows per request when loading whole lists
@@ -410,13 +419,21 @@ const ActionCell = ({
   const [localTxnId,  setLocalTxnId]  = useState("");
 
   const handlePay = () => {
-    const inputAmount = Number(localAmount);
+    const rawAmount = Number(localAmount);
     if (!localMode) return toast.error("Select payment mode");
-    if (!localAmount || isNaN(inputAmount) || inputAmount <= 0)
+    if (!localAmount || isNaN(rawAmount) || rawAmount <= 0)
       return toast.error("Enter valid amount");
 
-    if (inputAmount > bill.pending + 0.001) {
-      toast.error(`Amount exceeds outstanding ₹${Math.round(bill.pending)}.`);
+    // Payments are collected in whole rupees only (the backend rejects paise).
+    if (!Number.isInteger(rawAmount)) {
+      return toast.error("Enter the amount in whole rupees (no paise)");
+    }
+    const inputAmount = rawAmount;
+
+    // Compare against the same whole-rupee outstanding the table shows.
+    const outstanding = Math.round(bill.pending);
+    if (inputAmount > outstanding) {
+      toast.error(`Amount exceeds outstanding ₹${outstanding}.`);
       return;
     }
 
@@ -475,6 +492,9 @@ const ActionCell = ({
 
           <input
             type="number"
+            step="1"
+            min="1"
+            inputMode="numeric"
             placeholder="Amt"
             aria-label={`Payment amount for ${bill.tenantName}`}
             value={localAmount}
@@ -841,15 +861,16 @@ const RentPage = () => {
     });
   };
 
+  // Whole rupees: the rent shown / billed never carries paise.
   const resolveTenantRent = (tenantId: number, room?: Room, forMonth = month, forYear = year): number => {
     const cyc = getCyclePreview(tenantId, room, forMonth, forYear);
-    if (cyc) return cyc.rentAmount;
+    if (cyc) return Math.round(cyc.rentAmount);
 
     const tenantRent = tenantRentMap.get(Number(tenantId));
     const flatRent = tenantRent != null ? tenantRent : (room?.rentPerBed ?? 0);
     const tenant = tenantMap.get(Number(tenantId));
-    if (!tenant?.checkInDate) return flatRent;
-    return computeRentBreakdown(flatRent, tenant.checkInDate, forMonth, forYear).rentAmount;
+    if (!tenant?.checkInDate) return Math.round(flatRent);
+    return Math.round(computeRentBreakdown(flatRent, tenant.checkInDate, forMonth, forYear).rentAmount);
   };
 
   const resolveTenantRentBreakdown = (
@@ -874,7 +895,7 @@ const RentPage = () => {
       return {
         dueDate: rentRecord.dueDate ?? null,
         dueDays: Number(rentRecord.dueDays ?? 0),
-        dueAmount: Number(rentRecord.dueAmount ?? 0),
+        dueAmount: Math.round(Number(rentRecord.dueAmount ?? 0)),
         perDay: Number(rentRecord.duePerDay ?? 0),
       };
     }
@@ -890,12 +911,13 @@ const RentPage = () => {
       return {
         dueDate: cyc.dueDate ? toISODate(cyc.dueDate) : null,
         dueDays: cyc.dueDays,
-        dueAmount: cyc.dueAmount,
+        dueAmount: Math.round(cyc.dueAmount),
         perDay: cyc.duePerDay,
       } as RentDueResult;
     }
 
-    return computeRentDue(cfg, tenant.checkInDate, month, year);
+    const computed = computeRentDue(cfg, tenant.checkInDate, month, year);
+    return { ...computed, dueAmount: Math.round(computed.dueAmount) } as RentDueResult;
   };
 
   const isDailyTenant = (tenant?: Tenant): boolean => tenant?.tenantStay === "DAILY";
@@ -1436,9 +1458,10 @@ const RentPage = () => {
       (r) => normalizeStatus(r.paymentStatus) !== "PAID"
     );
 
+    // Whole rupees, same as the backend: round total and paid before subtracting.
     const previousPending = prevUnpaidRents.reduce((sum, r) => {
-      const rTotal = Number(r.totalAmount || 0);
-      const rPaid  = Number(r.paidAmount  || 0);
+      const rTotal = Math.round(Number(r.totalAmount || 0));
+      const rPaid  = Math.round(Number(r.paidAmount  || 0));
       return sum + Math.max(0, rTotal - rPaid);
     }, 0);
 
@@ -1506,14 +1529,15 @@ const RentPage = () => {
         return null;
       }
 
-      const liveEB = b.amount ?? 0;
+      // Whole rupees: EB (units × rate) can carry paise, the page never does.
+      const liveEB = Math.round(b.amount ?? 0);
 
       if (tenant && isDailyTenant(tenant) && !rentRecord) {
         const { advanceRent, advanceEB } = computeDailyAdvance(tenant);
-        const ebBalance = advanceEB - liveEB;
+        const ebBalance = Math.round(advanceEB - liveEB);
         const additionalEBDue = ebBalance < 0 ? -ebBalance : 0;
-        const displayDamage = pendingDamageMap.get(Number(b.tenantId)) ?? 0;
-        const totalPaidAtCheckIn = tenant.totalAmount ?? advanceRent + advanceEB;
+        const displayDamage = Math.round(pendingDamageMap.get(Number(b.tenantId)) ?? 0);
+        const totalPaidAtCheckIn = Math.round(tenant.totalAmount ?? advanceRent + advanceEB);
 
         const flatNumber =
           bill.flatNumber ||
@@ -1534,7 +1558,7 @@ const RentPage = () => {
           rentPerBed:    totalPaidAtCheckIn,
           displayEB:     liveEB,
           damageAmount:  displayDamage,
-          total:         advanceRent + liveEB + displayDamage + (tenantPendingMap.get(Number(b.tenantId)) ?? 0),
+          total:         Math.round(advanceRent) + liveEB + displayDamage + (tenantPendingMap.get(Number(b.tenantId)) ?? 0),
           paid:          totalPaidAtCheckIn,
           previousPending: 0,
           currentPending:  additionalEBDue + displayDamage + (tenantPendingMap.get(Number(b.tenantId)) ?? 0),
@@ -1552,10 +1576,10 @@ const RentPage = () => {
 
       const rentPerBed = resolveTenantRent(Number(b.tenantId), room);
 
-      const recordTotal  = rentRecord ? Number(rentRecord.totalAmount  || 0) : 0;
-      const recordRent   = rentRecord ? Number(rentRecord.rentAmount   || 0) : rentPerBed;
-      const recordEB     = rentRecord ? Number(rentRecord.ebAmount     || 0) : b.amount ?? 0;
-      const recordDamage = rentRecord ? Number((rentRecord as any).damageAmount || 0) : 0;
+      const recordTotal  = rentRecord ? Math.round(Number(rentRecord.totalAmount  || 0)) : 0;
+      const recordRent   = rentRecord ? Math.round(Number(rentRecord.rentAmount   || 0)) : rentPerBed;
+      const recordEB     = rentRecord ? Math.round(Number(rentRecord.ebAmount     || 0)) : liveEB;
+      const recordDamage = rentRecord ? Math.round(Number((rentRecord as any).damageAmount || 0)) : 0;
 
       const isPaid = normalizeStatus(rentRecord?.paymentStatus) === "PAID";
 
@@ -1567,12 +1591,14 @@ const RentPage = () => {
         displayEB = resolved.eb;
         if (resolved.usedInfo) mergedInformationalTenantIds.add(Number(b.tenantId));
       }
+      displayEB = Math.round(displayEB);
 
       const displayRent   = rentRecord ? recordRent   : rentPerBed;
       const due = resolveTenantDue(Number(b.tenantId), room, rentRecord);
+      const dueAmt = Math.round(due.dueAmount);
       const displayDamage = rentRecord
         ? recordDamage
-        : (pendingDamageMap.get(Number(b.tenantId)) ?? 0);
+        : Math.round(pendingDamageMap.get(Number(b.tenantId)) ?? 0);
 
       const rawTenantPending = tenantPendingMap.get(Number(b.tenantId)) ?? 0;
 
@@ -1590,17 +1616,17 @@ const RentPage = () => {
         : showFullCheckInPending
         ? { extraPending: rawTenantPending, rentCredit: 0 }
         : splitCheckInPending(Number(b.tenantId), displayRent);
-      const tenantPendingAmt = extraPending;
+      const tenantPendingAmt = Math.round(extraPending);
       const checkInRentPending =
-        rentRecord || showFullCheckInPending ? 0 : Math.max(0, rawTenantPending - extraPending);
+        rentRecord || showFullCheckInPending ? 0 : Math.max(0, Math.round(rawTenantPending - extraPending));
 
       // Tenant pending is now always added on top of this period's charges.
       const displayTotal  = (rentRecord
-        ? (isPaid ? recordTotal : displayRent + displayEB + displayDamage + due.dueAmount)
-        : rentPerBed + displayEB + displayDamage + due.dueAmount) +
+        ? (isPaid ? recordTotal : displayRent + displayEB + displayDamage + dueAmt)
+        : rentPerBed + displayEB + displayDamage + dueAmt) +
         tenantPendingAmt;
 
-      const currentPaid   = rentRecord ? Number(rentRecord.paidAmount || 0) : rentCredit;
+      const currentPaid   = rentRecord ? Math.round(Number(rentRecord.paidAmount || 0)) : Math.round(rentCredit);
       const currentStatus = normalizeStatus(rentRecord?.paymentStatus);
 
       const currentPending = rentRecord
@@ -1609,7 +1635,7 @@ const RentPage = () => {
           : currentStatus === "PARTIAL"
           ? displayTotal - currentPaid
           : displayTotal
-        : Math.max(0, displayTotal - rentCredit);
+        : Math.max(0, displayTotal - Math.round(rentCredit));
 
       const { previousPending, prevUnpaidRents } =
         computePreviousPending(Number(b.tenantId), month, year);
@@ -1639,7 +1665,7 @@ const RentPage = () => {
         displayEB,
         ebCarryNote,
         damageAmount:  displayDamage,
-        dueAmount:     due.dueAmount,
+        dueAmount:     dueAmt,
         dueDays:       due.dueDays,
         duePerDay:     due.perDay,
         total:         displayTotal,
@@ -1715,11 +1741,11 @@ const RentPage = () => {
       })
       .map((r) => {
         const room        = getRoomById(r.roomId);
-        const recordTotal  = Number(r.totalAmount || 0);
-        const recordRent   = Number(r.rentAmount  || 0);
-        const recordEB     = Number(r.ebAmount    || 0);
-        const recordDamage = Number((r as any).damageAmount || 0);
-        const currentPaid  = Number(r.paidAmount  || 0);
+        const recordTotal  = Math.round(Number(r.totalAmount || 0));
+        const recordRent   = Math.round(Number(r.rentAmount  || 0));
+        const recordEB     = Math.round(Number(r.ebAmount    || 0));
+        const recordDamage = Math.round(Number((r as any).damageAmount || 0));
+        const currentPaid  = Math.round(Number(r.paidAmount  || 0));
         const status       = normalizeStatus(r.paymentStatus);
 
         const orphanTenantPending = tenantPendingMap.get(Number(r.tenantId)) ?? 0;
@@ -1745,7 +1771,7 @@ const RentPage = () => {
           displayEB:       recordEB,
           rentPerBed:      recordRent,
           damageAmount:    recordDamage,
-          dueAmount:       Number(r.dueAmount ?? 0),
+          dueAmount:       Math.round(Number(r.dueAmount ?? 0)),
           dueDays:         Number(r.dueDays ?? 0),
           duePerDay:       Number(r.duePerDay ?? 0),
           total:           recordTotal + orphanTenantPending,
@@ -1801,12 +1827,13 @@ const RentPage = () => {
           );
           grossAmount = computed.amount;
         }
+        grossAmount = Math.round(grossAmount);
 
         const { advanceRent, advanceEB } = computeDailyAdvance(tenant);
-        const ebBalance = advanceEB - grossAmount;
+        const ebBalance = Math.round(advanceEB - grossAmount);
         const additionalEBDue = ebBalance < 0 ? -ebBalance : 0;
-        const displayDamage = pendingDamageMap.get(tenantId) ?? 0;
-        const totalPaidAtCheckIn = tenant.totalAmount ?? advanceRent + advanceEB;
+        const displayDamage = Math.round(pendingDamageMap.get(tenantId) ?? 0);
+        const totalPaidAtCheckIn = Math.round(tenant.totalAmount ?? advanceRent + advanceEB);
 
         const flatNumber =
           (room as any)?.flatNumber ??
@@ -1821,7 +1848,7 @@ const RentPage = () => {
           rentPerBed:    totalPaidAtCheckIn,
           displayEB:     grossAmount,
           damageAmount:  displayDamage,
-          total:         advanceRent + grossAmount + displayDamage + (tenantPendingMap.get(tenantId) ?? 0),
+          total:         Math.round(advanceRent) + grossAmount + displayDamage + (tenantPendingMap.get(tenantId) ?? 0),
           paid:          totalPaidAtCheckIn,
           previousPending: 0,
           currentPending:  additionalEBDue + displayDamage + (tenantPendingMap.get(tenantId) ?? 0),
@@ -1868,17 +1895,17 @@ const RentPage = () => {
         }`.toLowerCase();
         if (!searchStr.includes(q)) return null;
 
-        const damageAmount = pendingDamageMap.get(Number(tenantId)) ?? 0;
+        const damageAmount = Math.round(pendingDamageMap.get(Number(tenantId)) ?? 0);
         const rentPerBed = tenant && isDailyTenant(tenant)
-          ? (tenant.totalAmount ?? (() => {
+          ? Math.round(tenant.totalAmount ?? (() => {
               const { advanceRent, advanceEB } = computeDailyAdvance(tenant);
               return advanceRent + advanceEB;
             })())
           : resolveTenantRent(Number(tenantId), room);
 
         const { extraPending, rentCredit } = splitCheckInPending(Number(tenantId), rentPerBed);
-        const damageOnlyTotal   = rentPerBed + damageAmount + extraPending;
-        const damageOnlyPending = Math.max(0, damageOnlyTotal - rentCredit);
+        const damageOnlyTotal   = rentPerBed + damageAmount + Math.round(extraPending);
+        const damageOnlyPending = Math.max(0, damageOnlyTotal - Math.round(rentCredit));
 
         return {
           tenantId:      Number(tenantId),
@@ -1890,11 +1917,11 @@ const RentPage = () => {
           rentPerBed,
           damageAmount,
           total:         damageOnlyTotal,
-          paid:          rentCredit,
+          paid:          Math.round(rentCredit),
           previousPending: 0,
           currentPending:  damageOnlyPending,
           pending:         damageOnlyPending,
-          tenantPending:   extraPending,
+          tenantPending:   Math.round(extraPending),
           rentRecord:      undefined,
           unitId:          room?.unitId,
           amount:          0,
@@ -2161,7 +2188,7 @@ const RentPage = () => {
     const tenant = tenantMap.get(bill.tenantId);
     const isDaily = tenant && isDailyTenant(tenant);
     const rentAmount = isDaily ? 0 : resolveTenantRent(bill.tenantId, room);
-    const ebAmount = isDaily ? Math.max(0, -(bill.ebBalance ?? 0)) : bill.amount;
+    const ebAmount = Math.round(isDaily ? Math.max(0, -(bill.ebBalance ?? 0)) : bill.amount);
 
     try {
       await generateRent({
@@ -2214,7 +2241,7 @@ const RentPage = () => {
           const tenant = tenantMap.get(Number(b.tenantId));
           if (tenant && isDailyTenant(tenant)) {
             const { advanceEB } = computeDailyAdvance(tenant);
-            const ebBalance = advanceEB - (b.amount ?? 0);
+            const ebBalance = Math.round(advanceEB - (b.amount ?? 0));
             if (ebBalance >= 0) return;
             await generateRent({
               tenantId:   String(b.tenantId),
@@ -2229,7 +2256,7 @@ const RentPage = () => {
 
           const infoReading = informationalByTenant.get(Number(b.tenantId));
           const resolved = resolveTenantEB(tenant, room, b.amount ?? 0, infoReading, Number(b.tenantId));
-          const ebAmount = resolved.eb;
+          const ebAmount = Math.round(resolved.eb);
           if (resolved.usedInfo) mergedInformationalTenantIds.add(Number(b.tenantId));
 
           await generateRent({
@@ -2264,10 +2291,10 @@ const RentPage = () => {
           );
           if (alreadyHasRent) return;
 
-          const grossAmount = resolveInformationalAmount(tenantId, r);
+          const grossAmount = Math.round(resolveInformationalAmount(tenantId, r));
 
           const { advanceEB } = computeDailyAdvance(tenant);
-          const ebBalance = advanceEB - grossAmount;
+          const ebBalance = Math.round(advanceEB - grossAmount);
           if (ebBalance >= 0) return;
 
           await generateRent({
@@ -2304,7 +2331,7 @@ const RentPage = () => {
     try {
       await api.put(`/rents/${rent.id}/combined-payment`, {
         paymentMode: mode,
-        amount,
+        amount: Math.round(amount),   // whole rupees only
         transactionId: txnId,
       });
       toast.success("Payment recorded");

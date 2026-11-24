@@ -2427,12 +2427,12 @@ const handleAdd = async () => {
         .tn-notice-count { color: #4338ca; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 20px; padding: 1px 10px; font-size: 12px; font-weight: 700; }
       `}</style>
 
-      <div className="tn-wrap">
+      <div className="tn-wrap">   
 
         {/* Main Content Header */}
         <div className="tn-main-header">
           <div className="tn-main-title">All Tenants</div>
-
+ 
           <div className="tn-controls">
             <Input ref={excelInputRef} type="file" accept=".xlsx,.xls" className="hidden"
               aria-label="Import tenants Excel file"
