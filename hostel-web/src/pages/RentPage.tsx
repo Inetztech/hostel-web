@@ -472,20 +472,20 @@ const ActionCell = ({
       )}
 
       {isUnpaid && (
-        <div className="grid grid-cols-2 items-center gap-1 p-1 bg-slate-50 border border-slate-100 rounded-md w-full">
+        <div className="grid grid-cols-2 items-center gap-2 p-2 bg-slate-50 border border-slate-100 rounded-md w-full">
           <Select
             value={localMode}
             onValueChange={(v: PaymentMode) => setLocalMode(v)}
           >
             <SelectTrigger
               aria-label={`Payment mode for ${bill.tenantName}`}
-              className="w-full min-w-0 h-6 text-[10px] border-slate-200 focus:ring-0 shadow-none px-1.5"
+              className="w-full min-w-0 h-9 text-sm border-slate-200 focus:ring-0 shadow-none px-2 bg-white"
             >
               <SelectValue placeholder="Mode" />
             </SelectTrigger>
             <SelectContent>
               {PAYMENT_MODES.map((mode) => (
-                <SelectItem key={mode} value={mode} className="text-[10px]">{mode}</SelectItem>
+                <SelectItem key={mode} value={mode} className="text-sm">{mode}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -500,7 +500,7 @@ const ActionCell = ({
             value={localAmount}
             onChange={(e) => setLocalAmount(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
-            className="border border-slate-200 rounded px-1.5 h-6 w-full min-w-0 text-[10px] outline-none focus:border-indigo-400"
+            className="border border-slate-200 rounded-md px-2 h-9 w-full min-w-0 text-sm bg-white outline-none focus:border-indigo-400"
           />
 
           {showTxnId && (
@@ -511,14 +511,14 @@ const ActionCell = ({
               value={localTxnId}
               onChange={(e) => setLocalTxnId(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
-              className="col-span-2 border border-slate-200 rounded px-1.5 h-6 w-full min-w-0 text-[10px] outline-none focus:border-indigo-400"
+              className="col-span-2 border border-slate-200 rounded-md px-2 h-9 w-full min-w-0 text-sm bg-white outline-none focus:border-indigo-400"
             />
           )}
 
           <Button
             size="sm"
             aria-label={`Record payment for ${bill.tenantName}`}
-            className="col-span-2 w-full h-6 px-2 text-[10px] bg-green-700 hover:bg-green-800"
+            className="col-span-2 w-full h-9 px-3 text-sm font-semibold bg-green-700 hover:bg-green-800"
             onClick={handlePay}
           >
             Pay
@@ -2679,18 +2679,18 @@ const RentPage = () => {
                 <table className="rt-table">
                   <caption className="sr-only">Rent collection for {MONTHS[month - 1]} {year}</caption>
                   <colgroup>
-                    <col style={{ width: showDueColumn ? "14%" : "16%" }} />  {/* TENANT */}
-                    <col style={{ width: "7%" }} />                           {/* ROOM */}
+                    <col style={{ width: showDueColumn ? "12%" : "14%" }} />  {/* TENANT */}
+                    <col style={{ width: showDueColumn ? "6%" : "7%" }} />    {/* ROOM */}
                     <col style={{ width: showDueColumn ? "8%" : "9%" }} />    {/* RENT */}
                     <col style={{ width: showDueColumn ? "6%" : "7%" }} />    {/* EB */}
-                    <col style={{ width: "7%" }} />                           {/* DAMAGE */}
-                    {showDueColumn && <col style={{ width: "7%" }} />}        {/* DUE */}
+                    <col style={{ width: showDueColumn ? "6%" : "7%" }} />    {/* DAMAGE */}
+                    {showDueColumn && <col style={{ width: "6%" }} />}        {/* DUE */}
                     <col style={{ width: showDueColumn ? "7%" : "8%" }} />    {/* PENDING AMT */}
                     <col style={{ width: showDueColumn ? "7%" : "8%" }} />    {/* PREVIOUS DUE */}
                     <col style={{ width: showDueColumn ? "6%" : "7%" }} />    {/* TOTAL */}
-                    <col style={{ width: "10%" }} />                          {/* STATUS */}
-                    <col style={{ width: showDueColumn ? "8%" : "9%" }} />    {/* PENDING */}
-                    <col style={{ width: showDueColumn ? "13%" : "14%" }} />  {/* ACTIONS */}
+                    <col style={{ width: showDueColumn ? "9%" : "9%" }} />    {/* STATUS */}
+                    <col style={{ width: showDueColumn ? "7%" : "8%" }} />    {/* PENDING */}
+                    <col style={{ width: showDueColumn ? "20%" : "16%" }} />  {/* ACTIONS */}
                   </colgroup>
                   <thead>
                     <tr>
