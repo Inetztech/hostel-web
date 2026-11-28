@@ -14,7 +14,7 @@ export const getMyPropertyType = async (forceRefresh = false): Promise<PropertyT
   const token = sessionStorage.getItem("token");
 
   // SUPER_ADMIN is not tied to one hostel; nothing to resolve.
-  if (!token || currentRole() === "SUPER_ADMIN") return null;
+  if (!token || currentRole() === "SUPER_ADMIN" || currentRole() === "CUSTOMER") return null;
 
   if (
     !forceRefresh &&

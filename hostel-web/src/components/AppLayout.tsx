@@ -14,12 +14,15 @@ import {
   Menu, X, GitBranch, BedDouble, BookUser,
   Megaphone, MessageSquareWarning, UtensilsCrossed, Drumstick,
   ShieldCheck, ShieldAlert, ChevronRight, ChevronDown, User, Building, CreditCard,
-  ScrollText, Search, Ticket, Wrench, Receipt, CalendarClock
+  ScrollText, Search, Ticket, Wrench, Receipt, CalendarClock, Lock, UserX, ClipboardCheck
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import NotificationBell from "@/components/NotificationBell";
 import { usePropertyType } from "@/lib/propertyType";
+import { useEntitlements, refreshEntitlements } from "@/lib/entitlements";
+import { moduleForPath, LOCK_MESSAGE } from "@/lib/modules";
+import LockedModuleDialog from "@/components/LockedModuleDialog";
 
 /* ================= NAV CONFIGURATION ================= */
 interface SubNavItem {
@@ -47,6 +50,15 @@ interface NavGroup {
 }
 
 const navGroups: NavGroup[] = [
+  {
+    // The one module open to a Free-plan customer.
+    id: "absconded",
+    to: "/absconded",
+    label: "Absconded List",
+    icon: UserX,
+    color: "text-orange-400",
+    allow: ["CUSTOMER"],
+  },
   { 
     id: "dashboard-user",
     to: "/dashboard", 
@@ -171,6 +183,7 @@ const roleMeta: Record<string, { label: string; bg: string; text: string; ring: 
   ADMIN:       { label: "Admin",       bg: "bg-blue-50",    text: "text-blue-700",    ring: "ring-blue-200",    dot: "bg-blue-500" },
   WARDEN:      { label: "Warden",      bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200", dot: "bg-emerald-500" },
   TENANT:      { label: "Tenant",      bg: "bg-amber-50",   text: "text-amber-700",   ring: "ring-amber-200",   dot: "bg-amber-500" },
+  CUSTOMER:    { label: "Customer",    bg: "bg-slate-50",   text: "text-slate-700",   ring: "ring-slate-200",   dot: "bg-slate-500" },
 };
 
 const permissionMessages: Record<string, string> = {
@@ -182,6 +195,7 @@ const permissionMessages: Record<string, string> = {
 const superAdminTitles: Record<string, string> = {
   "/super-admin": "Super Admin Dashboard",
   "/super-admin/hostels": "Hostels & Admins",
+  "/super-admin/upgrade-requests": "Upgrade Requests",
   "/super-admin/business-model": "Business Model",
 };
 
@@ -201,7 +215,7 @@ const PROFILE_UPDATED_EVENT = "hms:profile-updated";
 
 export default function AppLayout() {
   const role = getUserRole();
-  const { pathname } = useLocation();
+  const { pathname, state: routeState } = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [branchName, setBranchName] = useState<string>("");
@@ -234,6 +248,42 @@ export default function AppLayout() {
   // ROOM / FLAT as configured in the hostel's Business Model (null = not configured).
   const { propertyType } = usePropertyType();
 
+  // ── Plan-based locking (only ever active for role CUSTOMER) ──
+  const isCustomer = role === "CUSTOMER";
+  const ent = useEntitlements();
+  const [lockedOpen, setLockedOpen] = useState(false);
+  const [lockedLabel, setLockedLabel] = useState("");
+
+  const openLocked = (label = "") => {
+    setLockedLabel(label);
+    setLockedOpen(true);
+  };
+
+  // Redirected here by CustomerRouteGuard after opening a locked URL.
+  useEffect(() => {
+    const locked = (routeState as { locked?: string } | null)?.locked;
+    if (!locked) return;
+    openLocked();
+    navigate(pathname, { replace: true, state: null });
+  }, [routeState]);
+
+  // A locked API call answered 403 MODULE_LOCKED: show the notice and re-read the plan.
+  useEffect(() => {
+    if (!isCustomer) return;
+    const onLocked = () => { openLocked(); void refreshEntitlements(true); };
+    window.addEventListener("hms:module-locked", onLocked);
+    return () => window.removeEventListener("hms:module-locked", onLocked);
+  }, [isCustomer]);
+
+  // Pick up a purchase / suspension without a re-login.
+  useEffect(() => {
+    if (!isCustomer) return;
+    const refresh = () => { if (document.visibilityState === "visible") void refreshEntitlements(true); };
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [isCustomer]);
+
   if (!role) return <Navigate to="/" replace />;
 
   const meta = roleMeta[role?.toUpperCase() ?? ""] ?? { label: role, bg: "bg-gray-50", text: "text-gray-600", ring: "ring-gray-200", dot: "bg-gray-400" };
@@ -248,12 +298,16 @@ export default function AppLayout() {
     .toUpperCase();
 
   const checkAccess = (item: { allow?: string[]; permission?: string; anyOf?: string[]; staffOnly?: boolean }) => {
+    // A customer sees the same menu an Admin sees (plus Absconded List); locked ones are marked, not hidden.
+    if (isCustomer) return !!item.allow && (item.allow.includes("CUSTOMER") || item.allow.includes("ADMIN"));
     if (item.allow && !item.allow.includes(role?.toUpperCase() ?? "")) return false;
     const enforce = role !== "SUPER_ADMIN" && (!item.staffOnly || role === "ADMIN" || role === "WARDEN");
     if (item.permission && enforce && !userPermissions.includes(item.permission)) return false;
     if (item.anyOf && enforce && !item.anyOf.some((p) => userPermissions.includes(p))) return false;
     return true;
   };
+
+  const isLocked = (to: string) => isCustomer && !ent.hasModule(moduleForPath(to));
 
   const applyPropertyType = (item: SubNavItem): SubNavItem =>
     item.to === "/rooms" && propertyType === "FLAT"
@@ -345,7 +399,7 @@ export default function AppLayout() {
   // this user we pick it up on tab focus, every 30 s, and right after any 403,
   // then re-render the sidebar and move the user off a page they no longer have.
   useEffect(() => {
-    if (role === "SUPER_ADMIN") return;
+    if (role === "SUPER_ADMIN" || role === "CUSTOMER") return;
     let busy = false;
     let lastRun = 0;
 
@@ -405,7 +459,7 @@ export default function AppLayout() {
 
   const searchResults = searchQuery.trim()
     ? allVisibleSubItems.filter((item) =>
-        item.label.toLowerCase().includes(searchQuery.trim().toLowerCase())
+        !isLocked(item.to) && item.label.toLowerCase().includes(searchQuery.trim().toLowerCase())
       )
     : [];
 
@@ -421,7 +475,7 @@ export default function AppLayout() {
   };
 
   const noPermissionsAssigned =
-    role !== "SUPER_ADMIN" && profileLoaded && userPermissions.length === 0;
+    role !== "SUPER_ADMIN" && role !== "CUSTOMER" && profileLoaded && userPermissions.length === 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -519,6 +573,13 @@ export default function AppLayout() {
             </p>
           </div>
 
+          {isCustomer && (
+            <div className="mx-1 mb-2 rounded-lg bg-slate-800/50 border border-slate-700/60 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Your plan</p>
+              <p className="text-[12px] font-semibold text-slate-200">{ent.planName ?? "Free"}</p>
+            </div>
+          )}
+
           {noPermissionsAssigned && (
             <div className="mx-1 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2.5">
               <p className="text-[11px] font-medium text-amber-300 leading-snug">
@@ -534,6 +595,22 @@ export default function AppLayout() {
             // Standalone single link
             if (group.to) {
               const active = pathname === group.to;
+              if (isLocked(group.to)) {
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => openLocked(group.label)}
+                    title={LOCK_MESSAGE}
+                    className="group flex w-full items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-slate-500 hover:bg-slate-800/30 bg-transparent border-none text-left transition-all duration-150"
+                  >
+                    <group.icon aria-hidden="true" className="h-[18px] w-[18px] shrink-0 text-slate-600" />
+                    <span className="flex-1 truncate">{group.label}</span>
+                    <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                    <span className="sr-only">Locked</span>
+                  </button>
+                );
+              }
               return (
                 <Link
                   key={group.id}
@@ -593,6 +670,22 @@ export default function AppLayout() {
                   <div id={`nav-group-${group.id}`} className="ml-4 pl-3 space-y-0.5 border-l border-slate-800/80 my-1">
                     {group.children?.map((item) => {
                       const active = pathname === item.to;
+                      if (isLocked(item.to)) {
+                        return (
+                          <button
+                            key={item.to}
+                            type="button"
+                            onClick={() => openLocked(item.label)}
+                            title={LOCK_MESSAGE}
+                            className="group flex w-full items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12.5px] font-medium text-slate-500 hover:bg-slate-800/30 bg-transparent border-none text-left transition-all duration-150"
+                          >
+                            <item.icon aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-600" />
+                            <span className="flex-1 truncate">{item.label}</span>
+                            <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                            <span className="sr-only">Locked</span>
+                          </button>
+                        );
+                      }
                       return (
                         <Link
                           key={item.to}
@@ -629,6 +722,24 @@ export default function AppLayout() {
             {pinnedBottomGroups.map((group) => {
               if (!group.to) return null;
               const active = pathname === group.to;
+              if (isLocked(group.to)) {
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => openLocked(group.label)}
+                    title={LOCK_MESSAGE}
+                    className="group flex w-full items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-700/60 bg-slate-800/20 text-[13px] font-semibold text-slate-500 text-left"
+                  >
+                    <span aria-hidden="true" className="flex items-center justify-center h-9 w-9 rounded-lg shrink-0 border border-slate-700/60 bg-slate-900/60 text-slate-600">
+                      <group.icon className="h-[18px] w-[18px]" />
+                    </span>
+                    <span className="flex-1 truncate">{group.label}</span>
+                    <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                    <span className="sr-only">Locked</span>
+                  </button>
+                );
+              }
               return (
                 <Link
                   key={group.id}
@@ -750,7 +861,7 @@ export default function AppLayout() {
             </div>
 
             {/* NOTIFICATIONS — add aria-label="Notifications" to the button inside this component */}
-            <NotificationBell />
+            {!isCustomer && <NotificationBell />}
 
             {/* PROFILE DROPDOWN */}
             <div className="relative shrink-0" ref={profileRef}>
@@ -846,6 +957,8 @@ export default function AppLayout() {
         </div>
 
       </main>
+
+      <LockedModuleDialog open={lockedOpen} onOpenChange={setLockedOpen} moduleLabel={lockedLabel} />
     </div>
   );
 }

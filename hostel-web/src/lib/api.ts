@@ -89,7 +89,12 @@ api.interceptors.response.use(
     // user. Tell the app shell so it can re-read permissions and, if needed,
     // move the user off the page they can no longer use.
     if (err.response?.status === 403) {
-      window.dispatchEvent(new Event("hms:permissions-stale"));
+      if (err.response?.data?.code === "MODULE_LOCKED") {
+        // Plan-based lock (self-registered customer): show the upgrade notice, and re-read the plan.
+        window.dispatchEvent(new CustomEvent("hms:module-locked", { detail: { module: err.response.data.module } }));
+      } else {
+        window.dispatchEvent(new Event("hms:permissions-stale"));
+      }
     }
 
     return Promise.reject(err);
